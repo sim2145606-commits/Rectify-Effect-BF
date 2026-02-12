@@ -378,6 +378,32 @@ export default function Dashboard() {
         </Card>
       </Animated.View>
 
+      {/* System Engine Access */}
+      <Animated.View entering={FadeInDown.delay(550).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="hardware-chip" size={18} color={Colors.cyan} />
+          <Text style={styles.sectionTitle}>System Engine</Text>
+        </View>
+        <Pressable
+          onPress={() => {
+            mediumImpact();
+            router.push('/engine');
+          }}
+          style={styles.engineAccessCard}
+        >
+          <View style={styles.engineAccessIconCircle}>
+            <Ionicons name="cog" size={28} color={Colors.cyan} />
+          </View>
+          <View style={styles.engineAccessText}>
+            <Text style={styles.engineAccessTitle}>Engine Diagnostics & Control</Text>
+            <Text style={styles.engineAccessDesc}>
+              System setup, injection hooks & engine initialization
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.cyan} />
+        </Pressable>
+      </Animated.View>
+
       {/* Cloud Command Access */}
       <Animated.View entering={FadeInDown.delay(600).duration(500)}>
         <View style={styles.sectionHeader}>
@@ -798,6 +824,45 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
+  },
+  engineAccessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.cyan + '30',
+    marginBottom: Spacing.lg,
+    shadowColor: Colors.cyan,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  engineAccessIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.cyan + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.cyan + '30',
+  },
+  engineAccessText: {
+    flex: 1,
+  },
+  engineAccessTitle: {
+    color: Colors.cyan,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  engineAccessDesc: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+    marginTop: 2,
   },
   cloudCommandCard: {
     flexDirection: 'row',

@@ -79,4 +79,10 @@ export const STORAGE_KEYS = {
   CONFIG_BRIDGE: 'virtucam_config_bridge',
   ENHANCED_MEDIA_CACHE: 'virtucam_enhanced_media_cache',
   HOOK_SESSION_LOG: 'virtucam_hook_session_log',
+  ENGINE_INITIALIZED: 'virtucam_engine_initialized',
+  INJECTION_METHOD: 'virtucam_injection_method',
+  CAMERA2_HOOK: 'virtucam_camera2_hook',
+  CAMERA1_HOOK: 'virtucam_camera1_hook',
+  VIRTUAL_LOOPBACK: 'virtucam_virtual_loopback',
+  SETUP_WIZARD_COMPLETE: 'virtucam_setup_wizard_complete',
 };
