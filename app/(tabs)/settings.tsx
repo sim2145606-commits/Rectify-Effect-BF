@@ -9,6 +9,7 @@ import {
   Alert,
   Switch,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import Animated, {
   FadeInDown,
@@ -24,6 +25,16 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useSystemStatus } from '@/hooks/useSystemStatus';
+import { launchTargetApp } from '@/services/AppLauncher';
+import { writeTargetList } from '@/services/ConfigBridge';
+import {
+  requestCameraPermission,
+  requestMediaLibraryPermission,
+  requestAllFilesAccess,
+  requestOverlayPermission,
+} from '@/services/PermissionManager';
+import { getStatusColor } from '@/services/SystemVerification';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
 
@@ -54,7 +65,7 @@ const DEFAULT_APPS: TargetApp[] = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { lightImpact, mediumImpact, success } = useHaptics();
+  const { lightImpact, mediumImpact, success, warning } = useHaptics();
 
   const [targetMode, setTargetMode] = useStorage<TargetMode>(
     STORAGE_KEYS.TARGET_MODE,
@@ -65,10 +76,12 @@ export default function SettingsScreen() {
     DEFAULT_APPS
   );
 
+  const { status: systemStatus } = useSystemStatus();
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddApp, setShowAddApp] = useState(false);
   const [newAppName, setNewAppName] = useState('');
   const [newAppPackage, setNewAppPackage] = useState('');
+  const [launchingApp, setLaunchingApp] = useState<string | null>(null);
 
   const filteredApps = useMemo(() => {
     if (!searchQuery.trim()) return targetApps;
@@ -146,12 +159,67 @@ export default function SettingsScreen() {
     [lightImpact, setTargetApps]
   );
 
+  const handleLaunchApp = useCallback(
+    async (app: TargetApp) => {
+      setLaunchingApp(app.id);
+      mediumImpact();
+
+      try {
+        // Sync target list to bridge before launch
+        await writeTargetList(targetMode, targetApps);
+        const result = await launchTargetApp(app.packageName, app.name);
+        if (result.success) {
+          success();
+        } else {
+          warning();
+          Alert.alert('Launch Info', result.message);
+        }
+      } catch {
+        Alert.alert('Launch Error', `Failed to launch ${app.name}`);
+      } finally {
+        setLaunchingApp(null);
+      }
+    },
+    [targetMode, targetApps, mediumImpact, success, warning]
+  );
+
+  const handleRequestPermission = useCallback(
+    async (type: string) => {
+      lightImpact();
+      try {
+        switch (type) {
+          case 'camera':
+            await requestCameraPermission();
+            break;
+          case 'storage':
+            await requestMediaLibraryPermission();
+            break;
+          case 'root':
+            Alert.alert('Root Access', 'Root must be granted via Magisk or KernelSU. Check the system setup wizard for guidance.');
+            break;
+          case 'overlay':
+            await requestOverlayPermission();
+            break;
+          case 'allfiles':
+            await requestAllFilesAccess();
+            break;
+        }
+        success();
+      } catch {
+        warning();
+      }
+    },
+    [lightImpact, success, warning]
+  );
+
   const switchTargetMode = useCallback(
     (mode: TargetMode) => {
       mediumImpact();
       setTargetMode(mode);
+      // Sync to bridge
+      writeTargetList(mode, targetApps).catch(() => {});
     },
-    [mediumImpact, setTargetMode]
+    [mediumImpact, setTargetMode, targetApps]
   );
 
   return (
@@ -362,13 +430,15 @@ export default function SettingsScreen() {
 
       {/* App List */}
       <Animated.View entering={FadeInDown.delay(400).duration(500)}>
-        {filteredApps.map((app, index) => (
+        {filteredApps.map((app) => (
           <Animated.View key={app.id} layout={Layout.springify()}>
             <AppTargetRow
               app={app}
               targetMode={targetMode}
               onToggle={() => toggleApp(app.id)}
               onRemove={() => removeApp(app.id)}
+              onLaunch={() => handleLaunchApp(app)}
+              isLaunching={launchingApp === app.id}
             />
           </Animated.View>
         ))}
@@ -386,7 +456,7 @@ export default function SettingsScreen() {
       {/* Permissions Section */}
       <Animated.View entering={FadeInDown.delay(500).duration(500)}>
         <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
-          <Ionicons name="shield-checkmark" size={18} color={Colors.accent} />
+          <Ionicons name="shield-checkmark" size={18} color={Colors.electricBlue} />
           <Text style={styles.sectionTitle}>System Permissions</Text>
         </View>
         <Card>
@@ -394,25 +464,36 @@ export default function SettingsScreen() {
             icon="camera-outline"
             label="Camera Access"
             description="Required to intercept camera feed"
-            granted={true}
+            granted={systemStatus.cameraService.status === 'passed'}
+            onRequest={() => handleRequestPermission('camera')}
           />
           <PermissionRow
             icon="folder-outline"
             label="Storage Access"
             description="Required to read media files"
-            granted={true}
+            granted={systemStatus.storagePermission.status === 'passed'}
+            onRequest={() => handleRequestPermission('storage')}
+          />
+          <PermissionRow
+            icon="document-outline"
+            label="All Files Access"
+            description="MANAGE_EXTERNAL_STORAGE for injection"
+            granted={false}
+            onRequest={() => handleRequestPermission('allfiles')}
           />
           <PermissionRow
             icon="key-outline"
             label="Root / Xposed Access"
             description="Required for camera hook injection"
-            granted={true}
+            granted={systemStatus.rootAccess.status === 'passed'}
+            onRequest={() => handleRequestPermission('root')}
           />
           <PermissionRow
-            icon="notifications-outline"
+            icon="layers-outline"
             label="Overlay Permission"
-            description="Optional: show status in other apps"
-            granted={false}
+            description="Display over other apps for status"
+            granted={systemStatus.overlayPermission.status === 'passed'}
+            onRequest={() => handleRequestPermission('overlay')}
             last
           />
         </Card>
@@ -432,6 +513,12 @@ export default function SettingsScreen() {
           <View style={styles.aboutRow}>
             <Text style={styles.aboutLabel}>Hook Engine</Text>
             <Text style={styles.aboutValue}>Camera2 API Interceptor</Text>
+          </View>
+          <View style={styles.aboutRow}>
+            <Text style={styles.aboutLabel}>Framework</Text>
+            <Text style={[styles.aboutValue, { color: getStatusColor(systemStatus.xposedFramework.status) }]}>
+              {systemStatus.xposedFramework.detail}
+            </Text>
           </View>
           <View style={styles.aboutRow}>
             <Text style={styles.aboutLabel}>Target SDK</Text>
@@ -454,11 +541,15 @@ function AppTargetRow({
   targetMode,
   onToggle,
   onRemove,
+  onLaunch,
+  isLaunching,
 }: {
   app: TargetApp;
   targetMode: TargetMode;
   onToggle: () => void;
   onRemove: () => void;
+  onLaunch: () => void;
+  isLaunching: boolean;
 }) {
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({
@@ -500,7 +591,23 @@ function AppTargetRow({
           />
         </View>
         <View style={styles.appInfo}>
-          <Text style={styles.appName}>{app.name}</Text>
+          <View style={styles.appNameRow}>
+            <Text style={styles.appName}>{app.name}</Text>
+            {app.enabled && (
+              <Pressable
+                onPress={onLaunch}
+                disabled={isLaunching}
+                style={styles.launchButton}
+              >
+                {isLaunching ? (
+                  <ActivityIndicator size={10} color={Colors.electricBlue} />
+                ) : (
+                  <Ionicons name="rocket" size={10} color={Colors.electricBlue} />
+                )}
+                <Text style={styles.launchButtonText}>INJECT</Text>
+              </Pressable>
+            )}
+          </View>
           <Text style={styles.appPackage} numberOfLines={1}>
             {app.packageName}
           </Text>
@@ -548,15 +655,20 @@ function PermissionRow({
   description,
   granted,
   last,
+  onRequest,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   description: string;
   granted: boolean;
   last?: boolean;
+  onRequest?: () => void;
 }) {
+  const statusColor = granted ? Colors.electricBlue : Colors.warningAmber;
+
   return (
-    <View
+    <Pressable
+      onPress={!granted ? onRequest : undefined}
       style={[
         styles.permissionRow,
         !last && { borderBottomWidth: 1, borderBottomColor: Colors.border },
@@ -565,13 +677,13 @@ function PermissionRow({
       <View
         style={[
           styles.permissionIcon,
-          { backgroundColor: granted ? Colors.success + '20' : Colors.warning + '20' },
+          { backgroundColor: statusColor + '20' },
         ]}
       >
         <Ionicons
           name={icon}
           size={18}
-          color={granted ? Colors.success : Colors.warning}
+          color={statusColor}
         />
       </View>
       <View style={styles.permissionInfo}>
@@ -581,26 +693,21 @@ function PermissionRow({
       <View
         style={[
           styles.permissionBadge,
-          {
-            backgroundColor: granted ? Colors.success + '20' : Colors.warning + '20',
-          },
+          { backgroundColor: statusColor + '20' },
         ]}
       >
         <Ionicons
           name={granted ? 'checkmark' : 'alert'}
           size={12}
-          color={granted ? Colors.success : Colors.warning}
+          color={statusColor}
         />
         <Text
-          style={[
-            styles.permissionBadgeText,
-            { color: granted ? Colors.success : Colors.warning },
-          ]}
+          style={[styles.permissionBadgeText, { color: statusColor }]}
         >
-          {granted ? 'OK' : 'REQ'}
+          {granted ? 'OK' : 'GRANT'}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -805,10 +912,35 @@ const styles = StyleSheet.create({
   appInfo: {
     flex: 1,
   },
+  appNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
   appName: {
     color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '600',
+  },
+  launchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: Colors.electricBlue + '15',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: Colors.electricBlue + '30',
+  },
+  launchButtonText: {
+    color: Colors.electricBlue,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  electricBlue: {
+    color: Colors.electricBlue,
   },
   appPackage: {
     color: Colors.textTertiary,

@@ -43,7 +43,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: Colors.accent,
+        tabBarActiveTintColor: Colors.electricBlue,
         tabBarInactiveTintColor: Colors.textTertiary,
         tabBarStyle: {
           backgroundColor: Colors.surface,
@@ -135,6 +135,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconWrapperActive: {
-    backgroundColor: Colors.accent + '20',
+    backgroundColor: Colors.electricBlue + '20',
   },
 });

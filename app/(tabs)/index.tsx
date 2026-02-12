@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   Pressable,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -16,28 +17,54 @@ import Animated, {
   withSpring,
   Easing,
   FadeInDown,
+  FadeIn,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useSystemStatus } from '@/hooks/useSystemStatus';
+import { getStatusColor, getStatusIcon, type SystemCheckStatus } from '@/services/SystemVerification';
+import { syncAllSettings, getBridgeStatus } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
 
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
-  const { heavyImpact, success, warning } = useHaptics();
+  const { heavyImpact, success, warning, mediumImpact } = useHaptics();
 
   const [hookEnabled, setHookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
   const [frontCamera, setFrontCamera] = useStorage(STORAGE_KEYS.FRONT_CAMERA, true);
   const [backCamera, setBackCamera] = useStorage(STORAGE_KEYS.BACK_CAMERA, false);
   const [selectedMedia] = useStorage<string | null>(STORAGE_KEYS.SELECTED_MEDIA, null);
+  const [aiEnhancement] = useStorage<string | null>(STORAGE_KEYS.AI_ENHANCEMENT, null);
+
+  const { status: systemStatus, isChecking, refresh: refreshSystemStatus } = useSystemStatus(30000);
+  const [bridgeVersion, setBridgeVersion] = useState(0);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
 
   const masterGlow = useSharedValue(0);
   const masterScale = useSharedValue(1);
+  const scanLineY = useSharedValue(0);
+
+  // Sync bridge config whenever key settings change
+  useEffect(() => {
+    const doSync = async () => {
+      try {
+        await syncAllSettings();
+        const bridgeSt = await getBridgeStatus();
+        setBridgeVersion(bridgeSt.version);
+        setLastSyncTime(new Date().toLocaleTimeString());
+      } catch {
+        // Silent
+      }
+    };
+    doSync();
+  }, [hookEnabled, frontCamera, backCamera, selectedMedia]);
 
   useEffect(() => {
     if (hookEnabled) {
@@ -49,21 +76,33 @@ export default function Dashboard() {
         -1,
         false
       );
+      scanLineY.value = withRepeat(
+        withTiming(1, { duration: 2000, easing: Easing.linear }),
+        -1,
+        false
+      );
     } else {
       masterGlow.value = withTiming(0, { duration: 400 });
+      scanLineY.value = withTiming(0, { duration: 300 });
     }
-  }, [hookEnabled, masterGlow]);
+  }, [hookEnabled, masterGlow, scanLineY]);
 
   const masterGlowStyle = useAnimatedStyle(() => ({
     shadowOpacity: masterGlow.value * 0.6,
-    borderColor: `rgba(0, 122, 255, ${masterGlow.value * 0.5})`,
+    borderColor: hookEnabled
+      ? `rgba(0, 212, 255, ${masterGlow.value * 0.5})`
+      : Colors.border,
   }));
 
   const masterButtonStyle = useAnimatedStyle(() => ({
     transform: [{ scale: masterScale.value }],
   }));
 
-  const handleMasterToggle = () => {
+  const scanLineStyle = useAnimatedStyle(() => ({
+    top: `${scanLineY.value * 100}%` as `${number}%`,
+  }));
+
+  const handleMasterToggle = useCallback(async () => {
     if (hookEnabled) {
       warning();
     } else {
@@ -71,12 +110,23 @@ export default function Dashboard() {
       setTimeout(() => success(), 200);
     }
     setHookEnabled(!hookEnabled);
-  };
+  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning]);
+
+  const handleRefreshStatus = useCallback(async () => {
+    mediumImpact();
+    await refreshSystemStatus();
+    await syncAllSettings();
+    const bridgeSt = await getBridgeStatus();
+    setBridgeVersion(bridgeSt.version);
+    setLastSyncTime(new Date().toLocaleTimeString());
+  }, [mediumImpact, refreshSystemStatus]);
 
   const activeTargets = [
     frontCamera && 'Front',
     backCamera && 'Back',
   ].filter(Boolean);
+
+  const allSystemsReady = systemStatus.overallReady;
 
   return (
     <ScrollView
@@ -94,8 +144,20 @@ export default function Dashboard() {
             <Text style={styles.appName}>VIRTUCAM</Text>
             <Text style={styles.appSubtitle}>Virtual Camera Engine</Text>
           </View>
-          <View style={styles.versionBadge}>
-            <Text style={styles.versionText}>v1.0</Text>
+          <View style={styles.headerRight}>
+            <Pressable onPress={handleRefreshStatus} style={styles.refreshButton}>
+              {isChecking ? (
+                <ActivityIndicator color={Colors.electricBlue} size="small" />
+              ) : (
+                <Ionicons name="refresh" size={18} color={Colors.electricBlue} />
+              )}
+            </Pressable>
+            <View style={[styles.versionBadge, allSystemsReady ? styles.versionBadgeReady : styles.versionBadgeWarn]}>
+              <View style={[styles.versionDot, { backgroundColor: allSystemsReady ? Colors.electricBlue : Colors.warningAmber }]} />
+              <Text style={[styles.versionText, { color: allSystemsReady ? Colors.electricBlue : Colors.warningAmber }]}>
+                {allSystemsReady ? 'READY' : 'SETUP'}
+              </Text>
+            </View>
           </View>
         </View>
       </Animated.View>
@@ -113,10 +175,10 @@ export default function Dashboard() {
             <View style={styles.masterStatus}>
               <PulseIndicator
                 active={hookEnabled}
-                color={hookEnabled ? Colors.success : Colors.inactive}
+                color={hookEnabled ? Colors.electricBlue : Colors.inactive}
                 size={12}
               />
-              <Text style={styles.masterStatusText}>
+              <Text style={[styles.masterStatusText, hookEnabled && { color: Colors.electricBlue }]}>
                 {hookEnabled ? 'HOOK ACTIVE' : 'HOOK INACTIVE'}
               </Text>
             </View>
@@ -137,6 +199,31 @@ export default function Dashboard() {
             </View>
           </View>
 
+          {/* Live Feed Monitor */}
+          {hookEnabled && selectedMedia && (
+            <Animated.View entering={FadeIn.duration(400)} style={styles.liveFeedContainer}>
+              <Image
+                source={{ uri: selectedMedia }}
+                style={styles.liveFeedImage}
+                contentFit="cover"
+                transition={300}
+              />
+              <View style={styles.liveFeedOverlay}>
+                <View style={styles.liveFeedBadge}>
+                  <View style={styles.liveFeedDot} />
+                  <Text style={styles.liveFeedText}>LIVE FEED</Text>
+                </View>
+                <View style={styles.liveFeedInfo}>
+                  <Text style={styles.liveFeedInfoText}>
+                    {activeTargets.join(' + ')} CAM • {aiEnhancement ? `AI: ${aiEnhancement}` : 'RAW'}
+                  </Text>
+                </View>
+              </View>
+              {/* Scan line effect */}
+              <Animated.View style={[styles.scanLine, scanLineStyle]} />
+            </Animated.View>
+          )}
+
           <Animated.View style={masterButtonStyle}>
             <Pressable
               onPressIn={() => {
@@ -154,7 +241,7 @@ export default function Dashboard() {
               <Ionicons
                 name={hookEnabled ? 'power' : 'power-outline'}
                 size={40}
-                color={hookEnabled ? Colors.textPrimary : Colors.textSecondary}
+                color={hookEnabled ? Colors.electricBlue : Colors.textSecondary}
               />
               <Text
                 style={[
@@ -177,14 +264,14 @@ export default function Dashboard() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>
+              <Text style={[styles.statValue, selectedMedia ? { color: Colors.success } : undefined]}>
                 {selectedMedia ? 'Ready' : 'No Media'}
               </Text>
               <Text style={styles.statLabel}>Source Status</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, hookEnabled && { color: Colors.success }]}>
+              <Text style={[styles.statValue, hookEnabled && { color: Colors.electricBlue }]}>
                 {hookEnabled ? 'Live' : 'Idle'}
               </Text>
               <Text style={styles.statLabel}>Engine</Text>
@@ -193,8 +280,43 @@ export default function Dashboard() {
         </Animated.View>
       </Animated.View>
 
-      {/* Camera Targeting */}
+      {/* System Verification Status */}
       <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="shield-checkmark" size={18} color={Colors.electricBlue} />
+          <Text style={styles.sectionTitle}>System Verification</Text>
+          {isChecking && <ActivityIndicator size="small" color={Colors.electricBlue} />}
+        </View>
+        <View style={styles.systemGrid}>
+          <SystemCheckCard
+            label={systemStatus.rootAccess.label}
+            detail={systemStatus.rootAccess.detail}
+            status={systemStatus.rootAccess.status}
+            icon="shield-checkmark"
+          />
+          <SystemCheckCard
+            label={systemStatus.xposedFramework.label}
+            detail={systemStatus.xposedFramework.detail}
+            status={systemStatus.xposedFramework.status}
+            icon="code-slash"
+          />
+          <SystemCheckCard
+            label={systemStatus.moduleActive.label}
+            detail={systemStatus.moduleActive.detail}
+            status={systemStatus.moduleActive.status}
+            icon="extension-puzzle"
+          />
+          <SystemCheckCard
+            label={systemStatus.storagePermission.label}
+            detail={systemStatus.storagePermission.detail}
+            status={systemStatus.storagePermission.status}
+            icon="folder"
+          />
+        </View>
+      </Animated.View>
+
+      {/* Camera Targeting */}
+      <Animated.View entering={FadeInDown.delay(400).duration(500)}>
         <View style={styles.sectionHeader}>
           <MaterialCommunityIcons name="camera-switch" size={18} color={Colors.accent} />
           <Text style={styles.sectionTitle}>Camera Targeting</Text>
@@ -223,8 +345,39 @@ export default function Dashboard() {
         </View>
       </Animated.View>
 
+      {/* Bridge Status */}
+      <Animated.View entering={FadeInDown.delay(500).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="bridge" size={18} color={Colors.cyan} />
+          <Text style={styles.sectionTitle}>Config Bridge</Text>
+        </View>
+        <Card>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Bridge Status</Text>
+            <View style={styles.infoValueRow}>
+              <View style={[styles.miniDot, { backgroundColor: Colors.electricBlue }]} />
+              <Text style={[styles.infoValue, { color: Colors.electricBlue }]}>Connected</Text>
+            </View>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Config Version</Text>
+            <Text style={styles.infoValue}>v{bridgeVersion}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Last Sync</Text>
+            <Text style={styles.infoValue}>{lastSyncTime}</Text>
+          </View>
+          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+            <Text style={styles.infoLabel}>Storage Path</Text>
+            <Text style={styles.infoValue} numberOfLines={1}>
+              /virtucam/bridge.json
+            </Text>
+          </View>
+        </Card>
+      </Animated.View>
+
       {/* System Information */}
-      <Animated.View entering={FadeInDown.delay(400).duration(500)}>
+      <Animated.View entering={FadeInDown.delay(600).duration(500)}>
         <View style={styles.sectionHeader}>
           <Ionicons name="information-circle-outline" size={18} color={Colors.accent} />
           <Text style={styles.sectionTitle}>System Information</Text>
@@ -249,79 +402,46 @@ export default function Dashboard() {
         </Card>
       </Animated.View>
 
-      {/* Diagnostics */}
-      <Animated.View entering={FadeInDown.delay(500).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="chart-line" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>Quick Diagnostics</Text>
-        </View>
-        <View style={styles.diagnosticsGrid}>
-          <DiagnosticCard
-            icon="checkmark-circle"
-            label="Camera Service"
-            status={hookEnabled ? 'Active' : 'Standby'}
-            active={hookEnabled}
-          />
-          <DiagnosticCard
-            icon="document-text"
-            label="Media Source"
-            status={selectedMedia ? 'Loaded' : 'Empty'}
-            active={!!selectedMedia}
-          />
-          <DiagnosticCard
-            icon="shield-checkmark"
-            label="Permissions"
-            status="Granted"
-            active={true}
-          />
-          <DiagnosticCard
-            icon="speedometer"
-            label="Performance"
-            status={hookEnabled ? 'Optimal' : 'N/A'}
-            active={hookEnabled}
-          />
-        </View>
-      </Animated.View>
-
       <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
-function DiagnosticCard({
-  icon,
+function SystemCheckCard({
   label,
+  detail,
   status,
-  active,
+  icon,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
   label: string;
-  status: string;
-  active: boolean;
+  detail: string;
+  status: SystemCheckStatus;
+  icon: keyof typeof Ionicons.glyphMap;
 }) {
+  const color = getStatusColor(status);
+  const statusIcon = getStatusIcon(status);
+
   return (
     <View
       style={[
-        styles.diagCard,
-        active && {
-          borderColor: Colors.accent + '40',
+        styles.checkCard,
+        {
+          borderColor: color + '30',
         },
       ]}
     >
-      <Ionicons
-        name={icon}
-        size={20}
-        color={active ? Colors.accent : Colors.textTertiary}
-      />
-      <Text style={styles.diagLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.diagStatus,
-          active && { color: Colors.success },
-        ]}
-      >
-        {status}
-      </Text>
+      <View style={styles.checkCardHeader}>
+        <View style={[styles.checkIconCircle, { backgroundColor: color + '15' }]}>
+          <Ionicons name={icon} size={16} color={color} />
+        </View>
+        <Ionicons
+          name={statusIcon as keyof typeof Ionicons.glyphMap}
+          size={16}
+          color={color}
+        />
+      </View>
+      <Text style={styles.checkLabel}>{label}</Text>
+      <Text style={[styles.checkDetail, { color }]}>{detail}</Text>
     </View>
   );
 }
@@ -342,7 +462,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xxl,
   },
   appName: {
-    color: Colors.accent,
+    color: Colors.electricBlue,
     fontSize: FontSize.xxxl,
     fontWeight: '800',
     letterSpacing: 3,
@@ -353,18 +473,46 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginTop: 2,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  refreshButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
   versionBadge: {
-    backgroundColor: Colors.accent + '20',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
+    paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full,
     borderWidth: 1,
-    borderColor: Colors.accent + '40',
+  },
+  versionBadgeReady: {
+    backgroundColor: Colors.electricBlue + '15',
+    borderColor: Colors.electricBlue + '40',
+  },
+  versionBadgeWarn: {
+    backgroundColor: Colors.warningAmber + '15',
+    borderColor: Colors.warningAmber + '40',
+  },
+  versionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   versionText: {
-    color: Colors.accent,
     fontSize: FontSize.xs,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 1,
   },
   masterCard: {
@@ -374,7 +522,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    shadowColor: Colors.accent,
+    shadowColor: Colors.electricBlue,
     shadowOffset: { width: 0, height: 0 },
     shadowRadius: 20,
     elevation: 8,
@@ -405,9 +553,9 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   statusChipActive: {
-    backgroundColor: Colors.success + '20',
+    backgroundColor: Colors.electricBlue + '20',
     borderWidth: 1,
-    borderColor: Colors.success + '40',
+    borderColor: Colors.electricBlue + '40',
   },
   statusChipInactive: {
     backgroundColor: Colors.surfaceLighter,
@@ -421,7 +569,72 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   statusChipTextActive: {
-    color: Colors.success,
+    color: Colors.electricBlue,
+  },
+  liveFeedContainer: {
+    width: '100%',
+    height: 160,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    marginBottom: Spacing.xl,
+    borderWidth: 1,
+    borderColor: Colors.electricBlue + '30',
+  },
+  liveFeedImage: {
+    width: '100%',
+    height: '100%',
+  },
+  liveFeedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: Spacing.sm,
+  },
+  liveFeedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 59, 48, 0.9)',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+  },
+  liveFeedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.textPrimary,
+  },
+  liveFeedText: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  liveFeedInfo: {
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+  },
+  liveFeedInfoText: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+  },
+  scanLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: Colors.electricBlue + '40',
+    shadowColor: Colors.electricBlue,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
   },
   masterButton: {
     alignItems: 'center',
@@ -432,8 +645,8 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   masterButtonActive: {
-    backgroundColor: Colors.accent + '15',
-    borderColor: Colors.accent + '50',
+    backgroundColor: Colors.electricBlue + '10',
+    borderColor: Colors.electricBlue + '50',
   },
   masterButtonInactive: {
     backgroundColor: Colors.surfaceLight,
@@ -447,7 +660,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   masterButtonLabelActive: {
-    color: Colors.accent,
+    color: Colors.electricBlue,
   },
   statsRow: {
     flexDirection: 'row',
@@ -490,9 +703,46 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
     textTransform: 'uppercase',
+    flex: 1,
   },
   section: {
     marginBottom: Spacing.lg,
+  },
+  systemGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  checkCard: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    gap: Spacing.sm,
+  },
+  checkCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  checkIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkLabel: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+  },
+  checkDetail: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
   },
   infoRow: {
     flexDirection: 'row',
@@ -511,29 +761,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     fontWeight: '600',
   },
-  diagnosticsGrid: {
+  infoValueRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
+    alignItems: 'center',
+    gap: 6,
   },
-  diagCard: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    gap: Spacing.sm,
-  },
-  diagLabel: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
-  },
-  diagStatus: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.sm,
-    fontWeight: '700',
+  miniDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
 });

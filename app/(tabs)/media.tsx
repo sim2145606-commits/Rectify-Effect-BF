@@ -25,6 +25,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
+import { resolveMediaPath, type ResolvedPath } from '@/services/PathResolver';
+import { writeBridgeConfig } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 
 type MediaItem = {
@@ -52,6 +54,7 @@ export default function MediaLibrary() {
 
   const [selectedType, setSelectedType] = useState<'image' | 'video' | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resolvedPath, setResolvedPath] = useState<ResolvedPath | null>(null);
 
   useEffect(() => {
     if (selectedMedia && recentFiles.length > 0) {
@@ -59,6 +62,18 @@ export default function MediaLibrary() {
       if (found) {
         setSelectedType(found.type);
       }
+    }
+    // Resolve path whenever media changes
+    if (selectedMedia) {
+      resolveMediaPath(selectedMedia)
+        .then((resolved) => {
+          setResolvedPath(resolved);
+          // Update bridge config with resolved absolute path
+          writeBridgeConfig({ mediaSourcePath: resolved.absolutePath }).catch(() => {});
+        })
+        .catch(() => setResolvedPath(null));
+    } else {
+      setResolvedPath(null);
     }
   }, [selectedMedia, recentFiles]);
 
@@ -298,12 +313,30 @@ export default function MediaLibrary() {
               </Text>
             </View>
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Status</Text>
-              <Text style={[styles.detailValue, { color: Colors.success }]}>Ready for Injection</Text>
+              <Text style={styles.detailLabel}>MIME</Text>
+              <Text style={styles.detailValue}>
+                {resolvedPath?.mimeType || 'Resolving...'}
+              </Text>
             </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Hook Status</Text>
+              <Text style={[styles.detailValue, { color: resolvedPath?.isAccessible ? Colors.electricBlue : Colors.warningAmber }]}>
+                {resolvedPath?.isAccessible ? 'Accessible' : 'Resolving Path...'}
+              </Text>
+            </View>
+            {resolvedPath && resolvedPath.fileSize > 0 && (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>File Size</Text>
+                <Text style={styles.detailValue}>
+                  {(resolvedPath.fileSize / 1024).toFixed(1)} KB
+                </Text>
+              </View>
+            )}
             <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
-              <Text style={styles.detailLabel}>Source</Text>
-              <Text style={styles.detailValue} numberOfLines={1}>Local Storage</Text>
+              <Text style={styles.detailLabel}>Absolute Path</Text>
+              <Text style={[styles.detailValue, { fontSize: FontSize.xs, maxWidth: '60%' }]} numberOfLines={2}>
+                {resolvedPath?.absolutePath || 'Resolving...'}
+              </Text>
             </View>
           </Card>
         </Animated.View>
@@ -497,7 +530,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(0, 122, 255, 0.8)',
+    backgroundColor: 'rgba(0, 212, 255, 0.85)',
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.sm,

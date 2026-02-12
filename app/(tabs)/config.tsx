@@ -23,6 +23,8 @@ import { useImageTransform } from '@fastshot/ai';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
+import { saveEnhancedMedia, cleanEnhancedCache } from '@/services/PathResolver';
+import { writeBridgeConfig } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 
 type ScaleMode = 'fit' | 'fill' | 'stretch';
@@ -105,18 +107,47 @@ export default function MediaConfig() {
 
   React.useEffect(() => {
     if (transformData?.images?.[0] && activeAiMode) {
-      setEnhancedUri(transformData.images[0]);
-      setAiEnhancement(activeAiMode);
-      setActiveAiMode(null);
-      success();
+      const processEnhanced = async () => {
+        const images = transformData.images!;
+        const remoteUri = images[0];
+        setEnhancedUri(remoteUri);
+        setAiEnhancement(activeAiMode);
+
+        // Save enhanced image to system-accessible temp directory for hook
+        try {
+          const savedPath = await saveEnhancedMedia(remoteUri, activeAiMode);
+          if (savedPath) {
+            await writeBridgeConfig({
+              enhancedMediaPath: savedPath,
+              aiFilterApplied: activeAiMode,
+            });
+          }
+        } catch {
+          // Non-critical — enhancement still shows in-app
+        }
+
+        setActiveAiMode(null);
+        success();
+      };
+      processEnhanced();
     }
   }, [transformData, activeAiMode, setAiEnhancement, success]);
 
-  const clearEnhancement = useCallback(() => {
+  const clearEnhancement = useCallback(async () => {
     lightImpact();
     setEnhancedUri(null);
     setAiEnhancement(null);
     resetAi();
+    // Clean up cached enhanced files
+    try {
+      await cleanEnhancedCache();
+      await writeBridgeConfig({
+        enhancedMediaPath: null,
+        aiFilterApplied: null,
+      });
+    } catch {
+      // Silent
+    }
   }, [lightImpact, setAiEnhancement, resetAi]);
 
   const displayUri = enhancedUri || selectedMedia;
@@ -290,7 +321,7 @@ export default function MediaConfig() {
           )}
         </View>
         <Text style={styles.aiDescription}>
-          Powered by Newell AI • Transforms take 10-30 seconds
+          Powered by Newell AI • Pre-processes to /virtucam/enhanced/ • 10-30s
         </Text>
         <View style={styles.aiGrid}>
           <AiEnhanceCard
