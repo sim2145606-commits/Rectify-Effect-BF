@@ -5,562 +5,283 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Alert,
-  ActivityIndicator,
 } from 'react-native';
 import Animated, {
   FadeInDown,
-  FadeIn,
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
 } from 'react-native-reanimated';
-import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useImageTransform } from '@fastshot/ai';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
-import { saveEnhancedMedia, cleanEnhancedCache } from '@/services/PathResolver';
 import { writeBridgeConfig } from '@/services/ConfigBridge';
-import Card from '@/components/Card';
+import HUDViewfinder from '@/components/media-studio/HUDViewfinder';
+import RotationDial from '@/components/media-studio/RotationDial';
+import SpanScalePanel from '@/components/media-studio/SpanScalePanel';
+import PositionControl from '@/components/media-studio/PositionControl';
+import AIEnhancementSuite from '@/components/media-studio/AIEnhancementSuite';
+import PlaybackControls from '@/components/media-studio/PlaybackControls';
+import EngineOverlay from '@/components/media-studio/EngineOverlay';
 
 type ScaleMode = 'fit' | 'fill' | 'stretch';
 
-export default function MediaConfig() {
+export default function MediaStudio() {
   const insets = useSafeAreaInsets();
-  const { lightImpact, mediumImpact, success } = useHaptics();
+  const { heavyImpact, mediumImpact } = useHaptics();
 
+  // Core state
   const [selectedMedia] = useStorage<string | null>(STORAGE_KEYS.SELECTED_MEDIA, null);
   const [rotation, setRotation] = useStorage(STORAGE_KEYS.ROTATION, 0);
   const [mirrored, setMirrored] = useStorage(STORAGE_KEYS.MIRRORED, false);
+  const [flippedVertical, setFlippedVertical] = useStorage(STORAGE_KEYS.FLIPPED_VERTICAL, false);
   const [scaleMode, setScaleMode] = useStorage<ScaleMode>(STORAGE_KEYS.SCALE_MODE, 'fit');
-  const [aiEnhancement, setAiEnhancement] = useStorage<string | null>(
-    STORAGE_KEYS.AI_ENHANCEMENT,
-    null
-  );
+  const [offsetX, setOffsetX] = useStorage(STORAGE_KEYS.OFFSET_X, 0);
+  const [offsetY, setOffsetY] = useStorage(STORAGE_KEYS.OFFSET_Y, 0);
 
+  // AI state
+  const [aiOptimize, setAiOptimize] = useStorage(STORAGE_KEYS.AI_OPTIMIZE, false);
+  const [aiSubjectLock, setAiSubjectLock] = useStorage(STORAGE_KEYS.AI_SUBJECT_LOCK, false);
   const [enhancedUri, setEnhancedUri] = useState<string | null>(null);
-  const [activeAiMode, setActiveAiMode] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
-  const { transformImage, data: transformData, isLoading: aiLoading, reset: resetAi } = useImageTransform();
+  // Playback state
+  const [loopEnabled, setLoopEnabled] = useStorage(STORAGE_KEYS.LOOP_ENABLED, true);
+  const [loopStart, setLoopStart] = useStorage(STORAGE_KEYS.LOOP_START, 0);
+  const [loopEnd, setLoopEnd] = useStorage(STORAGE_KEYS.LOOP_END, 30);
 
-  const handleRotate = useCallback(() => {
-    mediumImpact();
-    setRotation((prev: number) => (prev + 90) % 360);
-  }, [mediumImpact, setRotation]);
+  // Engine state
+  const [engineActive, setEngineActive] = useStorage(STORAGE_KEYS.ENGINE_ACTIVE, false);
 
-  const handleMirror = useCallback(() => {
-    lightImpact();
-    setMirrored((prev: boolean) => !prev);
-  }, [lightImpact, setMirrored]);
-
-  const handleScaleMode = useCallback(
-    (mode: ScaleMode) => {
-      lightImpact();
-      setScaleMode(mode);
-    },
-    [lightImpact, setScaleMode]
-  );
-
-  const handleAiEnhance = useCallback(
-    async (mode: string) => {
-      if (!selectedMedia) {
-        Alert.alert('No Media', 'Please select media from the Library tab first.');
-        return;
-      }
-      mediumImpact();
-      setActiveAiMode(mode);
-
-      let prompt = '';
-      switch (mode) {
-        case 'upscale':
-          prompt = 'Upscale this image to higher resolution with enhanced detail and sharpness. Make it look crisp and professional quality.';
-          break;
-        case 'studio':
-          prompt = 'Apply professional studio lighting to this image. Add soft, flattering light with subtle rim lighting, reduce harsh shadows, and make it look like a professionally lit studio photograph.';
-          break;
-        case 'enhance':
-          prompt = 'Enhance this image by improving color balance, brightness, contrast, and overall quality. Make colors more vivid and details more crisp while keeping the natural look.';
-          break;
-        case 'cinematic':
-          prompt = 'Apply a cinematic color grade to this image. Add a filmic look with rich shadows, warm highlights, slight vignetting, and a professional movie-like atmosphere.';
-          break;
-        default:
-          prompt = 'Enhance this image with professional quality improvements.';
-      }
-
-      try {
-        await transformImage({
-          imageUrl: selectedMedia,
-          prompt,
-        });
-      } catch {
-        Alert.alert('AI Error', 'Failed to apply AI enhancement. Please try again.');
-        setActiveAiMode(null);
-      }
-    },
-    [selectedMedia, mediumImpact, transformImage]
-  );
-
-  React.useEffect(() => {
-    if (transformData?.images?.[0] && activeAiMode) {
-      const processEnhanced = async () => {
-        const images = transformData.images!;
-        const remoteUri = images[0];
-        setEnhancedUri(remoteUri);
-        setAiEnhancement(activeAiMode);
-
-        // Save enhanced image to system-accessible temp directory for hook
-        try {
-          const savedPath = await saveEnhancedMedia(remoteUri, activeAiMode);
-          if (savedPath) {
-            await writeBridgeConfig({
-              enhancedMediaPath: savedPath,
-              aiFilterApplied: activeAiMode,
-            });
-          }
-        } catch {
-          // Non-critical — enhancement still shows in-app
-        }
-
-        setActiveAiMode(null);
-        success();
-      };
-      processEnhanced();
-    }
-  }, [transformData, activeAiMode, setAiEnhancement, success]);
-
-  const clearEnhancement = useCallback(async () => {
-    lightImpact();
-    setEnhancedUri(null);
-    setAiEnhancement(null);
-    resetAi();
-    // Clean up cached enhanced files
-    try {
-      await cleanEnhancedCache();
-      await writeBridgeConfig({
-        enhancedMediaPath: null,
-        aiFilterApplied: null,
-      });
-    } catch {
-      // Silent
-    }
-  }, [lightImpact, setAiEnhancement, resetAi]);
-
+  // Display URI
   const displayUri = enhancedUri || selectedMedia;
 
-  const getContentFit = (): 'contain' | 'cover' | 'fill' => {
-    switch (scaleMode) {
-      case 'fit':
-        return 'contain';
-      case 'fill':
-        return 'cover';
-      case 'stretch':
-        return 'fill';
-      default:
-        return 'contain';
+  // Handlers
+  const handleRotationChange = useCallback((angle: number) => {
+    setRotation(angle);
+    writeBridgeConfig({ rotation: angle }).catch(() => {});
+  }, [setRotation]);
+
+  const handleScaleModeChange = useCallback((mode: ScaleMode) => {
+    setScaleMode(mode);
+    writeBridgeConfig({ scaleMode: mode }).catch(() => {});
+  }, [setScaleMode]);
+
+  const handleMirrorToggle = useCallback(() => {
+    setMirrored((prev: boolean) => {
+      const newVal = !prev;
+      writeBridgeConfig({ mirrored: newVal }).catch(() => {});
+      return newVal;
+    });
+  }, [setMirrored]);
+
+  const handleFlipToggle = useCallback(() => {
+    setFlippedVertical((prev: boolean) => !prev);
+  }, [setFlippedVertical]);
+
+  const handleOffsetChange = useCallback((x: number, y: number) => {
+    setOffsetX(x);
+    setOffsetY(y);
+  }, [setOffsetX, setOffsetY]);
+
+  const handleEngineToggle = useCallback((active: boolean) => {
+    setEngineActive(active);
+    writeBridgeConfig({ enabled: active }).catch(() => {});
+  }, [setEngineActive]);
+
+  const handleQuickPreset = useCallback((preset: string) => {
+    mediumImpact();
+    switch (preset) {
+      case 'default':
+        setRotation(0);
+        setMirrored(false);
+        setFlippedVertical(false);
+        setScaleMode('fit');
+        setOffsetX(0);
+        setOffsetY(0);
+        break;
+      case 'mirror':
+        setMirrored(true);
+        setFlippedVertical(false);
+        break;
+      case 'portrait':
+        setRotation(90);
+        setScaleMode('fill');
+        break;
+      case 'cinematic':
+        setScaleMode('fill');
+        setRotation(0);
+        break;
     }
-  };
+  }, [mediumImpact, setRotation, setMirrored, setFlippedVertical, setScaleMode, setOffsetX, setOffsetY]);
+
+  const handleResetAll = useCallback(() => {
+    heavyImpact();
+    setRotation(0);
+    setMirrored(false);
+    setFlippedVertical(false);
+    setScaleMode('fit');
+    setOffsetX(0);
+    setOffsetY(0);
+    writeBridgeConfig({
+      rotation: 0,
+      mirrored: false,
+      scaleMode: 'fit',
+    }).catch(() => {});
+  }, [heavyImpact, setRotation, setMirrored, setFlippedVertical, setScaleMode, setOffsetX, setOffsetY]);
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: insets.top + Spacing.lg },
+        { paddingTop: insets.top + Spacing.md },
       ]}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
-      <Animated.View entering={FadeInDown.delay(100).duration(500)}>
-        <Text style={styles.screenTitle}>Configuration</Text>
-        <Text style={styles.screenSubtitle}>
-          Transform and enhance your media source
-        </Text>
-      </Animated.View>
-
-      {/* Live Transform Preview */}
-      <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="image-edit" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>Transform Preview</Text>
-        </View>
-        <Card style={styles.previewCard}>
-          {displayUri ? (
-            <View style={styles.previewContainer}>
-              <Image
-                source={{ uri: displayUri }}
-                style={[
-                  styles.previewImage,
-                  {
-                    transform: [
-                      { rotate: `${rotation}deg` },
-                      { scaleX: mirrored ? -1 : 1 },
-                    ],
-                  },
-                ]}
-                contentFit={getContentFit()}
-                transition={300}
-              />
-              {aiLoading && (
-                <View style={styles.aiOverlay}>
-                  <ActivityIndicator color={Colors.accent} size="large" />
-                  <Text style={styles.aiOverlayText}>
-                    AI Processing... (10-30s)
-                  </Text>
-                </View>
-              )}
-              <View style={styles.previewInfoBar}>
-                <Text style={styles.previewInfoText}>
-                  {rotation}° • {mirrored ? 'Mirrored' : 'Normal'} • {scaleMode.toUpperCase()}
-                </Text>
-                {aiEnhancement && (
-                  <View style={styles.aiAppliedBadge}>
-                    <Ionicons name="sparkles" size={10} color={Colors.accent} />
-                    <Text style={styles.aiAppliedText}>AI</Text>
-                  </View>
-                )}
-              </View>
+      <Animated.View entering={FadeInDown.delay(50).duration(500)} style={styles.headerContainer}>
+        <View style={styles.headerRow}>
+          <View>
+            <View style={styles.titleRow}>
+              <MaterialCommunityIcons name="monitor-cellphone" size={22} color={Colors.electricBlue} />
+              <Text style={styles.screenTitle}>Media Studio</Text>
             </View>
-          ) : (
-            <View style={styles.emptyPreview}>
-              <View style={styles.emptyIconCircle}>
-                <MaterialCommunityIcons
-                  name="image-off-outline"
-                  size={32}
-                  color={Colors.textTertiary}
-                />
-              </View>
-              <Text style={styles.emptyTitle}>No Media Loaded</Text>
-              <Text style={styles.emptySubtitle}>
-                Select media from the Library tab
-              </Text>
-            </View>
-          )}
-        </Card>
-      </Animated.View>
+            <Text style={styles.screenSubtitle}>
+              OBS-style virtual camera control
+            </Text>
+          </View>
+          <Pressable style={styles.resetAllButton} onPress={handleResetAll}>
+            <MaterialCommunityIcons name="restore" size={14} color={Colors.textSecondary} />
+            <Text style={styles.resetAllText}>RESET</Text>
+          </Pressable>
+        </View>
 
-      {/* Transformation Controls */}
-      <Animated.View entering={FadeInDown.delay(300).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="rotate-3d-variant" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>Transformation</Text>
-        </View>
-        <View style={styles.transformRow}>
-          <TransformButton
-            icon="rotate-right"
-            label={`Rotate ${rotation}°`}
-            onPress={handleRotate}
-            active={rotation !== 0}
-          />
-          <TransformButton
-            icon="flip-horizontal"
-            label={mirrored ? 'Mirrored' : 'Mirror'}
-            onPress={handleMirror}
-            active={mirrored}
-          />
-          <TransformButton
-            icon="restore"
-            label="Reset"
-            onPress={() => {
-              lightImpact();
-              setRotation(0);
-              setMirrored(false);
-            }}
-            active={false}
-          />
-        </View>
-      </Animated.View>
-
-      {/* Scaling Modes */}
-      <Animated.View entering={FadeInDown.delay(400).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="aspect-ratio" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>Scaling Mode</Text>
-        </View>
-        <View style={styles.scaleModeRow}>
-          <ScaleModeButton
-            mode="fit"
-            label="Fit"
-            description="Letterbox"
-            icon="fit-to-screen-outline"
-            current={scaleMode}
-            onPress={handleScaleMode}
-          />
-          <ScaleModeButton
-            mode="fill"
-            label="Fill"
-            description="Crop edges"
-            icon="arrow-expand-all"
-            current={scaleMode}
-            onPress={handleScaleMode}
-          />
-          <ScaleModeButton
-            mode="stretch"
-            label="Stretch"
-            description="Distort"
-            icon="stretch-to-page-outline"
-            current={scaleMode}
-            onPress={handleScaleMode}
-          />
-        </View>
-      </Animated.View>
-
-      {/* AI Enhancement */}
-      <Animated.View entering={FadeInDown.delay(500).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="sparkles" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>AI Enhancement</Text>
-          {aiEnhancement && (
-            <Pressable onPress={clearEnhancement} style={styles.clearAiButton}>
-              <Text style={styles.clearAiText}>Clear</Text>
-            </Pressable>
-          )}
-        </View>
-        <Text style={styles.aiDescription}>
-          Powered by Newell AI • Pre-processes to /virtucam/enhanced/ • 10-30s
-        </Text>
-        <View style={styles.aiGrid}>
-          <AiEnhanceCard
-            icon="arrow-expand-all"
-            label="Upscale"
-            description="Boost resolution & detail"
-            mode="upscale"
-            onPress={handleAiEnhance}
-            loading={aiLoading && activeAiMode === 'upscale'}
-            disabled={aiLoading || !selectedMedia}
-            active={aiEnhancement === 'upscale'}
-          />
-          <AiEnhanceCard
-            icon="lightbulb-on-outline"
-            label="Studio Light"
-            description="Professional lighting"
-            mode="studio"
-            onPress={handleAiEnhance}
-            loading={aiLoading && activeAiMode === 'studio'}
-            disabled={aiLoading || !selectedMedia}
-            active={aiEnhancement === 'studio'}
-          />
-          <AiEnhanceCard
-            icon="auto-fix"
-            label="Auto Enhance"
-            description="Color & clarity boost"
-            mode="enhance"
-            onPress={handleAiEnhance}
-            loading={aiLoading && activeAiMode === 'enhance'}
-            disabled={aiLoading || !selectedMedia}
-            active={aiEnhancement === 'enhance'}
-          />
-          <AiEnhanceCard
-            icon="movie-filter-outline"
-            label="Cinematic"
-            description="Filmic color grade"
-            mode="cinematic"
-            onPress={handleAiEnhance}
-            loading={aiLoading && activeAiMode === 'cinematic'}
-            disabled={aiLoading || !selectedMedia}
-            active={aiEnhancement === 'cinematic'}
-          />
-        </View>
-      </Animated.View>
-
-      {enhancedUri && (
-        <Animated.View entering={FadeIn.delay(200).duration(400)}>
-          <Card
-            glow
-            glowColor={Colors.successGlow}
-            style={styles.enhancedBanner}
+        {/* Status Bar */}
+        <View style={styles.statusBar}>
+          <LinearGradient
+            colors={[Colors.electricBlue + '08', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.statusGradient}
           >
-            <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
-            <View style={styles.enhancedBannerText}>
-              <Text style={styles.enhancedTitle}>Enhancement Applied</Text>
-              <Text style={styles.enhancedSubtitle}>
-                AI {aiEnhancement} filter is active on your media
-              </Text>
-            </View>
-          </Card>
-        </Animated.View>
-      )}
+            <StatusChip
+              label="Engine"
+              value={engineActive ? 'ON' : 'OFF'}
+              color={engineActive ? Colors.success : Colors.inactive}
+            />
+            <View style={styles.statusDivider} />
+            <StatusChip
+              label="AI"
+              value={aiOptimize || aiSubjectLock ? 'ON' : 'OFF'}
+              color={aiOptimize || aiSubjectLock ? Colors.electricBlue : Colors.inactive}
+            />
+            <View style={styles.statusDivider} />
+            <StatusChip
+              label="Loop"
+              value={loopEnabled ? 'ON' : 'OFF'}
+              color={loopEnabled ? Colors.cyan : Colors.inactive}
+            />
+            <View style={styles.statusDivider} />
+            <StatusChip
+              label="Media"
+              value={selectedMedia ? 'LOADED' : 'NONE'}
+              color={selectedMedia ? Colors.success : Colors.warning}
+            />
+          </LinearGradient>
+        </View>
+      </Animated.View>
 
-      <View style={{ height: 40 }} />
+      {/* Live Viewfinder */}
+      <HUDViewfinder
+        mediaUri={displayUri}
+        rotation={rotation}
+        mirrored={mirrored}
+        flippedVertical={flippedVertical}
+        scaleMode={scaleMode}
+        offsetX={offsetX}
+        offsetY={offsetY}
+        aiOptimize={aiOptimize}
+        aiSubjectLock={aiSubjectLock}
+        aiLoading={aiLoading}
+        engineActive={engineActive}
+      />
+
+      {/* The Transformer - Rotation Dial */}
+      <RotationDial
+        rotation={rotation}
+        onRotationChange={handleRotationChange}
+      />
+
+      {/* Span & Scale */}
+      <SpanScalePanel
+        scaleMode={scaleMode}
+        mirrored={mirrored}
+        flippedVertical={flippedVertical}
+        onScaleModeChange={handleScaleModeChange}
+        onMirrorToggle={handleMirrorToggle}
+        onFlipToggle={handleFlipToggle}
+      />
+
+      {/* Position Control */}
+      <PositionControl
+        offsetX={offsetX}
+        offsetY={offsetY}
+        onOffsetChange={handleOffsetChange}
+      />
+
+      {/* AI Enhancement Suite */}
+      <AIEnhancementSuite
+        selectedMedia={selectedMedia}
+        aiOptimize={aiOptimize}
+        aiSubjectLock={aiSubjectLock}
+        onAiOptimizeChange={(val) => {
+          setAiOptimize(val);
+          setAiLoading(false);
+        }}
+        onAiSubjectLockChange={(val) => {
+          setAiSubjectLock(val);
+          setAiLoading(false);
+        }}
+        onEnhancedUriChange={setEnhancedUri}
+      />
+
+      {/* Playback Engine */}
+      <PlaybackControls
+        loopEnabled={loopEnabled}
+        loopStart={loopStart}
+        loopEnd={loopEnd}
+        mediaDuration={30}
+        onLoopEnabledChange={setLoopEnabled}
+        onLoopStartChange={setLoopStart}
+        onLoopEndChange={setLoopEnd}
+      />
+
+      {/* Android Integration */}
+      <EngineOverlay
+        engineActive={engineActive}
+        onEngineToggle={handleEngineToggle}
+        rotation={rotation}
+        scaleMode={scaleMode}
+        selectedMedia={selectedMedia}
+        onQuickPreset={handleQuickPreset}
+      />
+
+      {/* Footer spacer */}
+      <View style={{ height: 60 }} />
     </ScrollView>
   );
 }
 
-function TransformButton({
-  icon,
-  label,
-  onPress,
-  active,
-}: {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  label: string;
-  onPress: () => void;
-  active: boolean;
-}) {
-  const scale = useSharedValue(1);
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
+function StatusChip({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <Animated.View style={[styles.transformButtonWrapper, animStyle]}>
-      <Pressable
-        onPressIn={() => {
-          scale.value = withSpring(0.93);
-        }}
-        onPressOut={() => {
-          scale.value = withSpring(1);
-        }}
-        onPress={onPress}
-        style={[
-          styles.transformButton,
-          active && styles.transformButtonActive,
-        ]}
-      >
-        <MaterialCommunityIcons
-          name={icon}
-          size={22}
-          color={active ? Colors.accent : Colors.textSecondary}
-        />
-        <Text
-          style={[
-            styles.transformLabel,
-            active && { color: Colors.accent },
-          ]}
-        >
-          {label}
-        </Text>
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-function ScaleModeButton({
-  mode,
-  label,
-  description,
-  icon,
-  current,
-  onPress,
-}: {
-  mode: ScaleMode;
-  label: string;
-  description: string;
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  current: ScaleMode;
-  onPress: (mode: ScaleMode) => void;
-}) {
-  const isActive = current === mode;
-  const scale = useSharedValue(1);
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View style={[styles.scaleModeWrapper, animStyle]}>
-      <Pressable
-        onPressIn={() => {
-          scale.value = withSpring(0.95);
-        }}
-        onPressOut={() => {
-          scale.value = withSpring(1);
-        }}
-        onPress={() => onPress(mode)}
-        style={[
-          styles.scaleModeButton,
-          isActive && styles.scaleModeButtonActive,
-        ]}
-      >
-        <MaterialCommunityIcons
-          name={icon}
-          size={20}
-          color={isActive ? Colors.accent : Colors.textTertiary}
-        />
-        <Text
-          style={[
-            styles.scaleModeLabel,
-            isActive && { color: Colors.accent },
-          ]}
-        >
-          {label}
-        </Text>
-        <Text style={styles.scaleModeDesc}>{description}</Text>
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-function AiEnhanceCard({
-  icon,
-  label,
-  description,
-  mode,
-  onPress,
-  loading,
-  disabled,
-  active,
-}: {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  label: string;
-  description: string;
-  mode: string;
-  onPress: (mode: string) => void;
-  loading: boolean;
-  disabled: boolean;
-  active: boolean;
-}) {
-  const scale = useSharedValue(1);
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View style={[styles.aiCardWrapper, animStyle]}>
-      <Pressable
-        onPressIn={() => {
-          scale.value = withSpring(0.95);
-        }}
-        onPressOut={() => {
-          scale.value = withSpring(1);
-        }}
-        onPress={() => onPress(mode)}
-        disabled={disabled}
-        style={[
-          styles.aiCard,
-          active && styles.aiCardActive,
-          disabled && !loading && styles.aiCardDisabled,
-        ]}
-      >
-        {loading ? (
-          <ActivityIndicator color={Colors.accent} size="small" />
-        ) : (
-          <MaterialCommunityIcons
-            name={icon}
-            size={22}
-            color={active ? Colors.accent : disabled ? Colors.textTertiary : Colors.textSecondary}
-          />
-        )}
-        <Text
-          style={[
-            styles.aiCardLabel,
-            active && { color: Colors.accent },
-            disabled && !loading && { color: Colors.textTertiary },
-          ]}
-        >
-          {label}
-        </Text>
-        <Text style={styles.aiCardDesc}>{description}</Text>
-        {active && (
-          <View style={styles.aiActiveIndicator}>
-            <Ionicons name="checkmark" size={12} color={Colors.accent} />
-          </View>
-        )}
-      </Pressable>
-    </Animated.View>
+    <View style={styles.statusChip}>
+      <View style={[styles.statusDot, { backgroundColor: color }]} />
+      <View>
+        <Text style={styles.statusChipLabel}>{label}</Text>
+        <Text style={[styles.statusChipValue, { color }]}>{value}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -570,256 +291,91 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.xxxl,
+  },
+  headerContainer: {
+    marginBottom: Spacing.lg,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
   screenTitle: {
     color: Colors.textPrimary,
-    fontSize: FontSize.xxxl,
+    fontSize: FontSize.xxl,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   screenSubtitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.md,
-    marginTop: 4,
-    marginBottom: Spacing.xxl,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-    marginTop: Spacing.sm,
-  },
-  sectionTitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    flex: 1,
-  },
-  previewCard: {
-    padding: 0,
-    overflow: 'hidden',
-    marginBottom: Spacing.lg,
-  },
-  previewContainer: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    backgroundColor: Colors.surfaceLight,
-    overflow: 'hidden',
-  },
-  previewImage: {
-    width: '100%',
-    height: '100%',
-  },
-  aiOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(18, 18, 18, 0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.md,
-  },
-  aiOverlayText: {
-    color: Colors.accent,
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-  },
-  previewInfoBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: Colors.overlay,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  previewInfoText: {
-    color: Colors.textSecondary,
+    color: Colors.textTertiary,
     fontSize: FontSize.xs,
-    fontWeight: '600',
+    marginTop: 2,
+    marginLeft: 30,
     letterSpacing: 0.5,
   },
-  aiAppliedBadge: {
+  resetAllButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: Colors.accent + '30',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
-  },
-  aiAppliedText: {
-    color: Colors.accent,
-    fontSize: FontSize.xs,
-    fontWeight: '800',
-  },
-  emptyPreview: {
-    aspectRatio: 4 / 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.md,
-  },
-  emptyIconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
     backgroundColor: Colors.surfaceLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.sm,
-  },
-  emptyTitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-  },
-  emptySubtitle: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.sm,
-  },
-  transformRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  transformButtonWrapper: {
-    flex: 1,
-  },
-  transformButton: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.lg,
-    alignItems: 'center',
-    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  transformButtonActive: {
-    borderColor: Colors.accent + '50',
-    backgroundColor: Colors.accent + '10',
-  },
-  transformLabel: {
+  resetAllText: {
     color: Colors.textSecondary,
-    fontSize: FontSize.sm,
-    fontWeight: '600',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  scaleModeRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  scaleModeWrapper: {
-    flex: 1,
-  },
-  scaleModeButton: {
-    backgroundColor: Colors.surface,
+  statusBar: {
+    marginTop: Spacing.md,
     borderRadius: BorderRadius.md,
-    padding: Spacing.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  statusGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+  },
+  statusDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: Colors.border,
+    marginHorizontal: Spacing.sm,
+  },
+  statusChip: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
-  scaleModeButtonActive: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accent + '10',
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  scaleModeLabel: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    marginTop: Spacing.xs,
-  },
-  scaleModeDesc: {
+  statusChipLabel: {
     color: Colors.textTertiary,
-    fontSize: FontSize.xs,
-  },
-  aiDescription: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.sm,
-    marginBottom: Spacing.md,
-    marginTop: -Spacing.xs,
-  },
-  aiGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  aiCardWrapper: {
-    width: '48%',
-    flexGrow: 1,
-  },
-  aiCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.lg,
-    gap: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    minHeight: 100,
-  },
-  aiCardActive: {
-    borderColor: Colors.accent + '60',
-    backgroundColor: Colors.accent + '10',
-  },
-  aiCardDisabled: {
-    opacity: 0.5,
-  },
-  aiCardLabel: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.md,
+    fontSize: 7,
     fontWeight: '700',
+    letterSpacing: 0.5,
   },
-  aiCardDesc: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.xs,
-  },
-  aiActiveIndicator: {
-    position: 'absolute',
-    top: Spacing.sm,
-    right: Spacing.sm,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: Colors.accent + '30',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearAiButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.surfaceLighter,
-  },
-  clearAiText: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.xs,
-    fontWeight: '600',
-  },
-  enhancedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginTop: Spacing.sm,
-  },
-  enhancedBannerText: {
-    flex: 1,
-  },
-  enhancedTitle: {
-    color: Colors.success,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-  },
-  enhancedSubtitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
-    marginTop: 2,
+  statusChipValue: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });

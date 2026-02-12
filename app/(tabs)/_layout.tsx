@@ -97,10 +97,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="config"
         options={{
-          title: 'Config',
+          title: 'Studio',
           tabBarIcon: ({ color, focused }) => (
             <TabIcon
-              name="tune-variant"
+              name="monitor-cellphone"
               library="material"
               color={color}
               focused={focused}
