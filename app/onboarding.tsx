@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import Animated, {
   withSequence,
   FadeInDown,
   FadeInUp,
+  FadeIn,
   Easing,
   SlideInRight,
   SlideOutLeft,
@@ -40,10 +41,16 @@ import {
   requestOverlayPermission,
 } from '@/services/PermissionManager';
 import { syncAllSettings } from '@/services/ConfigBridge';
+import {
+  getAndroidVersionInfo,
+  type AndroidVersionInfo,
+  determineOptimalCameraAPI,
+  getBatteryOptimizationSteps,
+} from '@/services/CompatibilityEngine';
+import SuccessAnimation from '@/components/SuccessAnimation';
 
-// Screen dimensions available if needed for responsive layout
 
-type StepKey = 'root' | 'xposed' | 'module' | 'permissions';
+type StepKey = 'root' | 'xposed' | 'module' | 'permissions' | 'battery' | 'compatibility';
 
 type Step = {
   key: StepKey;
@@ -55,97 +62,214 @@ type Step = {
   actionLabel: string;
   tipTitle: string;
   tipBody: string;
+  minSdkVersion?: number;
 };
 
-const STEPS: Step[] = [
-  {
-    key: 'root',
-    title: 'Root Access',
-    subtitle: 'Superuser Verification',
-    icon: 'shield-checkmark',
+function buildSteps(androidInfo: AndroidVersionInfo): Step[] {
+  const steps: Step[] = [
+    {
+      key: 'root',
+      title: 'Root Access',
+      subtitle: 'Superuser Verification',
+      icon: 'shield-checkmark',
+      iconLib: 'ionicons',
+      description:
+        'VirtuCam requires root access to intercept camera frames at the system level. Grant Superuser (SU) permissions to proceed.',
+      actionLabel: 'Verify Root Access',
+      tipTitle: 'Need Root?',
+      tipBody:
+        `Use Magisk or KernelSU to root your device. VirtuCam works best with Magisk v26+ or KernelSU on Android ${androidInfo.versionName}.`,
+    },
+    {
+      key: 'xposed',
+      title: 'Xposed Framework',
+      subtitle: 'Hook Engine Detection',
+      icon: 'code-slash',
+      iconLib: 'ionicons',
+      description:
+        'An Xposed-compatible framework (LSPosed recommended) is required to hook into camera APIs. The framework enables VirtuCam to intercept Camera2 API calls.',
+      actionLabel: 'Detect Framework',
+      tipTitle: 'Recommended Setup',
+      tipBody:
+        'Install LSPosed via Magisk Module → Reboot → Open LSPosed Manager to verify activation. Zygisk mode is preferred for stability.',
+    },
+    {
+      key: 'module',
+      title: 'Module Activation',
+      subtitle: 'VirtuCam Hook Module',
+      icon: 'extension-puzzle',
+      iconLib: 'ionicons',
+      description:
+        'The VirtuCam Xposed module must be enabled in your framework manager. Enable it for all target applications in the module scope.',
+      actionLabel: 'Check Module Status',
+      tipTitle: 'Activation Steps',
+      tipBody:
+        'Open LSPosed Manager → Modules → Enable VirtuCam → Select target apps in module scope → Force stop target apps to activate hooks.',
+    },
+    {
+      key: 'permissions',
+      title: 'System Permissions',
+      subtitle: `Adaptive for Android ${androidInfo.versionName}`,
+      icon: 'key',
+      iconLib: 'ionicons',
+      description: getPermissionDescription(androidInfo),
+      actionLabel: 'Grant All Permissions',
+      tipTitle: `Android ${androidInfo.versionName} Notes`,
+      tipBody: getPermissionTip(androidInfo),
+    },
+  ];
+
+  // Add battery optimization step for Android 6+
+  if (androidInfo.sdkVersion >= 23) {
+    const batteryInfo = getBatteryOptimizationSteps(androidInfo.sdkVersion);
+    steps.push({
+      key: 'battery',
+      title: 'Battery Optimization',
+      subtitle: batteryInfo.title,
+      icon: 'battery-charging',
+      iconLib: 'material',
+      description:
+        'VirtuCam needs to run in the background without being killed by the OS. Whitelist the app from battery optimization for uninterrupted injection.',
+      actionLabel: 'Open Battery Settings',
+      tipTitle: 'Critical for Stability',
+      tipBody: batteryInfo.warning,
+      minSdkVersion: 23,
+    });
+  }
+
+  // Add compatibility check step
+  steps.push({
+    key: 'compatibility',
+    title: 'Camera Compatibility',
+    subtitle: `${androidInfo.supportsCamera2 ? 'Camera2 API (Modern)' : 'Camera1 (Legacy)'}`,
+    icon: 'videocam',
     iconLib: 'ionicons',
-    description:
-      'VirtuCam requires root access to intercept camera frames at the system level. Grant Superuser (SU) permissions to proceed.',
-    actionLabel: 'Verify Root Access',
-    tipTitle: 'Need Root?',
-    tipBody:
-      'Use Magisk or KernelSU to root your device. VirtuCam works best with Magisk v26+ or KernelSU on Android 10-16.',
-  },
-  {
-    key: 'xposed',
-    title: 'Xposed Framework',
-    subtitle: 'Hook Engine Detection',
-    icon: 'code-slash',
-    iconLib: 'ionicons',
-    description:
-      'An Xposed-compatible framework (LSPosed recommended) is required to hook into camera APIs. The framework enables VirtuCam to intercept Camera2 API calls.',
-    actionLabel: 'Detect Framework',
-    tipTitle: 'Recommended Setup',
-    tipBody:
-      'Install LSPosed via Magisk Module → Reboot → Open LSPosed Manager to verify activation. Zygisk mode is preferred for stability.',
-  },
-  {
-    key: 'module',
-    title: 'Module Activation',
-    subtitle: 'VirtuCam Hook Module',
-    icon: 'extension-puzzle',
-    iconLib: 'ionicons',
-    description:
-      'The VirtuCam Xposed module must be enabled in your framework manager. Enable it for all target applications in the module scope.',
-    actionLabel: 'Check Module Status',
-    tipTitle: 'Activation Steps',
-    tipBody:
-      'Open LSPosed Manager → Modules → Enable VirtuCam → Select target apps in module scope → Force stop target apps to activate hooks.',
-  },
-  {
-    key: 'permissions',
-    title: 'System Permissions',
-    subtitle: 'Required Access Rights',
-    icon: 'key',
-    iconLib: 'ionicons',
-    description:
-      'Grant camera, storage, file access, and overlay permissions. These are essential for media injection and live status overlays.',
-    actionLabel: 'Grant All Permissions',
-    tipTitle: 'Permission Details',
-    tipBody:
-      'Camera: For camera feed interception. All Files: For reading media at system level. Overlay: For showing injection status in target apps.',
-  },
-];
+    description: getCompatibilityDescription(androidInfo),
+    actionLabel: 'Verify Camera API',
+    tipTitle: 'Camera Engine',
+    tipBody: determineOptimalCameraAPI(androidInfo.sdkVersion).reason,
+  });
+
+  return steps;
+}
+
+function getPermissionDescription(info: AndroidVersionInfo): string {
+  const parts = ['Camera and storage permissions are required for media injection and live status overlays.'];
+
+  if (info.requiresScopedStorage) {
+    parts.push('Android 11+ requires "All Files Access" for system-level media reading.');
+  }
+  if (info.requiresPostNotificationPermission) {
+    parts.push('Android 13+ requires explicit notification permission for the persistent service notification.');
+  }
+  if (info.requiresMediaProjectionForeground) {
+    parts.push('Android 14+ requires foreground service type declaration for media projection.');
+  }
+
+  return parts.join(' ');
+}
+
+function getPermissionTip(info: AndroidVersionInfo): string {
+  if (info.sdkVersion >= 34) {
+    return 'Android 14+ has strict foreground service types. VirtuCam uses mediaProjection type. You may need to approve a screen capture dialog when launching injection.';
+  }
+  if (info.sdkVersion >= 33) {
+    return 'Android 13 introduced granular media permissions (Images/Videos separate). Also grant POST_NOTIFICATIONS for the persistent status notification.';
+  }
+  if (info.sdkVersion >= 30) {
+    return 'Android 11+ uses Scoped Storage. Go to Settings → Apps → VirtuCam → Permissions → Files → "Allow management of all files" for full access.';
+  }
+  return 'Camera: For camera feed interception. Storage: For reading media at system level. Overlay: For showing injection status in target apps.';
+}
+
+function getCompatibilityDescription(info: AndroidVersionInfo): string {
+  if (info.supportsCamera2) {
+    return `Your device (Android ${info.versionName}) fully supports the modern Camera2 API. This is the recommended injection method with the best quality and broadest app support. Legacy Camera1 is available as a fallback.`;
+  }
+  return `Your device uses the Legacy Camera1 API. VirtuCam will automatically use compatibility mode for broader support.`;
+}
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const { heavyImpact, success, warning, mediumImpact, lightImpact } = useHaptics();
 
+  const [androidInfo] = useState<AndroidVersionInfo>(() => getAndroidVersionInfo());
+  const steps = useMemo(() => buildSteps(androidInfo), [androidInfo]);
+
   const [currentStep, setCurrentStep] = useState(0);
   const [, setSystemState] = useState<SystemVerificationState>(INITIAL_SYSTEM_STATE);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [stepStatuses, setStepStatuses] = useState<Record<StepKey, SystemCheckStatus>>({
-    root: 'checking',
-    xposed: 'checking',
-    module: 'checking',
-    permissions: 'checking',
+  const [stepStatuses, setStepStatuses] = useState<Record<string, SystemCheckStatus>>(() => {
+    const initial: Record<string, SystemCheckStatus> = {};
+    steps.forEach(s => { initial[s.key] = 'checking'; });
+    return initial;
   });
+  const [showComplete, setShowComplete] = useState(false);
 
   const progressWidth = useSharedValue(0);
   const cardScale = useSharedValue(1);
 
   useEffect(() => {
-    progressWidth.value = withTiming(((currentStep + 1) / STEPS.length) * 100, {
+    progressWidth.value = withTiming(((currentStep + 1) / steps.length) * 100, {
       duration: 500,
       easing: Easing.bezier(0.4, 0, 0.2, 1),
     });
-  }, [currentStep, progressWidth]);
+  }, [currentStep, progressWidth, steps.length]);
 
   const progressStyle = useAnimatedStyle(() => ({
     width: `${progressWidth.value}%`,
   }));
 
   const handleVerify = useCallback(async () => {
-    const step = STEPS[currentStep];
+    const step = steps[currentStep];
     setIsVerifying(true);
     mediumImpact();
 
     try {
+      if (step.key === 'battery') {
+        // Open battery optimization settings
+        if (Platform.OS === 'android') {
+          try {
+            const IntentLauncher = await import('expo-intent-launcher');
+            await IntentLauncher.startActivityAsync(
+              'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+              { data: `package:${Platform.select({ android: 'com.virtucam', default: '' })}` }
+            ).catch(() => {
+              // Fallback to battery saver settings
+              IntentLauncher.startActivityAsync(
+                'android.settings.BATTERY_SAVER_SETTINGS'
+              ).catch(() => {});
+            });
+          } catch {
+            // Handled
+          }
+        }
+        setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
+        success();
+        setIsVerifying(false);
+        return;
+      }
+
+      if (step.key === 'compatibility') {
+        // Auto-detect camera API support
+        const cameraInfo = determineOptimalCameraAPI(androidInfo.sdkVersion);
+        await AsyncStorage.setItem(STORAGE_KEYS.COMPATIBILITY_MODE, cameraInfo.recommended);
+
+        // Auto-set camera hooks based on recommendation
+        if (cameraInfo.recommended === 'camera2') {
+          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA2_HOOK, JSON.stringify(true));
+          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA1_HOOK, JSON.stringify(false));
+        } else {
+          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA2_HOOK, JSON.stringify(false));
+          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA1_HOOK, JSON.stringify(true));
+        }
+
+        setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
+        success();
+        setIsVerifying(false);
+        return;
+      }
+
       const result = await runFullSystemCheck();
       setSystemState(result);
 
@@ -161,16 +285,18 @@ export default function OnboardingScreen() {
           status = result.moduleActive.status;
           break;
         case 'permissions':
-          // Request permissions during this step
           await requestCameraPermission();
           await requestMediaLibraryPermission();
+          if (androidInfo.requiresScopedStorage) {
+            await requestAllFilesAccess().catch(() => {});
+          }
           status = result.storagePermission.status;
           break;
         default:
           status = 'warning';
       }
 
-      setStepStatuses((prev) => ({ ...prev, [step.key]: status }));
+      setStepStatuses(prev => ({ ...prev, [step.key]: status }));
 
       if (status === 'passed') {
         success();
@@ -178,15 +304,15 @@ export default function OnboardingScreen() {
         warning();
       }
     } catch {
-      setStepStatuses((prev) => ({ ...prev, [step.key]: 'warning' }));
+      setStepStatuses(prev => ({ ...prev, [step.key]: 'warning' }));
       warning();
     } finally {
       setIsVerifying(false);
     }
-  }, [currentStep, mediumImpact, success, warning]);
+  }, [currentStep, steps, mediumImpact, success, warning, androidInfo]);
 
   const handleAdvancedAction = useCallback(async () => {
-    const step = STEPS[currentStep];
+    const step = steps[currentStep];
     lightImpact();
 
     if (step.key === 'permissions') {
@@ -203,32 +329,40 @@ export default function OnboardingScreen() {
         }
       }
     }
-  }, [currentStep, lightImpact]);
+  }, [currentStep, steps, lightImpact]);
 
   const handleNext = useCallback(async () => {
     heavyImpact();
-    if (currentStep < STEPS.length - 1) {
+    if (currentStep < steps.length - 1) {
       cardScale.value = withSequence(
         withTiming(0.95, { duration: 100 }),
         withSpring(1, { damping: 15 })
       );
-      setCurrentStep((prev) => prev + 1);
+      setCurrentStep(prev => prev + 1);
     } else {
+      // Final step - show completion animation
+      setShowComplete(true);
+      success();
+
       try {
         await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
+        await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_V2_COMPLETE, 'true');
+        await AsyncStorage.setItem(STORAGE_KEYS.ANDROID_VERSION_DETECTED, JSON.stringify(androidInfo));
         await syncAllSettings();
-        success();
-        router.replace('/(tabs)');
       } catch {
-        router.replace('/(tabs)');
+        // Continue anyway
       }
+
+      setTimeout(() => {
+        router.replace('/(tabs)');
+      }, 1500);
     }
-  }, [currentStep, cardScale, heavyImpact, success]);
+  }, [currentStep, steps.length, cardScale, heavyImpact, success, androidInfo]);
 
   const handleBack = useCallback(() => {
     lightImpact();
     if (currentStep > 0) {
-      setCurrentStep((prev) => prev - 1);
+      setCurrentStep(prev => prev - 1);
     }
   }, [currentStep, lightImpact]);
 
@@ -236,6 +370,7 @@ export default function OnboardingScreen() {
     warning();
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
+      await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_V2_COMPLETE, 'true');
       await syncAllSettings();
       router.replace('/(tabs)');
     } catch {
@@ -243,12 +378,34 @@ export default function OnboardingScreen() {
     }
   }, [warning]);
 
-  const step = STEPS[currentStep];
-  const stepStatus = stepStatuses[step.key];
+  const step = steps[currentStep];
+  const stepStatus = stepStatuses[step.key] || 'checking';
 
   const cardAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: cardScale.value }],
   }));
+
+  if (showComplete) {
+    return (
+      <View style={[styles.container, styles.completionContainer, { paddingTop: insets.top }]}>
+        <SuccessAnimation
+          visible
+          size={100}
+          color={Colors.verifiedGreen}
+          glowColor={Colors.verifiedGreenGlow}
+        />
+        <Animated.View entering={FadeIn.delay(400).duration(500)}>
+          <Text style={styles.completionTitle}>Setup Complete</Text>
+          <Text style={styles.completionSubtitle}>
+            Android {androidInfo.versionName} • {androidInfo.supportsCamera2 ? 'Camera2 API' : 'Camera1 Legacy'}
+          </Text>
+          <Text style={styles.completionDesc}>
+            All systems configured for your device. Launching VirtuCam...
+          </Text>
+        </Animated.View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + Spacing.lg }]}>
@@ -257,12 +414,20 @@ export default function OnboardingScreen() {
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.logoText}>VIRTUCAM</Text>
-            <Text style={styles.logoSubtext}>System Setup Wizard</Text>
+            <Text style={styles.logoSubtext}>
+              Adaptive Setup Wizard v2
+            </Text>
           </View>
-          <Pressable onPress={handleSkip} style={styles.skipButton}>
-            <Text style={styles.skipText}>Skip</Text>
-            <Ionicons name="arrow-forward" size={14} color={Colors.textTertiary} />
-          </Pressable>
+          <View style={styles.headerBadges}>
+            <View style={styles.androidChip}>
+              <MaterialCommunityIcons name="android" size={12} color={Colors.verifiedGreen} />
+              <Text style={styles.androidChipText}>{androidInfo.versionName}</Text>
+            </View>
+            <Pressable onPress={handleSkip} style={styles.skipButton}>
+              <Text style={styles.skipText}>Skip</Text>
+              <Ionicons name="arrow-forward" size={14} color={Colors.textTertiary} />
+            </Pressable>
+          </View>
         </View>
 
         {/* Progress Bar */}
@@ -271,14 +436,14 @@ export default function OnboardingScreen() {
             <Animated.View style={[styles.progressFill, progressStyle]} />
           </View>
           <Text style={styles.progressText}>
-            Step {currentStep + 1} of {STEPS.length}
+            Step {currentStep + 1} of {steps.length}
           </Text>
         </View>
 
         {/* Step Indicators */}
         <View style={styles.stepIndicators}>
-          {STEPS.map((s, index) => {
-            const sStatus = stepStatuses[s.key];
+          {steps.map((s, index) => {
+            const sStatus = stepStatuses[s.key] || 'checking';
             const isActive = index === currentStep;
             const isComplete = sStatus === 'passed';
             const isPast = index < currentStep;
@@ -394,7 +559,7 @@ export default function OnboardingScreen() {
             ) : stepStatus === 'passed' ? (
               <>
                 <Ionicons name="checkmark-circle" size={20} color={Colors.textPrimary} />
-                <Text style={styles.actionButtonText}>Verified ✓</Text>
+                <Text style={styles.actionButtonText}>Verified</Text>
               </>
             ) : (
               <>
@@ -454,7 +619,7 @@ export default function OnboardingScreen() {
 
         <Pressable onPress={handleNext} style={styles.navButtonPrimary}>
           <Text style={styles.navButtonPrimaryText}>
-            {currentStep === STEPS.length - 1 ? 'Finish' : 'Next'}
+            {currentStep === steps.length - 1 ? 'Finish' : 'Next'}
           </Text>
           <Ionicons name="chevron-forward" size={20} color={Colors.textPrimary} />
         </Pressable>
@@ -489,6 +654,27 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     letterSpacing: 1,
     marginTop: 2,
+  },
+  headerBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  androidChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.verifiedGreen + '15',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: Colors.verifiedGreen + '30',
+  },
+  androidChipText: {
+    color: Colors.verifiedGreen,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
   },
   skipButton: {
     flexDirection: 'row',
@@ -527,12 +713,12 @@ const styles = StyleSheet.create({
   },
   stepIndicators: {
     flexDirection: 'row',
-    gap: Spacing.md,
+    gap: Spacing.sm,
   },
   stepDot: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: Colors.surfaceLight,
     alignItems: 'center',
     justifyContent: 'center',
@@ -552,7 +738,7 @@ const styles = StyleSheet.create({
   },
   stepDotText: {
     color: Colors.textTertiary,
-    fontSize: FontSize.xs,
+    fontSize: 9,
     fontWeight: '700',
   },
   stepDotTextActive: {
@@ -641,8 +827,8 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   actionButtonSuccess: {
-    backgroundColor: Colors.electricBlue,
-    shadowColor: Colors.electricBlue,
+    backgroundColor: Colors.verifiedGreen,
+    shadowColor: Colors.verifiedGreen,
   },
   actionButtonLoading: {
     opacity: 0.8,
@@ -749,5 +935,32 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '700',
+  },
+
+  // Completion screen
+  completionContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xxl,
+  },
+  completionTitle: {
+    color: Colors.verifiedGreen,
+    fontSize: FontSize.xxxl,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: 1,
+  },
+  completionSubtitle: {
+    color: Colors.gold,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: Spacing.sm,
+  },
+  completionDesc: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.md,
+    textAlign: 'center',
+    marginTop: Spacing.sm,
   },
 });

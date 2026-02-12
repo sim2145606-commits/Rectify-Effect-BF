@@ -41,6 +41,14 @@ export default function RootLayout() {
             presentation: 'card',
           }}
         />
+        <Stack.Screen
+          name="integrity"
+          options={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            presentation: 'card',
+          }}
+        />
       </Stack>
     </AuthProvider>
   );

@@ -378,6 +378,32 @@ export default function Dashboard() {
         </Card>
       </Animated.View>
 
+      {/* System Integrity Access */}
+      <Animated.View entering={FadeInDown.delay(520).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="shield-checkmark" size={18} color={Colors.success} />
+          <Text style={styles.sectionTitle}>System Integrity</Text>
+        </View>
+        <Pressable
+          onPress={() => {
+            mediumImpact();
+            router.push('/integrity');
+          }}
+          style={styles.integrityCard}
+        >
+          <View style={styles.integrityIconCircle}>
+            <Ionicons name="scan" size={28} color={Colors.success} />
+          </View>
+          <View style={styles.integrityText}>
+            <Text style={styles.integrityTitle}>Pre-Flight Diagnostic</Text>
+            <Text style={styles.integrityDesc}>
+              One-tap integrity scan, log exporter & connectivity heartbeat
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.success} />
+        </Pressable>
+      </Animated.View>
+
       {/* System Engine Access */}
       <Animated.View entering={FadeInDown.delay(550).duration(500)}>
         <View style={styles.sectionHeader}>
@@ -443,15 +469,15 @@ export default function Dashboard() {
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Hook Method</Text>
-            <Text style={styles.infoValue}>Camera2 API Intercept</Text>
+            <Text style={styles.infoValue}>Camera2 + Camera1 Adaptive</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Compatibility</Text>
-            <Text style={styles.infoValue}>Android 10 – 16</Text>
+            <Text style={styles.infoValue}>Android 9 – 16</Text>
           </View>
           <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
             <Text style={styles.infoLabel}>Engine</Text>
-            <Text style={styles.infoValue}>VirtuCam Core v1.0</Text>
+            <Text style={styles.infoValue}>VirtuCam Core v2.0</Text>
           </View>
         </Card>
       </Animated.View>
@@ -860,6 +886,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   engineAccessDesc: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  integrityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.success + '30',
+    marginBottom: Spacing.lg,
+    shadowColor: Colors.success,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  integrityIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.success + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.success + '30',
+  },
+  integrityText: {
+    flex: 1,
+  },
+  integrityTitle: {
+    color: Colors.success,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  integrityDesc: {
     color: Colors.textTertiary,
     fontSize: FontSize.xs,
     marginTop: 2,

@@ -40,6 +40,12 @@ import { syncAllSettings, writeBridgeConfig } from '@/services/ConfigBridge';
 import StatusRing from '@/components/StatusRing';
 import ReadinessGauge from '@/components/ReadinessGauge';
 import PulseIndicator from '@/components/PulseIndicator';
+import {
+  getAndroidVersionInfo,
+  determineOptimalCameraAPI,
+  getBatteryOptimizationSteps,
+  type AndroidVersionInfo,
+} from '@/services/CompatibilityEngine';
 
 // ─── Types ──────────────────────────────────────────
 
@@ -111,6 +117,8 @@ export default function SystemEngine() {
   const [wizardComplete, setWizardComplete] = useStorage(STORAGE_KEYS.SETUP_WIZARD_COMPLETE, false);
 
   const [isInitializing, setIsInitializing] = useState(false);
+  const [androidInfo] = useState<AndroidVersionInfo>(() => getAndroidVersionInfo());
+  const [showBatteryGuide, setShowBatteryGuide] = useState(false);
 
   // ─── Animations ─────────────────────────────
 
@@ -746,6 +754,116 @@ export default function SystemEngine() {
         </Animated.View>
       </Animated.View>
 
+      {/* ─── Compatibility Engine ────────────── */}
+      <Animated.View entering={FadeInDown.delay(750).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="auto-fix" size={16} color={Colors.success} />
+          <Text style={styles.sectionTitle}>Compatibility Engine</Text>
+          <View style={[styles.liveBadge, { backgroundColor: Colors.success + '10', borderColor: Colors.success + '30' }]}>
+            <View style={[styles.liveDot, { backgroundColor: Colors.success }]} />
+            <Text style={[styles.liveText, { color: Colors.success }]}>AUTO</Text>
+          </View>
+        </View>
+
+        <View style={styles.compatCard}>
+          <View style={styles.compatHeader}>
+            <View style={styles.compatIconCircle}>
+              <MaterialCommunityIcons name="android" size={22} color={Colors.success} />
+            </View>
+            <View style={styles.compatInfo}>
+              <Text style={styles.compatTitle}>
+                Android {androidInfo.versionName} ({androidInfo.codename})
+              </Text>
+              <Text style={styles.compatSubtitle}>
+                SDK {androidInfo.sdkVersion} • {androidInfo.supportsCamera2 ? 'Camera2 Compatible' : 'Camera1 Mode'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.compatDivider} />
+
+          <View style={styles.compatFeaturesGrid}>
+            <CompatFeatureRow
+              label="Camera API"
+              value={determineOptimalCameraAPI(androidInfo.sdkVersion).recommended === 'camera2' ? 'Camera2 (Modern)' : 'Camera1 (Legacy)'}
+              status={androidInfo.supportsCamera2 ? 'good' : 'legacy'}
+            />
+            <CompatFeatureRow
+              label="Scoped Storage"
+              value={androidInfo.requiresScopedStorage ? 'Required' : 'Not Required'}
+              status={androidInfo.requiresScopedStorage ? 'info' : 'good'}
+            />
+            <CompatFeatureRow
+              label="Post Notifications"
+              value={androidInfo.requiresPostNotificationPermission ? 'Required (13+)' : 'Not Required'}
+              status={androidInfo.requiresPostNotificationPermission ? 'info' : 'good'}
+            />
+            <CompatFeatureRow
+              label="Media Projection FG"
+              value={androidInfo.requiresMediaProjectionForeground ? 'Required (14+)' : 'Not Required'}
+              status={androidInfo.requiresMediaProjectionForeground ? 'info' : 'good'}
+            />
+          </View>
+
+          <Text style={styles.compatNote}>
+            Camera API mode is auto-selected based on device capabilities. Toggle manually above if needed.
+          </Text>
+        </View>
+      </Animated.View>
+
+      {/* ─── Battery Optimization Guide ─────── */}
+      <Animated.View entering={FadeInDown.delay(800).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="battery-heart" size={16} color={Colors.warningAmber} />
+          <Text style={styles.sectionTitle}>Battery Optimization</Text>
+        </View>
+
+        <Pressable
+          onPress={() => {
+            lightImpact();
+            setShowBatteryGuide(!showBatteryGuide);
+          }}
+          style={[styles.batteryCard, showBatteryGuide && styles.batteryCardExpanded]}
+        >
+          <View style={styles.batteryHeader}>
+            <View style={styles.batteryIconCircle}>
+              <MaterialCommunityIcons name="battery-alert" size={20} color={Colors.warningAmber} />
+            </View>
+            <View style={styles.batteryHeaderText}>
+              <Text style={styles.batteryTitle}>Whitelist VirtuCam</Text>
+              <Text style={styles.batterySubtitle}>
+                Prevent OS from killing background injection
+              </Text>
+            </View>
+            <Ionicons
+              name={showBatteryGuide ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={Colors.textTertiary}
+            />
+          </View>
+
+          {showBatteryGuide && (
+            <Animated.View entering={FadeIn.duration(300)}>
+              <View style={styles.batteryDivider} />
+              {getBatteryOptimizationSteps(androidInfo.sdkVersion).steps.map((stepText, idx) => (
+                <View key={idx} style={styles.batteryStep}>
+                  <View style={styles.batteryStepNumber}>
+                    <Text style={styles.batteryStepNumberText}>{idx + 1}</Text>
+                  </View>
+                  <Text style={styles.batteryStepText}>{stepText}</Text>
+                </View>
+              ))}
+              <View style={styles.batteryWarning}>
+                <Ionicons name="warning" size={14} color={Colors.warningAmber} />
+                <Text style={styles.batteryWarningText}>
+                  {getBatteryOptimizationSteps(androidInfo.sdkVersion).warning}
+                </Text>
+              </View>
+            </Animated.View>
+          )}
+        </Pressable>
+      </Animated.View>
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -944,6 +1062,27 @@ function HookMethodCard({
         </View>
       </View>
     </Pressable>
+  );
+}
+
+function CompatFeatureRow({
+  label,
+  value,
+  status,
+}: {
+  label: string;
+  value: string;
+  status: 'good' | 'legacy' | 'info';
+}) {
+  const color = status === 'good' ? Colors.success : status === 'legacy' ? Colors.warningAmber : Colors.electricBlue;
+  return (
+    <View style={styles.compatFeatureRow}>
+      <Text style={styles.compatFeatureLabel}>{label}</Text>
+      <View style={[styles.compatFeatureBadge, { backgroundColor: color + '15', borderColor: color + '30' }]}>
+        <View style={[styles.compatFeatureDot, { backgroundColor: color }]} />
+        <Text style={[styles.compatFeatureValue, { color }]}>{value}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -1557,5 +1696,169 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary,
     fontSize: FontSize.xs,
     fontWeight: '600',
+  },
+
+  // Compatibility Engine
+  compatCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.success + '25',
+    marginBottom: Spacing.sm,
+  },
+  compatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  compatIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.success + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.success + '30',
+  },
+  compatInfo: { flex: 1 },
+  compatTitle: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  compatSubtitle: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  compatDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: Spacing.md,
+  },
+  compatFeaturesGrid: {
+    gap: Spacing.sm,
+  },
+  compatFeatureRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  compatFeatureLabel: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+  },
+  compatFeatureBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  compatFeatureDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  compatFeatureValue: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+  },
+  compatNote: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+    marginTop: Spacing.md,
+    fontStyle: 'italic',
+  },
+
+  // Battery Guide
+  batteryCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.warningAmber + '25',
+    marginBottom: Spacing.sm,
+  },
+  batteryCardExpanded: {
+    borderColor: Colors.warningAmber + '40',
+  },
+  batteryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  batteryIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.warningAmber + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  batteryHeaderText: { flex: 1 },
+  batteryTitle: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  batterySubtitle: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  batteryDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: Spacing.md,
+  },
+  batteryStep: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  batteryStepNumber: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.warningAmber + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.warningAmber + '30',
+  },
+  batteryStepNumberText: {
+    color: Colors.warningAmber,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  batteryStepText: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    flex: 1,
+    lineHeight: 20,
+  },
+  batteryWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    backgroundColor: Colors.warningAmber + '08',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.warningAmber + '20',
+    marginTop: Spacing.sm,
+  },
+  batteryWarningText: {
+    color: Colors.warningAmber,
+    fontSize: FontSize.xs,
+    flex: 1,
+    lineHeight: 18,
   },
 });

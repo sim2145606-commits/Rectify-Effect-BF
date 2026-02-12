@@ -30,6 +30,14 @@ export const Colors = {
   overlay: 'rgba(0, 0, 0, 0.7)',
   cardShadow: 'rgba(0, 0, 0, 0.5)',
   inactive: '#3A3A48',
+  // Release Optimization colors
+  gold: '#FFD700',
+  goldGlow: 'rgba(255, 215, 0, 0.3)',
+  goldDark: '#B8860B',
+  verifiedGreen: '#00E676',
+  verifiedGreenGlow: 'rgba(0, 230, 118, 0.3)',
+  emerald: '#50C878',
+  emeraldGlow: 'rgba(80, 200, 120, 0.3)',
 };
 
 export const Spacing = {
@@ -95,4 +103,15 @@ export const STORAGE_KEYS = {
   CAMERA1_HOOK: 'virtucam_camera1_hook',
   VIRTUAL_LOOPBACK: 'virtucam_virtual_loopback',
   SETUP_WIZARD_COMPLETE: 'virtucam_setup_wizard_complete',
+  // Release Optimization keys
+  INTEGRITY_SCAN_RESULT: 'virtucam_integrity_scan_result',
+  INTEGRITY_LAST_SCAN: 'virtucam_integrity_last_scan',
+  SYSTEM_REPORT_LOG: 'virtucam_system_report_log',
+  ANDROID_VERSION_DETECTED: 'virtucam_android_version_detected',
+  COMPATIBILITY_MODE: 'virtucam_compatibility_mode',
+  BATTERY_OPTIMIZED: 'virtucam_battery_optimized',
+  AI_CACHE_DATA: 'virtucam_ai_cache_data',
+  AI_CACHE_TIMESTAMP: 'virtucam_ai_cache_timestamp',
+  ADAPTIVE_LAYOUT_RATIO: 'virtucam_adaptive_layout_ratio',
+  ONBOARDING_V2_COMPLETE: 'virtucam_onboarding_v2_complete',
 };
