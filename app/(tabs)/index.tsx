@@ -8,6 +8,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -35,6 +36,7 @@ import SystemToggle from '@/components/SystemToggle';
 
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { heavyImpact, success, warning, mediumImpact } = useHaptics();
 
   const [hookEnabled, setHookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
@@ -376,8 +378,34 @@ export default function Dashboard() {
         </Card>
       </Animated.View>
 
-      {/* System Information */}
+      {/* Cloud Command Access */}
       <Animated.View entering={FadeInDown.delay(600).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="cloud-sync" size={18} color={Colors.electricBlue} />
+          <Text style={styles.sectionTitle}>Cloud Command</Text>
+        </View>
+        <Pressable
+          onPress={() => {
+            mediumImpact();
+            router.push('/cloud');
+          }}
+          style={styles.cloudCommandCard}
+        >
+          <View style={styles.cloudCommandIconCircle}>
+            <MaterialCommunityIcons name="cloud-sync" size={28} color={Colors.electricBlue} />
+          </View>
+          <View style={styles.cloudCommandText}>
+            <Text style={styles.cloudCommandTitle}>Cloud Command Dashboard</Text>
+            <Text style={styles.cloudCommandDesc}>
+              View sync status, cloud presets & verified configurations
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.electricBlue} />
+        </Pressable>
+      </Animated.View>
+
+      {/* System Information */}
+      <Animated.View entering={FadeInDown.delay(700).duration(500)}>
         <View style={styles.sectionHeader}>
           <Ionicons name="information-circle-outline" size={18} color={Colors.accent} />
           <Text style={styles.sectionTitle}>System Information</Text>
@@ -770,5 +798,44 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
+  },
+  cloudCommandCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.electricBlue + '30',
+    marginBottom: Spacing.lg,
+    shadowColor: Colors.electricBlue,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  cloudCommandIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.electricBlue + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.electricBlue + '30',
+  },
+  cloudCommandText: {
+    flex: 1,
+  },
+  cloudCommandTitle: {
+    color: Colors.electricBlue,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  cloudCommandDesc: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+    marginTop: 2,
   },
 });

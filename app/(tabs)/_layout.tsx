@@ -24,11 +24,11 @@ function TabIcon({
       ]}
     >
       {library === 'ionicons' ? (
-        <Ionicons name={name as keyof typeof Ionicons.glyphMap} size={22} color={color} />
+        <Ionicons name={name as keyof typeof Ionicons.glyphMap} size={20} color={color} />
       ) : (
         <MaterialCommunityIcons
           name={name as keyof typeof MaterialCommunityIcons.glyphMap}
-          size={22}
+          size={20}
           color={color}
         />
       )}
@@ -49,20 +49,20 @@ export default function TabLayout() {
           backgroundColor: Colors.surface,
           borderTopColor: Colors.border,
           borderTopWidth: 1,
-          paddingBottom: Platform.OS === 'web' ? 8 : insets.bottom,
-          paddingTop: 8,
-          height: Platform.OS === 'web' ? 64 : 60 + insets.bottom,
+          paddingBottom: Platform.OS === 'web' ? 6 : insets.bottom,
+          paddingTop: 6,
+          height: Platform.OS === 'web' ? 62 : 56 + insets.bottom,
           elevation: 0,
           shadowOpacity: 0,
         },
         tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '600',
-          letterSpacing: 0.5,
-          marginTop: 2,
+          fontSize: 9,
+          fontWeight: '700',
+          letterSpacing: 0.3,
+          marginTop: 1,
         },
         tabBarItemStyle: {
-          paddingVertical: 2,
+          paddingVertical: 1,
         },
       }}
     >
@@ -109,6 +109,20 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="presets"
+        options={{
+          title: 'Presets',
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name="layers"
+              library="ionicons"
+              color={color}
+              focused={focused}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Targets',
@@ -128,8 +142,8 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   iconWrapper: {
-    width: 36,
-    height: 28,
+    width: 32,
+    height: 26,
     borderRadius: BorderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
