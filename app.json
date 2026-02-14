@@ -16,7 +16,8 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.briefplantrain.virtucam"
     },
     "web": {
       "bundler": "metro",
@@ -38,6 +39,13 @@
     "experiments": {
       "typedRoutes": true,
       "baseUrl": ""
+    },
+    "owner": "briefplantrain",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e6ca5e6e-504c-4b64-9c1d-36eed2ff423b"
+      }
     }
   }
 }
