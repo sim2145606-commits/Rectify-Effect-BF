@@ -50,22 +50,10 @@ async function checkMediaLibraryPermission(): Promise<PermissionStatus> {
 async function checkAllFilesAccess(): Promise<PermissionStatus> {
   // MANAGE_EXTERNAL_STORAGE can't be directly checked in Expo
   // We track it via our state
-  try {
-    const stored = await AsyncStorage.getItem('virtucam_all_files_access');
-    if (stored === 'true') return 'granted';
-  } catch {
-    // Fallback
-  }
   return 'undetermined';
 }
 
 async function checkOverlayPermission(): Promise<PermissionStatus> {
-  try {
-    const stored = await AsyncStorage.getItem('virtucam_overlay_granted');
-    if (stored === 'true') return 'granted';
-  } catch {
-    // Fallback
-  }
   return 'undetermined';
 }
 
@@ -107,8 +95,6 @@ export async function requestAllFilesAccess(): Promise<void> {
       await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION
       );
-      // Mark as potentially granted (user needs to confirm)
-      await AsyncStorage.setItem('virtucam_all_files_access', 'true');
     } catch {
       // Fallback: open general app settings
       try {
@@ -130,7 +116,6 @@ export async function requestOverlayPermission(): Promise<void> {
       await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION
       );
-      await AsyncStorage.setItem('virtucam_overlay_granted', 'true');
     } catch {
       try {
         await Linking.openSettings();

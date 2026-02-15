@@ -205,9 +205,14 @@ export default function OnboardingScreen() {
     return initial;
   });
   const [showComplete, setShowComplete] = useState(false);
+  const [batterySettingsOpened, setBatterySettingsOpened] = useState(false);
 
   const progressWidth = useSharedValue(0);
   const cardScale = useSharedValue(1);
+
+  useEffect(() => {
+    setBatterySettingsOpened(false);
+  }, [currentStep]);
 
   useEffect(() => {
     progressWidth.value = withTiming(((currentStep + 1) / steps.length) * 100, {
@@ -227,26 +232,31 @@ export default function OnboardingScreen() {
 
     try {
       if (step.key === 'battery') {
-        // Open battery optimization settings
-        if (Platform.OS === 'android') {
-          try {
-            const IntentLauncher = await import('expo-intent-launcher');
-            await IntentLauncher.startActivityAsync(
-              'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
-              { data: `package:${Platform.select({ android: 'com.virtucam', default: '' })}` }
-            ).catch(() => {
-              // Fallback to battery saver settings
-              IntentLauncher.startActivityAsync(
-                'android.settings.BATTERY_SAVER_SETTINGS'
-              ).catch(() => {});
-            });
-          } catch {
-            // Handled
+        if (!batterySettingsOpened) {
+          // Open battery optimization settings
+          if (Platform.OS === 'android') {
+            try {
+              const IntentLauncher = await import('expo-intent-launcher');
+              await IntentLauncher.startActivityAsync(
+                'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+                { data: `package:${Platform.select({ android: 'com.virtucam', default: '' })}` }
+              ).catch(() => {
+                // Fallback to battery saver settings
+                IntentLauncher.startActivityAsync(
+                  'android.settings.BATTERY_SAVER_SETTINGS'
+                ).catch(() => {});
+              });
+            } catch {
+              // Handled
+            }
           }
+          setBatterySettingsOpened(true);
+          setIsVerifying(false);
+        } else {
+          setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
+          success();
+          setIsVerifying(false);
         }
-        setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
-        success();
-        setIsVerifying(false);
         return;
       }
 
@@ -309,7 +319,7 @@ export default function OnboardingScreen() {
     } finally {
       setIsVerifying(false);
     }
-  }, [currentStep, steps, mediumImpact, success, warning, androidInfo]);
+  }, [currentStep, steps, mediumImpact, success, warning, androidInfo, batterySettingsOpened]);
 
   const handleAdvancedAction = useCallback(async () => {
     const step = steps[currentStep];
@@ -560,6 +570,11 @@ export default function OnboardingScreen() {
               <>
                 <Ionicons name="checkmark-circle" size={20} color={Colors.textPrimary} />
                 <Text style={styles.actionButtonText}>Verified</Text>
+              </>
+            ) : step.key === 'battery' && batterySettingsOpened ? (
+              <>
+                <Ionicons name="checkmark-circle-outline" size={20} color={Colors.textPrimary} />
+                <Text style={styles.actionButtonText}>Confirm</Text>
               </>
             ) : (
               <>

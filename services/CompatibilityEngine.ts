@@ -1,6 +1,14 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
+import { Camera } from 'expo-camera';
+
+export type CameraHardwareInfo = {
+  hasPermission: boolean;
+  isAvailable: boolean;
+  cameraCount: number;
+  supportedTypes: Camera['props']['type'][];
+};
 
 export type CameraAPIMode = 'camera2' | 'camera1' | 'auto';
 
@@ -279,5 +287,41 @@ export function getBatteryOptimizationSteps(sdkVersion: number): {
       'For Huawei: Add to "Protected apps" list',
     ],
     warning: 'Disabling battery optimization ensures VirtuCam runs persistently in the background.',
+  };
+}
+
+export async function checkCameraHardware(): Promise<CameraHardwareInfo> {
+  const { status } = await Camera.getCameraPermissionsAsync();
+  const hasPermission = status === 'granted';
+
+  if (!hasPermission) {
+    return {
+      hasPermission: false,
+      isAvailable: false,
+      cameraCount: 0,
+      supportedTypes: [],
+    };
+  }
+
+  const isAvailable = await Camera.isAvailableAsync();
+  if (!isAvailable) {
+    return {
+      hasPermission: true,
+      isAvailable: false,
+      cameraCount: 0,
+      supportedTypes: [],
+    };
+  }
+
+  // NOTE: getAvailableCameraTypesAsync is not available in expo-camera,
+  // we will use a placeholder for now
+  const supportedTypes = [Camera.Constants.Type.back, Camera.Constants.Type.front];
+  const cameraCount = supportedTypes.length;
+
+  return {
+    hasPermission: true,
+    isAvailable: true,
+    cameraCount,
+    supportedTypes,
   };
 }

@@ -17,7 +17,12 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.briefplantrain.virtucam"
+      "package": "com.briefplantrain.virtucam",
+      "metaData": {
+        "xposedmodule": "true",
+        "xposeddescription": "VirtuCam - Virtual Camera Engine",
+        "xposedminversion": "82"
+      }
     },
     "web": {
       "bundler": "metro",

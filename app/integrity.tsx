@@ -473,6 +473,29 @@ export default function SystemIntegrity() {
     }
   }, [checks, allVerified, lightImpact]);
 
+  const handleManualVerification = (checkId: string) => {
+    const check = checks.find(c => c.id === checkId);
+    if (!check || check.status === 'passed') return;
+
+    Alert.alert(
+      `Confirm ${check.label}`,
+      `Have you manually granted the "${check.label}" permission in your device's settings?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: () => {
+            const newChecks = checks.map(c =>
+              c.id === checkId ? { ...c, status: 'passed' as SystemCheckStatus, detail: `${check.label} permission confirmed by user.` } : c
+            );
+            setChecks(newChecks);
+            success();
+          },
+        },
+      ]
+    );
+  };
+
   const passedCount = useMemo(() =>
     checks.filter(c => c.status === 'passed' || c.status === 'unavailable').length,
     [checks]
@@ -699,7 +722,12 @@ export default function SystemIntegrity() {
                   key={check.id}
                   entering={FadeInDown.delay(400 + index * 60).duration(300)}
                 >
-                  <IntegrityCheckCard check={check} allVerified={allVerified} />
+                  <IntegrityCheckCard
+                    check={check}
+                    allVerified={allVerified}
+                    pressable={check.id === 'overlay' || check.id === 'storage'}
+                    onPress={() => handleManualVerification(check.id)}
+                  />
                 </Animated.View>
               ))}
             </Animated.View>
@@ -717,7 +745,12 @@ export default function SystemIntegrity() {
                   key={check.id}
                   entering={FadeInDown.delay(550 + index * 60).duration(300)}
                 >
-                  <IntegrityCheckCard check={check} allVerified={allVerified} />
+                  <IntegrityCheckCard
+                    check={check}
+                    allVerified={allVerified}
+                    pressable={check.id === 'overlay' || check.id === 'storage'}
+                    onPress={() => handleManualVerification(check.id)}
+                  />
                 </Animated.View>
               ))}
             </Animated.View>
@@ -735,7 +768,12 @@ export default function SystemIntegrity() {
                   key={check.id}
                   entering={FadeInDown.delay(700 + index * 60).duration(300)}
                 >
-                  <IntegrityCheckCard check={check} allVerified={allVerified} />
+                  <IntegrityCheckCard
+                    check={check}
+                    allVerified={allVerified}
+                    pressable={check.id === 'overlay' || check.id === 'storage'}
+                    onPress={() => handleManualVerification(check.id)}
+                  />
                 </Animated.View>
               ))}
             </Animated.View>
@@ -824,9 +862,13 @@ function HeartbeatCard({
 function IntegrityCheckCard({
   check,
   allVerified,
+  pressable,
+  onPress,
 }: {
   check: IntegrityCheck;
   allVerified: boolean;
+  pressable: boolean;
+  onPress: () => void;
 }) {
   const isPassed = check.status === 'passed' || check.status === 'unavailable';
   const color = allVerified && isPassed
@@ -840,37 +882,39 @@ function IntegrityCheckCard({
     : Colors.textTertiary;
 
   return (
-    <View style={[styles.checkCard, { borderColor: color + '25' }]}>
-      <View style={styles.checkCardRow}>
-        <View style={[styles.checkIcon, { backgroundColor: color + '15' }]}>
-          <Ionicons
-            name={isPassed ? 'checkmark-circle' : check.status === 'warning' ? 'alert-circle' : 'close-circle'}
-            size={18}
-            color={color}
-          />
-        </View>
-        <View style={styles.checkCardText}>
-          <View style={styles.checkTitleRow}>
-            <Text style={[styles.checkLabel, { color: isPassed ? Colors.textPrimary : color }]}>
-              {check.label}
-            </Text>
-            <View style={[styles.severityBadge, { backgroundColor: severityColor + '15', borderColor: severityColor + '30' }]}>
-              <Text style={[styles.severityText, { color: severityColor }]}>
-                {check.severity.toUpperCase()}
+    <Pressable onPress={onPress} disabled={!pressable || isPassed}>
+      <View style={[styles.checkCard, { borderColor: color + '25' }]}>
+        <View style={styles.checkCardRow}>
+          <View style={[styles.checkIcon, { backgroundColor: color + '15' }]}>
+            <Ionicons
+              name={isPassed ? 'checkmark-circle' : check.status === 'warning' ? 'alert-circle' : 'close-circle'}
+              size={18}
+              color={color}
+            />
+          </View>
+          <View style={styles.checkCardText}>
+            <View style={styles.checkTitleRow}>
+              <Text style={[styles.checkLabel, { color: isPassed ? Colors.textPrimary : color }]}>
+                {check.label}
               </Text>
+              <View style={[styles.severityBadge, { backgroundColor: severityColor + '15', borderColor: severityColor + '30' }]}>
+                <Text style={[styles.severityText, { color: severityColor }]}>
+                  {check.severity.toUpperCase()}
+                </Text>
+              </View>
             </View>
+            <Text style={[styles.checkDetail, { color }]}>
+              {check.detail}
+            </Text>
           </View>
-          <Text style={[styles.checkDetail, { color }]}>
-            {check.detail}
-          </Text>
+          {allVerified && isPassed && (
+            <View style={styles.goldStarContainer}>
+              <Ionicons name="star" size={14} color={Colors.gold} />
+            </View>
+          )}
         </View>
-        {allVerified && isPassed && (
-          <View style={styles.goldStarContainer}>
-            <Ionicons name="star" size={14} color={Colors.gold} />
-          </View>
-        )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 

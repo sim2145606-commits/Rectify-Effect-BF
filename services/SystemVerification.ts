@@ -3,6 +3,7 @@ import * as Application from 'expo-application';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
+import { checkCameraHardware } from './CompatibilityEngine';
 
 export type SystemCheckStatus = 'checking' | 'passed' | 'failed' | 'warning' | 'unavailable';
 
@@ -214,15 +215,21 @@ async function checkModuleActive(): Promise<SystemCheckResult> {
 async function checkStoragePermission(): Promise<SystemCheckResult> {
   const check = createCheck('storage', 'Storage Access');
 
-  try {
-    // Test write access to document directory
-    const testPath = `${FileSystem.documentDirectory}__vc_test`;
-    await FileSystem.writeAsStringAsync(testPath, 'test');
-    await FileSystem.deleteAsync(testPath, { idempotent: true });
+  if (Platform.OS !== 'android') {
+    return { ...check, status: 'unavailable', detail: 'Android only feature' };
+  }
 
-    return { ...check, status: 'passed', detail: 'Full storage access granted' };
-  } catch {
-    return { ...check, status: 'warning', detail: 'Limited storage access' };
+  try {
+    // This is a proxy for MANAGE_EXTERNAL_STORAGE.
+    // We try to read the root of the external storage. If it succeeds, we have the permission.
+    await FileSystem.readDirectoryAsync('file:///storage/emulated/0/');
+    return { ...check, status: 'passed', detail: 'All files access granted' };
+  } catch (e) {
+    if (e.message.includes('Permission denied')) {
+      return { ...check, status: 'warning', detail: 'All files access not granted' };
+    }
+    // On some devices, the operation might fail for other reasons.
+    return { ...check, status: 'warning', detail: 'Could not verify all files access' };
   }
 }
 
@@ -233,17 +240,6 @@ async function checkOverlayPermission(): Promise<SystemCheckResult> {
     return { ...check, status: 'unavailable', detail: 'Android only feature' };
   }
 
-  // Overlay permission can't be directly checked in Expo
-  // but we track it via our settings
-  try {
-    const stored = await AsyncStorage.getItem('virtucam_overlay_granted');
-    if (stored === 'true') {
-      return { ...check, status: 'passed', detail: 'Display over other apps enabled' };
-    }
-  } catch {
-    // Fallback
-  }
-
   return { ...check, status: 'warning', detail: 'Overlay permission not confirmed' };
 }
 
@@ -251,21 +247,24 @@ async function checkCameraService(): Promise<SystemCheckResult> {
   const check = createCheck('camera', 'Camera Service');
 
   try {
-    // Check if hook is enabled and media is selected
-    const hookEnabled = await AsyncStorage.getItem(STORAGE_KEYS.HOOK_ENABLED);
-    const selectedMedia = await AsyncStorage.getItem(STORAGE_KEYS.SELECTED_MEDIA);
+    const hardwareInfo = await checkCameraHardware();
 
-    if (hookEnabled === 'true' && selectedMedia && selectedMedia !== 'null') {
-      return { ...check, status: 'passed', detail: 'Camera hook active with source' };
+    if (!hardwareInfo.hasPermission) {
+      return { ...check, status: 'warning', detail: 'Camera permission not granted' };
     }
 
-    if (hookEnabled === 'true') {
-      return { ...check, status: 'warning', detail: 'Hook active — no media source set' };
+    if (!hardwareInfo.isAvailable) {
+      return { ...check, status: 'failed', detail: 'No camera hardware available' };
     }
 
-    return { ...check, status: 'failed', detail: 'Camera hook disabled' };
-  } catch {
-    return { ...check, status: 'failed', detail: 'Unable to check camera service' };
+    if (hardwareInfo.cameraCount === 0) {
+      return { ...check, status: 'failed', detail: 'No cameras found on this device' };
+    }
+
+    return { ...check, status: 'passed', detail: `Found ${hardwareInfo.cameraCount} cameras. Ready for stream.` };
+
+  } catch (e) {
+    return { ...check, status: 'failed', detail: `An error occurred while checking camera service.` };
   }
 }
 
