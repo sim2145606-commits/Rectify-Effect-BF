@@ -114,4 +114,6 @@ export const STORAGE_KEYS = {
   AI_CACHE_TIMESTAMP: 'virtucam_ai_cache_timestamp',
   ADAPTIVE_LAYOUT_RATIO: 'virtucam_adaptive_layout_ratio',
   ONBOARDING_V2_COMPLETE: 'virtucam_onboarding_v2_complete',
+  ALL_FILES_ACCESS_STATUS: 'virtucam_all_files_access_status',
+  OVERLAY_PERMISSION_STATUS: 'virtucam_overlay_permission_status',
 };

@@ -4,6 +4,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
 import { checkCameraHardware } from './CompatibilityEngine';
+import {
+  checkAllFilesAccess as checkAllFilesAccessPerm,
+  checkOverlayPermission as checkOverlayPerm,
+  PermissionStatus,
+} from './PermissionManager';
+
 
 export type SystemCheckStatus = 'checking' | 'passed' | 'failed' | 'warning' | 'unavailable';
 
@@ -138,7 +144,7 @@ async function checkXposedFramework(): Promise<SystemCheckResult> {
       }
     }
 
-    // Check for Xposed through system properties
+    // Check for the manager app's data directory
     const xposedInstallerPaths = [
       '/data/data/org.lsposed.manager',
       '/data/data/de.robv.android.xposed.installer',
@@ -159,6 +165,7 @@ async function checkXposedFramework(): Promise<SystemCheckResult> {
         }
       }
     }
+
 
     if (frameworkFound) {
       return { ...check, status: 'passed', detail: `${frameworkType} framework active` };
@@ -212,36 +219,52 @@ async function checkModuleActive(): Promise<SystemCheckResult> {
   }
 }
 
+function mapPermStatus(permStatus: PermissionStatus): SystemCheckStatus {
+  switch (permStatus) {
+    case 'granted':
+      return 'passed';
+    case 'denied':
+    case 'undetermined':
+      return 'warning';
+    case 'unavailable':
+    default:
+      return 'unavailable';
+  }
+}
+
 async function checkStoragePermission(): Promise<SystemCheckResult> {
   const check = createCheck('storage', 'Storage Access');
+  const permStatus = await checkAllFilesAccessPerm();
 
-  if (Platform.OS !== 'android') {
+  if (permStatus === 'unavailable') {
     return { ...check, status: 'unavailable', detail: 'Android only feature' };
   }
 
-  try {
-    // This is a proxy for MANAGE_EXTERNAL_STORAGE.
-    // We try to read the root of the external storage. If it succeeds, we have the permission.
-    await FileSystem.readDirectoryAsync('file:///storage/emulated/0/');
-    return { ...check, status: 'passed', detail: 'All files access granted' };
-  } catch (e) {
-    if (e.message.includes('Permission denied')) {
-      return { ...check, status: 'warning', detail: 'All files access not granted' };
-    }
-    // On some devices, the operation might fail for other reasons.
-    return { ...check, status: 'warning', detail: 'Could not verify all files access' };
-  }
+  const status = mapPermStatus(permStatus);
+  return {
+    ...check,
+    status,
+    detail: status === 'passed' ? 'All files access granted' : 'All files access not granted',
+  };
 }
+
 
 async function checkOverlayPermission(): Promise<SystemCheckResult> {
   const check = createCheck('overlay', 'Overlay Permission');
+  const permStatus = await checkOverlayPerm();
 
-  if (Platform.OS !== 'android') {
+  if (permStatus === 'unavailable') {
     return { ...check, status: 'unavailable', detail: 'Android only feature' };
   }
 
-  return { ...check, status: 'warning', detail: 'Overlay permission not confirmed' };
+  const status = mapPermStatus(permStatus);
+  return {
+    ...check,
+    status,
+    detail: status === 'passed' ? 'Overlay permission granted' : 'Overlay permission not confirmed',
+  };
 }
+
 
 async function checkCameraService(): Promise<SystemCheckResult> {
   const check = createCheck('camera', 'Camera Service');

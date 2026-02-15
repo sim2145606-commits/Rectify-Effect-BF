@@ -6,6 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
+  Alert,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -25,6 +26,7 @@ import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Camera } from 'expo-camera';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
 import {
@@ -38,7 +40,7 @@ import {
   requestCameraPermission,
   requestMediaLibraryPermission,
   requestAllFilesAccess,
-  requestOverlayPermission,
+  checkAllFilesAccess,
 } from '@/services/PermissionManager';
 import { syncAllSettings } from '@/services/ConfigBridge';
 import {
@@ -48,6 +50,8 @@ import {
   getBatteryOptimizationSteps,
 } from '@/services/CompatibilityEngine';
 import SuccessAnimation from '@/components/SuccessAnimation';
+import LogPanel from '@/components/LogPanel';
+import { logger } from '@/services/LogService';
 
 
 type StepKey = 'root' | 'xposed' | 'module' | 'permissions' | 'battery' | 'compatibility';
@@ -104,7 +108,7 @@ function buildSteps(androidInfo: AndroidVersionInfo): Step[] {
       actionLabel: 'Check Module Status',
       tipTitle: 'Activation Steps',
       tipBody:
-        'Open LSPosed Manager → Modules → Enable VirtuCam → Select target apps in module scope → Force stop target apps to activate hooks.',
+        'Open LSPosed Manager → Modules → Enable VirtuCam → Select target apps in module scope → Force stop target apps to activate hooks. Make sure you have installed the VirtuCam APK as a system app.',
     },
     {
       key: 'permissions',
@@ -206,13 +210,17 @@ export default function OnboardingScreen() {
   });
   const [showComplete, setShowComplete] = useState(false);
   const [batterySettingsOpened, setBatterySettingsOpened] = useState(false);
+  const [permissionSettingsOpened, setPermissionSettingsOpened] = useState(false);
 
   const progressWidth = useSharedValue(0);
   const cardScale = useSharedValue(1);
 
   useEffect(() => {
+    logger.clear();
+    logger.info(`Onboarding started. Android version: ${androidInfo.versionName} (SDK ${androidInfo.sdkVersion})`);
     setBatterySettingsOpened(false);
-  }, [currentStep]);
+    setPermissionSettingsOpened(false);
+  }, [currentStep, androidInfo]);
 
   useEffect(() => {
     progressWidth.value = withTiming(((currentStep + 1) / steps.length) * 100, {
@@ -229,59 +237,159 @@ export default function OnboardingScreen() {
     const step = steps[currentStep];
     setIsVerifying(true);
     mediumImpact();
+    logger.info(`Verifying step: ${step.title}`);
 
     try {
       if (step.key === 'battery') {
         if (!batterySettingsOpened) {
-          // Open battery optimization settings
+          logger.info('Opening battery optimization settings.');
           if (Platform.OS === 'android') {
             try {
               const IntentLauncher = await import('expo-intent-launcher');
               await IntentLauncher.startActivityAsync(
                 'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
-                { data: `package:${Platform.select({ android: 'com.virtucam', default: '' })}` }
+                { data: `package:${Platform.select({ android: 'com.briefplantrain.virtucam', default: '' })}` }
               ).catch(() => {
-                // Fallback to battery saver settings
+                logger.warn('Failed to open direct battery settings, falling back to saver settings.');
                 IntentLauncher.startActivityAsync(
                   'android.settings.BATTERY_SAVER_SETTINGS'
-                ).catch(() => {});
+                ).catch(() => { logger.error('Failed to open any battery settings.')});
               });
             } catch {
-              // Handled
+              logger.error('Failed to import expo-intent-launcher.');
             }
           }
           setBatterySettingsOpened(true);
           setIsVerifying(false);
         } else {
-          setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
-          success();
+          logger.info('Asking user to confirm battery optimization disabled.');
+          Alert.alert(
+            'Confirm Battery Settings',
+            'Did you disable battery optimization for VirtuCam? This is crucial for stability.',
+            [
+              { text: 'No', style: 'cancel', onPress: () => {
+                logger.warn('User did not disable battery optimization.');
+                setStepStatuses(prev => ({ ...prev, [step.key]: 'warning' }));
+                warning();
+              }},
+              {
+                text: 'Yes',
+                onPress: async () => {
+                  logger.success('User confirmed battery optimization disabled.');
+                  await AsyncStorage.setItem(STORAGE_KEYS.BATTERY_OPTIMIZED, 'true');
+                  setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
+                  success();
+                },
+              },
+            ]
+          );
           setIsVerifying(false);
         }
         return;
       }
 
       if (step.key === 'compatibility') {
-        // Auto-detect camera API support
-        const cameraInfo = determineOptimalCameraAPI(androidInfo.sdkVersion);
-        await AsyncStorage.setItem(STORAGE_KEYS.COMPATIBILITY_MODE, cameraInfo.recommended);
+        logger.info('Checking camera compatibility.');
+        try {
+          const { status } = await Camera.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            logger.warn('Camera permission not granted for compatibility check.');
+            setStepStatuses(prev => ({ ...prev, [step.key]: 'warning' }));
+            warning();
+            setIsVerifying(false);
+            return;
+          }
+          logger.info('Camera permission granted.');
 
-        // Auto-set camera hooks based on recommendation
-        if (cameraInfo.recommended === 'camera2') {
-          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA2_HOOK, JSON.stringify(true));
-          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA1_HOOK, JSON.stringify(false));
+          await Camera.getAvailableCameraTypesAsync();
+          logger.info('Camera hardware is available.');
+
+          const cameraInfo = determineOptimalCameraAPI(androidInfo.sdkVersion);
+          logger.info(`Optimal camera API determined: ${cameraInfo.recommended}`);
+          await AsyncStorage.setItem(STORAGE_KEYS.COMPATIBILITY_MODE, cameraInfo.recommended);
+          if (cameraInfo.recommended === 'camera2') {
+            await AsyncStorage.setItem(STORAGE_KEYS.CAMERA2_HOOK, JSON.stringify(true));
+            await AsyncStorage.setItem(STORAGE_KEYS.CAMERA1_HOOK, JSON.stringify(false));
+          } else {
+            await AsyncStorage.setItem(STORAGE_KEYS.CAMERA2_HOOK, JSON.stringify(false));
+            await AsyncStorage.setItem(STORAGE_KEYS.CAMERA1_HOOK, JSON.stringify(true));
+          }
+          logger.success('Camera compatibility check passed.');
+          setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
+          success();
+        } catch (e) {
+          logger.error(`Camera compatibility check failed: ${e.message}`);
+          setStepStatuses(prev => ({ ...prev, [step.key]: 'failed' }));
+          warning();
+        }
+        setIsVerifying(false);
+        return;
+      }
+
+      if (step.key === 'permissions') {
+        let allGranted = true;
+        logger.info('Requesting camera permission.');
+        const camPerm = await requestCameraPermission();
+        if (camPerm !== 'granted') {
+          allGranted = false;
+          logger.warn('Camera permission denied.');
         } else {
-          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA2_HOOK, JSON.stringify(false));
-          await AsyncStorage.setItem(STORAGE_KEYS.CAMERA1_HOOK, JSON.stringify(true));
+          logger.success('Camera permission granted.');
         }
 
-        setStepStatuses(prev => ({ ...prev, [step.key]: 'passed' }));
-        success();
+        logger.info('Requesting media library permission.');
+        const mediaPerm = await requestMediaLibraryPermission();
+        if (mediaPerm !== 'granted') {
+          allGranted = false;
+          logger.warn('Media library permission denied.');
+        } else {
+          logger.success('Media library permission granted.');
+        }
+
+        if (androidInfo.requiresScopedStorage) {
+          if (!permissionSettingsOpened) {
+            logger.info('Requesting all files access.');
+            await requestAllFilesAccess();
+            setPermissionSettingsOpened(true);
+            setIsVerifying(false);
+            return;
+          } else {
+            logger.info('Asking user to confirm all files access.');
+            Alert.alert(
+              'Confirm Permission',
+              'Did you grant "All Files Access" to VirtuCam in the settings?',
+              [
+                { text: 'No', style: 'cancel', onPress: () => {
+                  logger.warn('User did not grant all files access.');
+                  setStepStatuses(prev => ({ ...prev, [step.key]: 'warning' }));
+                  warning();
+                }},
+                {
+                  text: 'Yes',
+                  onPress: async () => {
+                    logger.success('User confirmed all files access.');
+                    await AsyncStorage.setItem(STORAGE_KEYS.ALL_FILES_ACCESS_STATUS, 'granted');
+                    const finalStatus = await checkAllFilesAccess();
+                    setStepStatuses(prev => ({ ...prev, [step.key]: finalStatus === 'granted' ? 'passed' : 'warning' }));
+                    if (finalStatus === 'granted') success(); else warning();
+                  },
+                },
+              ]
+            );
+          }
+        }
+
+        const finalStatus = allGranted ? 'passed' : 'warning';
+        setStepStatuses(prev => ({ ...prev, [step.key]: finalStatus }));
+        if (finalStatus === 'passed') success(); else warning();
         setIsVerifying(false);
         return;
       }
 
       const result = await runFullSystemCheck();
       setSystemState(result);
+      logger.info(`System check result for ${step.key}: ${result[step.key]?.status}`);
+
 
       let status: SystemCheckStatus;
       switch (step.key) {
@@ -294,14 +402,6 @@ export default function OnboardingScreen() {
         case 'module':
           status = result.moduleActive.status;
           break;
-        case 'permissions':
-          await requestCameraPermission();
-          await requestMediaLibraryPermission();
-          if (androidInfo.requiresScopedStorage) {
-            await requestAllFilesAccess().catch(() => {});
-          }
-          status = result.storagePermission.status;
-          break;
         default:
           status = 'warning';
       }
@@ -309,33 +409,32 @@ export default function OnboardingScreen() {
       setStepStatuses(prev => ({ ...prev, [step.key]: status }));
 
       if (status === 'passed') {
+        logger.success(`Step ${step.title} verified.`);
         success();
       } else {
+        logger.warn(`Step ${step.title} needs action.`);
         warning();
       }
-    } catch {
+    } catch (e) {
+      logger.error(`An error occurred during verification: ${e.message}`);
       setStepStatuses(prev => ({ ...prev, [step.key]: 'warning' }));
       warning();
     } finally {
       setIsVerifying(false);
     }
-  }, [currentStep, steps, mediumImpact, success, warning, androidInfo, batterySettingsOpened]);
+  }, [currentStep, steps, mediumImpact, success, warning, androidInfo, batterySettingsOpened, permissionSettingsOpened]);
 
   const handleAdvancedAction = useCallback(async () => {
     const step = steps[currentStep];
     lightImpact();
+    logger.info(`Advanced action for step: ${step.title}`);
 
     if (step.key === 'permissions') {
       if (Platform.OS === 'android') {
         try {
           await requestAllFilesAccess();
+          setPermissionSettingsOpened(true);
         } catch {
-          // Handled
-        }
-        try {
-          await requestOverlayPermission();
-        } catch {
-          // Handled
         }
       }
     }
@@ -350,7 +449,7 @@ export default function OnboardingScreen() {
       );
       setCurrentStep(prev => prev + 1);
     } else {
-      // Final step - show completion animation
+      logger.success('Onboarding complete.');
       setShowComplete(true);
       success();
 
@@ -359,8 +458,8 @@ export default function OnboardingScreen() {
         await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_V2_COMPLETE, 'true');
         await AsyncStorage.setItem(STORAGE_KEYS.ANDROID_VERSION_DETECTED, JSON.stringify(androidInfo));
         await syncAllSettings();
-      } catch {
-        // Continue anyway
+      } catch (e) {
+        logger.error(`Failed to save onboarding completion state: ${e.message}`);
       }
 
       setTimeout(() => {
@@ -378,6 +477,7 @@ export default function OnboardingScreen() {
 
   const handleSkip = useCallback(async () => {
     warning();
+    logger.warn('User skipped onboarding.');
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
       await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_V2_COMPLETE, 'true');
@@ -417,9 +517,49 @@ export default function OnboardingScreen() {
     );
   }
 
+  const getButtonContent = () => {
+    if (isVerifying) {
+      return (
+        <>
+          <ActivityIndicator color={Colors.textPrimary} size="small" />
+          <Text style={styles.actionButtonText}>Verifying...</Text>
+        </>
+      );
+    }
+    if (stepStatus === 'passed') {
+      return (
+        <>
+          <Ionicons name="checkmark-circle" size={20} color={Colors.textPrimary} />
+          <Text style={styles.actionButtonText}>Verified</Text>
+        </>
+      );
+    }
+    if (step.key === 'battery' && batterySettingsOpened) {
+      return (
+        <>
+          <Ionicons name="checkmark-circle-outline" size={20} color={Colors.textPrimary} />
+          <Text style={styles.actionButtonText}>Confirm</Text>
+        </>
+      );
+    }
+    if (step.key === 'permissions' && permissionSettingsOpened) {
+       return (
+        <>
+          <Ionicons name="checkmark-circle-outline" size={20} color={Colors.textPrimary} />
+          <Text style={styles.actionButtonText}>Confirm Access</Text>
+        </>
+      );
+    }
+    return (
+      <>
+        <Ionicons name="scan" size={20} color={Colors.textPrimary} />
+        <Text style={styles.actionButtonText}>{step.actionLabel}</Text>
+      </>
+    );
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + Spacing.lg }]}>
-      {/* Header */}
       <Animated.View entering={FadeInDown.delay(100).duration(500)} style={styles.header}>
         <View style={styles.headerTop}>
           <View>
@@ -440,7 +580,6 @@ export default function OnboardingScreen() {
           </View>
         </View>
 
-        {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressTrack}>
             <Animated.View style={[styles.progressFill, progressStyle]} />
@@ -450,7 +589,6 @@ export default function OnboardingScreen() {
           </Text>
         </View>
 
-        {/* Step Indicators */}
         <View style={styles.stepIndicators}>
           {steps.map((s, index) => {
             const sStatus = stepStatuses[s.key] || 'checking';
@@ -490,7 +628,6 @@ export default function OnboardingScreen() {
         </View>
       </Animated.View>
 
-      {/* Main Card */}
       <Animated.View style={[styles.mainCardContainer, cardAnimStyle]}>
         <Animated.View
           key={step.key}
@@ -498,7 +635,6 @@ export default function OnboardingScreen() {
           exiting={SlideOutLeft.duration(200)}
           style={styles.mainCard}
         >
-          {/* Step Icon */}
           <View style={[styles.iconContainer, { borderColor: getStatusColor(stepStatus) + '40' }]}>
             <View
               style={[styles.iconInner, { backgroundColor: getStatusColor(stepStatus) + '15' }]}
@@ -518,7 +654,6 @@ export default function OnboardingScreen() {
               )}
             </View>
 
-            {/* Status Indicator */}
             <View
               style={[
                 styles.statusBadge,
@@ -543,12 +678,10 @@ export default function OnboardingScreen() {
             </View>
           </View>
 
-          {/* Step Content */}
           <Text style={styles.stepTitle}>{step.title}</Text>
           <Text style={styles.stepSubtitle}>{step.subtitle}</Text>
           <Text style={styles.stepDescription}>{step.description}</Text>
 
-          {/* Action Button */}
           <Pressable
             onPress={handleVerify}
             disabled={isVerifying}
@@ -558,33 +691,9 @@ export default function OnboardingScreen() {
               isVerifying && styles.actionButtonLoading,
             ]}
           >
-            {isVerifying ? (
-              <>
-                <ActivityIndicator
-                  color={Colors.textPrimary}
-                  size="small"
-                />
-                <Text style={styles.actionButtonText}>Verifying...</Text>
-              </>
-            ) : stepStatus === 'passed' ? (
-              <>
-                <Ionicons name="checkmark-circle" size={20} color={Colors.textPrimary} />
-                <Text style={styles.actionButtonText}>Verified</Text>
-              </>
-            ) : step.key === 'battery' && batterySettingsOpened ? (
-              <>
-                <Ionicons name="checkmark-circle-outline" size={20} color={Colors.textPrimary} />
-                <Text style={styles.actionButtonText}>Confirm</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="scan" size={20} color={Colors.textPrimary} />
-                <Text style={styles.actionButtonText}>{step.actionLabel}</Text>
-              </>
-            )}
+            {getButtonContent()}
           </Pressable>
 
-          {/* Advanced Action for permissions step */}
           {step.key === 'permissions' && (
             <Pressable onPress={handleAdvancedAction} style={styles.advancedButton}>
               <MaterialCommunityIcons name="shield-lock-outline" size={16} color={Colors.accent} />
@@ -592,7 +701,6 @@ export default function OnboardingScreen() {
             </Pressable>
           )}
 
-          {/* Tip Card */}
           <View style={styles.tipCard}>
             <View style={styles.tipHeader}>
               <Ionicons name="bulb-outline" size={14} color={Colors.warningAmber} />
@@ -602,8 +710,11 @@ export default function OnboardingScreen() {
           </View>
         </Animated.View>
       </Animated.View>
+      
+      <View style={styles.logPanelContainer}>
+        <LogPanel />
+      </View>
 
-      {/* Navigation */}
       <Animated.View
         entering={FadeInUp.delay(400).duration(500)}
         style={[styles.navigation, { paddingBottom: insets.bottom + Spacing.lg }]}
@@ -892,6 +1003,10 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: FontSize.sm,
     lineHeight: 20,
+  },
+  logPanelContainer: {
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.lg,
   },
   navigation: {
     flexDirection: 'row',

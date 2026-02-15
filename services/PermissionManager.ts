@@ -1,8 +1,9 @@
-import { Platform, Linking } from 'react-native';
+import { Platform, Linking, AppState } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { STORAGE_KEYS } from '@/constants/theme';
 
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined' | 'limited';
 
@@ -12,6 +13,34 @@ export type PermissionState = {
   allFilesAccess: PermissionStatus;
   overlayPermission: PermissionStatus;
 };
+
+// --- State management for permissions that require leaving the app ---
+
+let AppStateListener: ((state: string) => void) | null = null;
+let permissionPromiseResolve: ((status: PermissionStatus) => void) | null = null;
+
+// Listen for the app to become active again
+function setupAppStateListener(key: string) {
+  if (AppStateListener) {
+    AppState.removeEventListener('change', AppStateListener);
+  }
+  AppStateListener = async (nextAppState) => {
+    if (nextAppState === 'active') {
+      // Once the app is active, we assume the user has made their choice.
+      // We can't *truly* know if they granted it, so we'll check a flag we set.
+      const userConfirmed = await AsyncStorage.getItem(key);
+      if (permissionPromiseResolve) {
+        permissionPromiseResolve(userConfirmed === 'true' ? 'granted' : 'denied');
+      }
+      if (AppStateListener) {
+        AppState.removeEventListener('change', AppStateListener);
+        AppStateListener = null;
+      }
+      permissionPromiseResolve = null;
+    }
+  };
+  AppState.addEventListener('change', AppStateListener);
+}
 
 export async function checkAllPermissions(): Promise<PermissionState> {
   const [camera, mediaLibrary, allFiles, overlay] = await Promise.all([
@@ -48,13 +77,21 @@ async function checkMediaLibraryPermission(): Promise<PermissionStatus> {
 }
 
 async function checkAllFilesAccess(): Promise<PermissionStatus> {
-  // MANAGE_EXTERNAL_STORAGE can't be directly checked in Expo
-  // We track it via our state
-  return 'undetermined';
+  if (Platform.OS !== 'android') return 'unavailable';
+  // MANAGE_EXTERNAL_STORAGE can't be directly checked in Expo/React Native.
+  // We can only open settings and ask the user to grant it.
+  // The actual verification must be based on user confirmation or by attempting a file operation.
+  // For this wizard, we will rely on a confirmation step from the user.
+  const storedStatus = await AsyncStorage.getItem(STORAGE_KEYS.ALL_FILES_ACCESS_STATUS);
+  return storedStatus === 'granted' ? 'granted' : 'undetermined';
 }
 
 async function checkOverlayPermission(): Promise<PermissionStatus> {
-  return 'undetermined';
+  if (Platform.OS !== 'android') return 'unavailable';
+  // SYSTEM_ALERT_WINDOW permission status also can't be directly checked.
+  // We follow the same pattern as All Files Access.
+  const storedStatus = await AsyncStorage.getItem(STORAGE_KEYS.OVERLAY_PERMISSION_STATUS);
+  return storedStatus === 'granted' ? 'granted' : 'undetermined';
 }
 
 function mapExpoStatus(status: string): PermissionStatus {
@@ -88,15 +125,18 @@ export async function requestMediaLibraryPermission(): Promise<PermissionStatus>
   }
 }
 
-export async function requestAllFilesAccess(): Promise<void> {
-  if (Platform.OS === 'android') {
+export async function requestAllFilesAccess(): Promise<PermissionStatus> {
+  if (Platform.OS !== 'android') return 'unavailable';
+
+  return new Promise(async (resolve) => {
+    permissionPromiseResolve = resolve;
+    setupAppStateListener(STORAGE_KEYS.ALL_FILES_ACCESS_STATUS);
+
     try {
-      // Open MANAGE_ALL_FILES_ACCESS_PERMISSION settings
       await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION
       );
     } catch {
-      // Fallback: open general app settings
       try {
         await IntentLauncher.startActivityAsync(
           IntentLauncher.ActivityAction.APPLICATION_SETTINGS
@@ -105,13 +145,17 @@ export async function requestAllFilesAccess(): Promise<void> {
         await Linking.openSettings();
       }
     }
-  } else {
-    await Linking.openSettings();
-  }
+  });
 }
 
-export async function requestOverlayPermission(): Promise<void> {
-  if (Platform.OS === 'android') {
+
+export async function requestOverlayPermission(): Promise<PermissionStatus> {
+  if (Platform.OS !== 'android') return 'unavailable';
+
+  return new Promise(async (resolve) => {
+    permissionPromiseResolve = resolve;
+    setupAppStateListener(STORAGE_KEYS.OVERLAY_PERMISSION_STATUS);
+
     try {
       await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION
@@ -123,10 +167,9 @@ export async function requestOverlayPermission(): Promise<void> {
         // Silent
       }
     }
-  } else {
-    await Linking.openSettings();
-  }
+  });
 }
+
 
 export async function openAppSettings(): Promise<void> {
   try {
@@ -157,6 +200,8 @@ export function getPermissionDisplayInfo(status: PermissionStatus): {
       return { label: 'DENIED', color: '#FF3B30', icon: 'close-circle' };
     case 'limited':
       return { label: 'LIMITED', color: '#FFB800', icon: 'alert-circle' };
+    case 'unavailable':
+      return { label: 'UNAVAILABLE', color: '#5A5A6E', icon: 'remove-circle-outline' };
     case 'undetermined':
     default:
       return { label: 'REQUIRED', color: '#FFB800', icon: 'alert-circle' };
