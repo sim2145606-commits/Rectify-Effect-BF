@@ -37,35 +37,3 @@ expoAutolinking.useExpoVersionCatalog()
 
 include ':app'
 includeBuild(expoAutolinking.reactNativeGradlePlugin)
-
-// Explicitly include native modules from node_modules to ensure autolinking works
-def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
-def nodeModulesDir = new File(projectRoot, "node_modules")
-
-// List of native modules that should be included
-def nativeModules = [
-    'react-native-async-storage/async-storage',
-    'react-native-community-datetimepicker',
-    'react-native-gesture-handler',
-    'react-native-reanimated',
-    'react-native-safe-area-context',
-    'react-native-screens',
-    'react-native-svg',
-    'react-native-webview',
-    'react-native-worklets'
-]
-
-// Try to include native modules if they exist
-nativeModules.each { modulePath ->
-    def moduleDir = new File(nodeModulesDir, modulePath)
-    def androidDir = new File(moduleDir, "android")
-    
-    if (androidDir.exists() && new File(androidDir, "build.gradle").exists()) {
-        def moduleName = modulePath.replace('/', '_').replace('-', '_')
-        try {
-            includeBuild(androidDir.absolutePath)
-        } catch (Exception e) {
-            println "Warning: Could not include native module at ${androidDir.absolutePath}: ${e.message}"
-        }
-    }
-}

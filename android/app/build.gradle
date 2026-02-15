@@ -164,22 +164,6 @@ configurations.all {
         // Force stable versions and prevent conflicts
         force 'androidx.appcompat:appcompat:1.6.1'
         force 'androidx.core:core:1.12.0'
-        
-        // Ignore missing project dependencies from autolinking
-        eachDependency { details ->
-            if (details.requested.group == null || details.requested.group.isEmpty()) {
-                // Skip subproject resolution - let autolinking handle it
-                try {
-                    // Only warn if it's a known autolinking module
-                    if (details.requested.name.matches('.*react-native.*') || 
-                        details.requested.name.matches('.*expo.*')) {
-                        // These should be handled by autolinking in settings.gradle
-                    }
-                } catch (Exception e) {
-                    // Silently skip
-                }
-            }
-        }
     }
 }
 
