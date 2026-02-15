@@ -46,3 +46,6 @@ app-example
 .fastshot-logs/
 examples/
 CLAUDE.md
+
+/android
+/ios
