@@ -1,4 +1,3 @@
-import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
 
@@ -52,64 +51,43 @@ export type SyncStatus = {
 
 const LAST_SYNC_KEY = 'virtucam_last_sync_time';
 
-// Fetch all presets for the current user
+// Mock implementation of fetchPresets
 export async function fetchPresets(): Promise<CloudPreset[]> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase
-    .from('creator_presets')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('updated_at', { ascending: false });
-
-  if (error) throw error;
-  return (data || []) as CloudPreset[];
+  console.log('fetchPresets called, returning empty array');
+  return [];
 }
 
-// Save a new preset capturing current device configuration
+// Mock implementation of savePreset
 export async function savePreset(config: PresetConfig): Promise<CloudPreset> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase
-    .from('creator_presets')
-    .insert({
-      user_id: user.id,
-      name: config.name,
-      description: config.description || null,
-      camera_front: config.camera_front,
-      camera_back: config.camera_back,
-      mirrored: config.mirrored,
-      rotation: config.rotation,
-      scale_mode: config.scale_mode,
-      ai_enhancement: config.ai_enhancement,
-      target_apps: config.target_apps,
-      target_mode: config.target_mode,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-
-  // Update sync status
+  console.log('savePreset called with config:', config);
+  const newPreset: CloudPreset = {
+    id: Math.random().toString(),
+    user_id: 'local',
+    name: config.name,
+    description: config.description || null,
+    camera_front: config.camera_front,
+    camera_back: config.camera_back,
+    mirrored: config.mirrored,
+    rotation: config.rotation,
+    scale_mode: config.scale_mode,
+    ai_enhancement: config.ai_enhancement,
+    target_apps: config.target_apps,
+    target_mode: config.target_mode,
+    is_public: false,
+    downloads: 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
   await updateLastSyncTime();
-
-  return data as CloudPreset;
+  return newPreset;
 }
 
-// Delete a preset
+// Mock implementation of deletePreset
 export async function deletePreset(presetId: string): Promise<void> {
-  const { error } = await supabase
-    .from('creator_presets')
-    .delete()
-    .eq('id', presetId);
-
-  if (error) throw error;
+  console.log('deletePreset called for presetId:', presetId);
   await updateLastSyncTime();
 }
 
-// Apply a preset — writes values to AsyncStorage so all screens pick them up
 export async function applyPreset(preset: CloudPreset): Promise<void> {
   const pairs: [string, string][] = [
     [STORAGE_KEYS.FRONT_CAMERA, JSON.stringify(preset.camera_front)],
@@ -121,50 +99,10 @@ export async function applyPreset(preset: CloudPreset): Promise<void> {
     [STORAGE_KEYS.TARGET_MODE, JSON.stringify(preset.target_mode)],
   ];
 
-  // Apply Media Studio extended fields if present in the preset metadata
-  const meta = (preset as CloudPresetWithStudio);
-  if (meta.flipped_vertical !== undefined) {
-    pairs.push([STORAGE_KEYS.FLIPPED_VERTICAL, JSON.stringify(meta.flipped_vertical)]);
-  }
-  if (meta.offset_x !== undefined) {
-    pairs.push([STORAGE_KEYS.OFFSET_X, JSON.stringify(meta.offset_x)]);
-  }
-  if (meta.offset_y !== undefined) {
-    pairs.push([STORAGE_KEYS.OFFSET_Y, JSON.stringify(meta.offset_y)]);
-  }
-  if (meta.ai_optimize !== undefined) {
-    pairs.push([STORAGE_KEYS.AI_OPTIMIZE, JSON.stringify(meta.ai_optimize)]);
-  }
-  if (meta.ai_subject_lock !== undefined) {
-    pairs.push([STORAGE_KEYS.AI_SUBJECT_LOCK, JSON.stringify(meta.ai_subject_lock)]);
-  }
-  if (meta.loop_enabled !== undefined) {
-    pairs.push([STORAGE_KEYS.LOOP_ENABLED, JSON.stringify(meta.loop_enabled)]);
-  }
-  if (meta.loop_start !== undefined) {
-    pairs.push([STORAGE_KEYS.LOOP_START, JSON.stringify(meta.loop_start)]);
-  }
-  if (meta.loop_end !== undefined) {
-    pairs.push([STORAGE_KEYS.LOOP_END, JSON.stringify(meta.loop_end)]);
-  }
-
   await AsyncStorage.multiSet(pairs);
   await updateLastSyncTime();
 }
 
-// Extended CloudPreset type with Media Studio fields
-type CloudPresetWithStudio = CloudPreset & {
-  flipped_vertical?: boolean;
-  offset_x?: number;
-  offset_y?: number;
-  ai_optimize?: boolean;
-  ai_subject_lock?: boolean;
-  loop_enabled?: boolean;
-  loop_start?: number;
-  loop_end?: number;
-};
-
-// Capture the current device config to create a preset
 export async function captureCurrentConfig(): Promise<Omit<PresetConfig, 'name'>> {
   const keys = [
     STORAGE_KEYS.FRONT_CAMERA,
@@ -200,7 +138,6 @@ export async function captureCurrentConfig(): Promise<Omit<PresetConfig, 'name'>
     }
   };
 
-  // Extract target app package names
   const targetApps = parseJson<{ packageName: string; enabled: boolean }[]>(
     values[STORAGE_KEYS.TARGET_APPS],
     []
@@ -229,44 +166,21 @@ export async function captureCurrentConfig(): Promise<Omit<PresetConfig, 'name'>
   };
 }
 
-// Get cloud sync status
 export async function getSyncStatus(): Promise<SyncStatus> {
-  try {
-    const lastSynced = await AsyncStorage.getItem(LAST_SYNC_KEY);
-    const presets = await fetchPresets();
-
-    // Collect all unique target app package names across all presets
-    const cloudVerifiedApps = new Set<string>();
-    presets.forEach((p) => {
-      if (Array.isArray(p.target_apps)) {
-        p.target_apps.forEach((app: string) => cloudVerifiedApps.add(app));
-      }
-    });
-
-    return {
-      state: 'synced',
-      lastSynced,
-      presetCount: presets.length,
-      cloudVerifiedApps: Array.from(cloudVerifiedApps),
-    };
-  } catch (err) {
-    return {
-      state: 'error',
-      lastSynced: null,
-      presetCount: 0,
-      cloudVerifiedApps: [],
-      error: err instanceof Error ? err.message : 'Unknown error',
-    };
-  }
+  const lastSynced = await AsyncStorage.getItem(LAST_SYNC_KEY);
+  return {
+    state: 'synced',
+    lastSynced,
+    presetCount: 0,
+    cloudVerifiedApps: [],
+  };
 }
 
-// Update the last sync timestamp
 async function updateLastSyncTime(): Promise<void> {
   const now = new Date().toISOString();
   await AsyncStorage.setItem(LAST_SYNC_KEY, now);
 }
 
-// Full cloud sync — re-fetch everything and update local cache
 export async function performFullSync(): Promise<SyncStatus> {
   await updateLastSyncTime();
   return getSyncStatus();

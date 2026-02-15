@@ -55,7 +55,6 @@ type IntegrityCheck = {
 
 type HeartbeatStatus = {
   cloudSync: 'online' | 'offline' | 'checking';
-  supabase: 'connected' | 'disconnected' | 'checking';
   bridge: 'active' | 'inactive' | 'checking';
   lastPing: number;
 };
@@ -73,7 +72,6 @@ export default function SystemIntegrity() {
   const [cacheStats, setCacheStats] = useState<AICacheStats | null>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatStatus>({
     cloudSync: 'checking',
-    supabase: 'checking',
     bridge: 'checking',
     lastPing: 0,
   });
@@ -145,7 +143,6 @@ export default function SystemIntegrity() {
     setHeartbeat(prev => ({
       ...prev,
       cloudSync: 'checking',
-      supabase: 'checking',
       bridge: 'checking',
     }));
 
@@ -157,7 +154,6 @@ export default function SystemIntegrity() {
 
       setHeartbeat({
         cloudSync: syncStatus ? 'online' : 'offline',
-        supabase: syncStatus ? 'connected' : 'disconnected',
         bridge: bridgeStatus?.exists ? 'active' : 'inactive',
         lastPing: Date.now(),
       });
@@ -165,7 +161,6 @@ export default function SystemIntegrity() {
       setHeartbeat(prev => ({
         ...prev,
         cloudSync: 'offline',
-        supabase: 'disconnected',
         bridge: 'inactive',
         lastPing: Date.now(),
       }));
@@ -354,14 +349,6 @@ export default function SystemIntegrity() {
         category: 'connectivity',
         status: heartbeat.cloudSync === 'online' ? 'passed' : heartbeat.cloudSync === 'checking' ? 'checking' : 'warning',
         detail: heartbeat.cloudSync === 'online' ? 'Cloud sync service is reachable' : 'Cloud sync service unreachable',
-        severity: 'optional',
-      },
-      {
-        id: 'supabase',
-        label: 'Supabase Backend',
-        category: 'connectivity',
-        status: heartbeat.supabase === 'connected' ? 'passed' : 'warning',
-        detail: heartbeat.supabase === 'connected' ? 'Database connection established' : 'Database connection unavailable',
         severity: 'optional',
       },
       {
@@ -682,12 +669,6 @@ export default function SystemIntegrity() {
             label="Cloud Sync"
             status={heartbeat.cloudSync}
             color={heartbeatColor(heartbeat.cloudSync)}
-          />
-          <HeartbeatCard
-            icon="database"
-            label="Supabase"
-            status={heartbeat.supabase}
-            color={heartbeatColor(heartbeat.supabase)}
           />
           <HeartbeatCard
             icon="bridge"
