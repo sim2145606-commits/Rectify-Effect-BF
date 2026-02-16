@@ -13,11 +13,14 @@ buildscript {
 }
 
 allprojects {
-  repositories {
-    google()
-    mavenCentral()
-    maven { url 'https://www.jitpack.io' }
-  }
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://www.jitpack.io' }
+        
+        // Add this line specifically for the Xposed API
+        maven { url 'https://api.xposed.info/' } 
+    }
 }
 
 apply plugin: "expo-root-project"
