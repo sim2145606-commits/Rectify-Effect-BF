@@ -99,6 +99,9 @@ public class CameraHook implements IXposedHookLoadPackage {
     // Track original ImageReader listeners for wrapping
     private final Map<ImageReader, Object> originalListeners = new ConcurrentHashMap<>();
     
+    // FIX 13: Track which ImageReaders are hooked
+    private final Set<ImageReader> hookedImageReaders = ConcurrentHashMap.newKeySet();
+    
     // Surface replacement mappings for CameraCaptureSession hooks
     private final Map<Surface, SurfaceMapping> surfaceMappings = new ConcurrentHashMap<>();
     private final Map<Surface, SurfaceTexture> surfaceToTextureMap = new ConcurrentHashMap<>();
@@ -339,6 +342,9 @@ public class CameraHook implements IXposedHookLoadPackage {
 
                             ImageReader reader = (ImageReader) param.thisObject;
                             originalListeners.put(reader, originalListener);
+                            
+                            // FIX 13: Track this ImageReader as hooked
+                            hookedImageReaders.add(reader);
 
                             // Replace with our wrapper listener
                             param.args[0] = createWrappedImageReaderListener(
@@ -357,6 +363,8 @@ public class CameraHook implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             if (!isActive()) return;
+                            // FIX 13: Only replace image data for hooked ImageReaders
+                            if (!hookedImageReaders.contains(param.thisObject)) return;
                             replaceImageData((Image) param.getResult(),
                                     (ImageReader) param.thisObject);
                         }
@@ -371,6 +379,8 @@ public class CameraHook implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             if (!isActive()) return;
+                            // FIX 13: Only replace image data for hooked ImageReaders
+                            if (!hookedImageReaders.contains(param.thisObject)) return;
                             replaceImageData((Image) param.getResult(),
                                     (ImageReader) param.thisObject);
                         }
@@ -533,13 +543,17 @@ public class CameraHook implements IXposedHookLoadPackage {
                 if (addressField != null) {
                     long address = addressField.getLong(buffer);
                     if (address != 0) {
-                        // Use Unsafe or direct memory copy
-                        // This is a last resort for read-only direct buffers
-                        sun.misc.Unsafe unsafe = getUnsafe();
+                        // FIX 14: Use Unsafe via reflection for direct memory access
+                        Object unsafe = getUnsafe();
                         if (unsafe != null) {
-                            int writeLen = Math.min(length, buffer.capacity());
-                            for (int i = 0; i < writeLen; i++) {
-                                unsafe.putByte(address + i, data[offset + i]);
+                            try {
+                                Method putByteMethod = unsafe.getClass().getMethod("putByte", long.class, byte.class);
+                                int writeLen = Math.min(length, buffer.capacity());
+                                for (int i = 0; i < writeLen; i++) {
+                                    putByteMethod.invoke(unsafe, address + i, data[offset + i]);
+                                }
+                            } catch (Exception e) {
+                                log("Unsafe putByte failed: " + e.getMessage());
                             }
                         }
                     }
@@ -552,11 +566,15 @@ public class CameraHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static sun.misc.Unsafe getUnsafe() {
+    /**
+     * FIX 14: Access Unsafe purely through reflection to avoid direct class reference
+     */
+    private static Object getUnsafe() {
         try {
-            Field f = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+            Field f = unsafeClass.getDeclaredField("theUnsafe");
             f.setAccessible(true);
-            return (sun.misc.Unsafe) f.get(null);
+            return f.get(null);
         } catch (Exception e) {
             return null;
         }
@@ -927,7 +945,12 @@ public class CameraHook implements IXposedHookLoadPackage {
             return output;
         } catch (Exception e) {
             log("processFrame error: " + e.getMessage());
-            return Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true);
+            // FIX 11: Force a copy if createScaledBitmap returns the same bitmap
+            Bitmap scaled = Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true);
+            if (scaled == source) {
+                scaled = source.copy(Bitmap.Config.ARGB_8888, false);
+            }
+            return scaled;
         }
     }
 
@@ -1737,9 +1760,9 @@ public class CameraHook implements IXposedHookLoadPackage {
                         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                             if (!isActive()) return;
                             
-                            // After camera updates the texture, we could inject here
-                            // This is a placeholder for GL-based injection
-                            // Full implementation would require EGL context manipulation
+                            // FIX 15: GL texture injection not implemented — frame replacement
+                            // handled via ImageReader interception and Surface forwarding
+                            // in hookCameraCaptureSession
                             SurfaceTexture texture = (SurfaceTexture) param.thisObject;
                             // log("SurfaceTexture.updateTexImage called");
                         }
@@ -1938,6 +1961,10 @@ public class CameraHook implements IXposedHookLoadPackage {
 
     private void hookCamera1SurfaceBinding(final LoadPackageParam lpparam) {
         try {
+            // FIX 15: These hooks provide logging for Camera1 surface binding.
+            // Actual frame injection for Camera1 is handled by PreviewCallback wrapping
+            // in hookCamera1API.
+            
             // Hook Camera.setPreviewTexture
             XposedHelpers.findAndHookMethod(
                     "android.hardware.Camera",
