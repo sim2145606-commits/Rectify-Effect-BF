@@ -37,20 +37,57 @@ To use VirtuCam, your device must meet the following requirements:
 ### For Developers (Local Build)
 This project is built using [Expo](https://expo.dev).
 
-1.  **Install dependencies**
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/ggsetRanges/virtucam.git
+    cd virtucam
+    ```
+
+2.  **Install dependencies**
     ```bash
     npm install
     ```
 
-2.  **Start the development server**
+3.  **Start the development server**
     ```bash
-    npx expo start
+    npm start
     ```
 
-3.  **Build the Android project**
+4.  **Build the Android project**
     ```bash
-    npx expo run:android
+    npm run android
     ```
+
+---
+
+## 🧑‍💻 Development
+
+### Available Scripts
+
+- `npm start` - Start the Expo development server
+- `npm run android` - Build and run on Android
+- `npm run ios` - Build and run on iOS
+- `npm run lint` - Run ESLint
+- `npm run format` - Format code with Prettier
+- `npm run type-check` - Verify TypeScript types
+- `npm run validate` - Run all checks (lint, type-check, format)
+
+### Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Code of Conduct
+
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+
+---
+
+## 📝 Documentation
+
+- [Contributing Guidelines](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [License](LICENSE)
 
 ---
 
@@ -79,5 +116,13 @@ VirtuCam is developed strictly for educational research, debugging, and developm
 
 If you encounter issues or wish to contribute:
 
-* **Issues**: Report bugs via the GitHub Issues tab.
+* **Issues**: Report bugs via the [GitHub Issues](https://github.com/ggsetRanges/virtucam/issues) tab.
+* **Pull Requests**: See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+* **Security**: Report vulnerabilities according to our [Security Policy](SECURITY.md).
 * **Discord**: Join the Expo community at [chat.expo.dev](https://chat.expo.dev).
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
