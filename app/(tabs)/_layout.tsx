@@ -81,20 +81,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="media"
-        options={{
-          title: 'Library',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon
-              name="images"
-              library="ionicons"
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="config"
         options={{
           title: 'Studio',

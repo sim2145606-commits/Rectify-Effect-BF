@@ -17,10 +17,6 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  withRepeat,
-  withSequence,
-  withTiming,
-  Easing,
   Layout,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,21 +26,21 @@ import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
-import PulseIndicator from '@/components/PulseIndicator';
 import {
   fetchPresets,
   savePreset,
   deletePreset,
+  renamePreset,
   applyPreset,
   captureCurrentConfig,
-  type CloudPreset,
+  type LocalPreset,
 } from '@/services/PresetService';
 
 export default function PresetsScreen() {
   const insets = useSafeAreaInsets();
   const { lightImpact, mediumImpact, success, warning, heavyImpact } = useHaptics();
 
-  const [presets, setPresets] = useState<CloudPreset[]>([]);
+  const [presets, setPresets] = useState<LocalPreset[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -52,23 +48,9 @@ export default function PresetsScreen() {
   const [presetName, setPresetName] = useState('');
   const [presetDesc, setPresetDesc] = useState('');
   const [applyingId, setApplyingId] = useState<string | null>(null);
-
-  // Header glow animation
-  const headerGlow = useSharedValue(0);
-  useEffect(() => {
-    headerGlow.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0.3, { duration: 2000, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      false
-    );
-  }, [headerGlow]);
-
-  const headerGlowStyle = useAnimatedStyle(() => ({
-    opacity: headerGlow.value,
-  }));
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState('');
+  const [renameDesc, setRenameDesc] = useState('');
 
   const loadPresets = useCallback(async () => {
     try {
@@ -117,7 +99,7 @@ export default function PresetsScreen() {
       warning();
       Alert.alert(
         'Save Failed',
-        err instanceof Error ? err.message : 'Could not save preset to cloud.'
+        err instanceof Error ? err.message : 'Could not save preset.'
       );
     } finally {
       setSaving(false);
@@ -125,7 +107,7 @@ export default function PresetsScreen() {
   }, [presetName, presetDesc, mediumImpact, success, warning, loadPresets]);
 
   const handleApplyPreset = useCallback(
-    async (preset: CloudPreset) => {
+    async (preset: LocalPreset) => {
       setApplyingId(preset.id);
       heavyImpact();
 
@@ -134,7 +116,7 @@ export default function PresetsScreen() {
         success();
         Alert.alert(
           'Preset Applied',
-          `"${preset.name}" has been loaded. Settings will take effect on the next screen visit.`
+          `"${preset.name}" has been loaded. Settings are now active.`
         );
       } catch {
         warning();
@@ -147,11 +129,11 @@ export default function PresetsScreen() {
   );
 
   const handleDeletePreset = useCallback(
-    (preset: CloudPreset) => {
+    (preset: LocalPreset) => {
       lightImpact();
       Alert.alert(
         'Delete Preset',
-        `Remove "${preset.name}" from your cloud library?`,
+        `Remove "${preset.name}" permanently?`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -173,6 +155,37 @@ export default function PresetsScreen() {
     [lightImpact, success, loadPresets]
   );
 
+  const handleStartRename = useCallback((preset: LocalPreset) => {
+    lightImpact();
+    setRenamingId(preset.id);
+    setRenameText(preset.name);
+    setRenameDesc(preset.description || '');
+  }, [lightImpact]);
+
+  const handleSaveRename = useCallback(async () => {
+    if (!renameText.trim() || !renamingId) {
+      return;
+    }
+
+    try {
+      await renamePreset(renamingId, renameText.trim(), renameDesc.trim() || undefined);
+      success();
+      setRenamingId(null);
+      setRenameText('');
+      setRenameDesc('');
+      await loadPresets();
+    } catch {
+      warning();
+      Alert.alert('Error', 'Failed to rename preset.');
+    }
+  }, [renamingId, renameText, renameDesc, success, warning, loadPresets]);
+
+  const handleCancelRename = useCallback(() => {
+    setRenamingId(null);
+    setRenameText('');
+    setRenameDesc('');
+  }, []);
+
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-US', {
@@ -183,15 +196,17 @@ export default function PresetsScreen() {
     });
   };
 
-  const getPresetSummary = (preset: CloudPreset) => {
+  const getPresetSummary = (preset: LocalPreset) => {
     const parts: string[] = [];
     if (preset.camera_front && preset.camera_back) parts.push('Dual Cam');
     else if (preset.camera_front) parts.push('Front Cam');
     else if (preset.camera_back) parts.push('Back Cam');
     if (preset.mirrored) parts.push('Mirrored');
     if (preset.rotation !== 0) parts.push(`${preset.rotation}°`);
-    if (preset.ai_enhancement) parts.push(`AI: ${preset.ai_enhancement}`);
     parts.push(preset.scale_mode.toUpperCase());
+    if (preset.offset_x !== 0 || preset.offset_y !== 0) {
+      parts.push(`Offset: ${preset.offset_x},${preset.offset_y}`);
+    }
     return parts.join(' • ');
   };
 
@@ -217,19 +232,14 @@ export default function PresetsScreen() {
       <Animated.View entering={FadeInDown.delay(100).duration(500)}>
         <View style={styles.headerRow}>
           <View style={styles.headerTextBlock}>
-            <View style={styles.titleRow}>
-              <Text style={styles.screenTitle}>{"Director's Suite"}</Text>
-              <Animated.View style={[styles.titleGlow, headerGlowStyle]}>
-                <MaterialCommunityIcons name="star-four-points" size={16} color={Colors.electricBlue} />
-              </Animated.View>
-            </View>
+            <Text style={styles.screenTitle}>Local Presets</Text>
             <Text style={styles.screenSubtitle}>
-              Save, manage & deploy camera configurations
+              Save, manage & load camera configurations
             </Text>
           </View>
           <View style={styles.presetCountBadge}>
             <Text style={styles.presetCountValue}>{presets.length}</Text>
-            <Text style={styles.presetCountLabel}>PRESETS</Text>
+            <Text style={styles.presetCountLabel}>SAVED</Text>
           </View>
         </View>
       </Animated.View>
@@ -251,7 +261,7 @@ export default function PresetsScreen() {
           >
             <View style={styles.captureIconCircle}>
               <MaterialCommunityIcons
-                name="camera-iris"
+                name="content-save-cog"
                 size={28}
                 color={Colors.electricBlue}
               />
@@ -259,7 +269,7 @@ export default function PresetsScreen() {
             <View style={styles.captureTextBlock}>
               <Text style={styles.captureTitle}>Save Current Config as Preset</Text>
               <Text style={styles.captureDesc}>
-                Captures rotation, mirror, AI filters, cameras & targets
+                Captures scale, mirror, offset, rotation & media
               </Text>
             </View>
             <Ionicons name="add-circle" size={24} color={Colors.electricBlue} />
@@ -307,12 +317,12 @@ export default function PresetsScreen() {
                   }}
                 />
                 <GlowButton
-                  label="Save to Cloud"
+                  label="Save Preset"
                   variant="primary"
                   size="small"
                   onPress={handleSavePreset}
                   loading={saving}
-                  icon={<Ionicons name="cloud-upload" size={14} color={Colors.textPrimary} />}
+                  icon={<Ionicons name="save" size={14} color={Colors.textPrimary} />}
                 />
               </View>
             </Card>
@@ -323,15 +333,14 @@ export default function PresetsScreen() {
       {/* Preset Library */}
       <Animated.View entering={FadeInDown.delay(300).duration(500)}>
         <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="bookshelf" size={18} color={Colors.accent} />
+          <MaterialCommunityIcons name="folder-multiple" size={18} color={Colors.accent} />
           <Text style={styles.sectionTitle}>Preset Library</Text>
-          <PulseIndicator active={presets.length > 0} color={Colors.electricBlue} size={8} />
         </View>
 
         {loading ? (
           <Card style={styles.loadingCard}>
             <ActivityIndicator color={Colors.electricBlue} size="large" />
-            <Text style={styles.loadingText}>Loading presets from cloud...</Text>
+            <Text style={styles.loadingText}>Loading presets...</Text>
           </Card>
         ) : presets.length === 0 ? (
           <Card style={styles.emptyCard}>
@@ -359,7 +368,15 @@ export default function PresetsScreen() {
                 preset={preset}
                 onApply={() => handleApplyPreset(preset)}
                 onDelete={() => handleDeletePreset(preset)}
+                onRename={() => handleStartRename(preset)}
                 isApplying={applyingId === preset.id}
+                isRenaming={renamingId === preset.id}
+                renameText={renameText}
+                renameDesc={renameDesc}
+                onRenameTextChange={setRenameText}
+                onRenameDescChange={setRenameDesc}
+                onSaveRename={handleSaveRename}
+                onCancelRename={handleCancelRename}
                 summary={getPresetSummary(preset)}
                 dateLabel={formatDate(preset.created_at)}
               />
@@ -377,14 +394,30 @@ function PresetCard({
   preset,
   onApply,
   onDelete,
+  onRename,
   isApplying,
+  isRenaming,
+  renameText,
+  renameDesc,
+  onRenameTextChange,
+  onRenameDescChange,
+  onSaveRename,
+  onCancelRename,
   summary,
   dateLabel,
 }: {
-  preset: CloudPreset;
+  preset: LocalPreset;
   onApply: () => void;
   onDelete: () => void;
+  onRename: () => void;
   isApplying: boolean;
+  isRenaming: boolean;
+  renameText: string;
+  renameDesc: string;
+  onRenameTextChange: (text: string) => void;
+  onRenameDescChange: (text: string) => void;
+  onSaveRename: () => void;
+  onCancelRename: () => void;
   summary: string;
   dateLabel: string;
 }) {
@@ -393,111 +426,90 @@ function PresetCard({
     transform: [{ scale: scale.value }],
   }));
 
-  // Sync pulse animation
-  const syncPulse = useSharedValue(0.6);
-  useEffect(() => {
-    syncPulse.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 1500 }),
-        withTiming(0.6, { duration: 1500 })
-      ),
-      -1,
-      false
-    );
-  }, [syncPulse]);
-
-  const syncPulseStyle = useAnimatedStyle(() => ({
-    opacity: syncPulse.value,
-  }));
-
-  const targetCount = Array.isArray(preset.target_apps) ? preset.target_apps.length : 0;
-
   return (
     <Animated.View style={animStyle}>
       <Pressable
         onPressIn={() => { scale.value = withSpring(0.98); }}
         onPressOut={() => { scale.value = withSpring(1); }}
-        onLongPress={onDelete}
         style={styles.presetCard}
       >
-        {/* Glassmorphism Top Bar */}
-        <View style={styles.presetGlassBar}>
-          <Animated.View style={[styles.presetSyncDot, syncPulseStyle]}>
-            <View style={styles.syncDotInner} />
-          </Animated.View>
-          <Text style={styles.presetCloudBadge}>CLOUD SYNCED</Text>
+        {/* Header */}
+        <View style={styles.presetHeader}>
+          <View style={styles.presetIconBlock}>
+            <MaterialCommunityIcons name="tune-vertical" size={20} color={Colors.electricBlue} />
+          </View>
+          <View style={styles.presetTextBlock}>
+            {isRenaming ? (
+              <View style={styles.renameInputs}>
+                <TextInput
+                  style={styles.renameInput}
+                  value={renameText}
+                  onChangeText={onRenameTextChange}
+                  placeholder="Preset name"
+                  placeholderTextColor={Colors.textTertiary}
+                  maxLength={50}
+                />
+                <TextInput
+                  style={[styles.renameInput, styles.renameDescInput]}
+                  value={renameDesc}
+                  onChangeText={onRenameDescChange}
+                  placeholder="Description (optional)"
+                  placeholderTextColor={Colors.textTertiary}
+                  maxLength={200}
+                />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.presetName} numberOfLines={1}>{preset.name}</Text>
+                {preset.description && (
+                  <Text style={styles.presetDescription} numberOfLines={1}>
+                    {preset.description}
+                  </Text>
+                )}
+              </>
+            )}
+            <Text style={styles.presetSummary} numberOfLines={1}>{summary}</Text>
+          </View>
           <Text style={styles.presetDate}>{dateLabel}</Text>
         </View>
 
-        {/* Preset Info */}
-        <View style={styles.presetMainContent}>
-          <View style={styles.presetIconBlock}>
-            <MaterialCommunityIcons name="tune-vertical" size={24} color={Colors.electricBlue} />
-          </View>
-          <View style={styles.presetTextBlock}>
-            <Text style={styles.presetName} numberOfLines={1}>{preset.name}</Text>
-            {preset.description ? (
-              <Text style={styles.presetDescription} numberOfLines={1}>
-                {preset.description}
-              </Text>
-            ) : null}
-            <Text style={styles.presetSummary} numberOfLines={1}>{summary}</Text>
-          </View>
-        </View>
-
-        {/* Config Tags */}
-        <View style={styles.presetTags}>
-          <View style={styles.tag}>
-            <MaterialCommunityIcons name="camera" size={10} color={Colors.accent} />
-            <Text style={styles.tagText}>
-              {preset.camera_front && preset.camera_back ? 'Dual' : preset.camera_front ? 'Front' : 'Back'}
-            </Text>
-          </View>
-          {preset.mirrored && (
-            <View style={styles.tag}>
-              <MaterialCommunityIcons name="flip-horizontal" size={10} color={Colors.cyan} />
-              <Text style={styles.tagText}>Mirror</Text>
-            </View>
-          )}
-          {preset.rotation !== 0 && (
-            <View style={styles.tag}>
-              <MaterialCommunityIcons name="rotate-right" size={10} color={Colors.warning} />
-              <Text style={styles.tagText}>{preset.rotation}°</Text>
-            </View>
-          )}
-          {preset.ai_enhancement && (
-            <View style={[styles.tag, styles.tagAi]}>
-              <Ionicons name="sparkles" size={10} color={Colors.purple} />
-              <Text style={[styles.tagText, { color: Colors.purple }]}>
-                {preset.ai_enhancement}
-              </Text>
-            </View>
-          )}
-          <View style={styles.tag}>
-            <MaterialCommunityIcons name="target" size={10} color={Colors.success} />
-            <Text style={styles.tagText}>{targetCount} apps</Text>
-          </View>
-        </View>
-
-        {/* Action Buttons */}
+        {/* Actions */}
         <View style={styles.presetActions}>
-          <Pressable onPress={onDelete} style={styles.deleteButton}>
-            <Ionicons name="trash-outline" size={16} color={Colors.danger} />
-          </Pressable>
-          <Pressable
-            onPress={onApply}
-            disabled={isApplying}
-            style={styles.applyButton}
-          >
-            {isApplying ? (
-              <ActivityIndicator size={14} color={Colors.textPrimary} />
-            ) : (
-              <Ionicons name="flash" size={14} color={Colors.textPrimary} />
-            )}
-            <Text style={styles.applyButtonText}>
-              {isApplying ? 'APPLYING...' : 'DEPLOY'}
-            </Text>
-          </Pressable>
+          {isRenaming ? (
+            <>
+              <Pressable onPress={onCancelRename} style={styles.actionButton}>
+                <Ionicons name="close" size={16} color={Colors.textSecondary} />
+                <Text style={styles.actionButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={onSaveRename} style={[styles.actionButton, styles.actionButtonPrimary]}>
+                <Ionicons name="checkmark" size={16} color={Colors.electricBlue} />
+                <Text style={[styles.actionButtonText, { color: Colors.electricBlue }]}>Save</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable onPress={onDelete} style={styles.deleteButton}>
+                <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+              </Pressable>
+              <Pressable onPress={onRename} style={styles.renameButton}>
+                <Ionicons name="pencil-outline" size={16} color={Colors.textSecondary} />
+              </Pressable>
+              <Pressable
+                onPress={onApply}
+                disabled={isApplying}
+                style={styles.applyButton}
+              >
+                {isApplying ? (
+                  <ActivityIndicator size={14} color={Colors.textPrimary} />
+                ) : (
+                  <Ionicons name="flash" size={14} color={Colors.textPrimary} />
+                )}
+                <Text style={styles.applyButtonText}>
+                  {isApplying ? 'LOADING...' : 'LOAD'}
+                </Text>
+              </Pressable>
+            </>
+          )}
         </View>
       </Pressable>
     </Animated.View>
@@ -522,19 +534,11 @@ const styles = StyleSheet.create({
   headerTextBlock: {
     flex: 1,
   },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
   screenTitle: {
     color: Colors.textPrimary,
     fontSize: FontSize.xxxl,
     fontWeight: '800',
     letterSpacing: 0.5,
-  },
-  titleGlow: {
-    marginTop: 2,
   },
   screenSubtitle: {
     color: Colors.textSecondary,
@@ -688,59 +692,23 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     textAlign: 'center',
   },
-  // Preset Card
   presetCard: {
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
     marginBottom: Spacing.md,
-    overflow: 'hidden',
-  },
-  presetGlassBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.electricBlue + '08',
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    gap: Spacing.sm,
-  },
-  presetSyncDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: Colors.electricBlue + '30',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  syncDotInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.electricBlue,
-  },
-  presetCloudBadge: {
-    color: Colors.electricBlue,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1,
-    flex: 1,
-  },
-  presetDate: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.xs,
-  },
-  presetMainContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
     padding: Spacing.lg,
+  },
+  presetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: Spacing.md,
+    marginBottom: Spacing.md,
   },
   presetIconBlock: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: BorderRadius.md,
     backgroundColor: Colors.electricBlue + '12',
     alignItems: 'center',
@@ -766,42 +734,34 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     marginTop: 4,
   },
-  presetTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  presetDate: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+  },
+  renameInputs: {
     gap: Spacing.xs,
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
   },
-  tag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
+  renameInput: {
     backgroundColor: Colors.surfaceLight,
+    borderRadius: BorderRadius.sm,
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-    borderRadius: BorderRadius.full,
+    paddingVertical: Spacing.xs,
+    color: Colors.textPrimary,
+    fontSize: FontSize.sm,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.electricBlue + '40',
   },
-  tagAi: {
-    borderColor: Colors.purple + '40',
-    backgroundColor: Colors.purple + '10',
-  },
-  tagText: {
-    color: Colors.textSecondary,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+  renameDescInput: {
+    fontSize: FontSize.xs,
   },
   presetActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.lg,
-    paddingTop: Spacing.xs,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
   deleteButton: {
     width: 36,
@@ -810,6 +770,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.danger + '12',
     borderWidth: 1,
     borderColor: Colors.danger + '25',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  renameButton: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -832,5 +802,25 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  actionButtonPrimary: {
+    backgroundColor: Colors.electricBlue + '15',
+    borderColor: Colors.electricBlue + '40',
+  },
+  actionButtonText: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
   },
 });

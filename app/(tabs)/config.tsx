@@ -1,36 +1,67 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
+  FlatList,
+  Alert,
+  ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import Animated, {
   FadeInDown,
+  FadeIn,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
 } from 'react-native-reanimated';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
+import { resolveMediaPath, type ResolvedPath } from '@/services/PathResolver';
 import { writeBridgeConfig } from '@/services/ConfigBridge';
 import HUDViewfinder from '@/components/media-studio/HUDViewfinder';
-import RotationDial from '@/components/media-studio/RotationDial';
 import SpanScalePanel from '@/components/media-studio/SpanScalePanel';
 import PositionControl from '@/components/media-studio/PositionControl';
-import PlaybackControls from '@/components/media-studio/PlaybackControls';
-import EngineOverlay from '@/components/media-studio/EngineOverlay';
 
 type ScaleMode = 'fit' | 'fill' | 'stretch';
 
-export default function MediaStudio() {
-  const insets = useSafeAreaInsets();
-  const { heavyImpact, mediumImpact } = useHaptics();
+type MediaItem = {
+  uri: string;
+  type: 'image' | 'video';
+  name: string;
+  timestamp: number;
+};
 
-  // Core state
-  const [selectedMedia] = useStorage<string | null>(STORAGE_KEYS.SELECTED_MEDIA, null);
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const PREVIEW_HEIGHT = SCREEN_WIDTH * 0.6;
+
+export default function StudioScreen() {
+  const insets = useSafeAreaInsets();
+  const { lightImpact, mediumImpact, heavyImpact, success } = useHaptics();
+
+  // Media state
+  const [selectedMedia, setSelectedMedia] = useStorage<string | null>(
+    STORAGE_KEYS.SELECTED_MEDIA,
+    null
+  );
+  const [recentFiles, setRecentFiles] = useStorage<MediaItem[]>(
+    STORAGE_KEYS.RECENT_FILES,
+    []
+  );
+  const [selectedType, setSelectedType] = useState<'image' | 'video' | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [resolvedPath, setResolvedPath] = useState<ResolvedPath | null>(null);
+
+  // Transform state
   const [rotation, setRotation] = useStorage(STORAGE_KEYS.ROTATION, 0);
   const [mirrored, setMirrored] = useStorage(STORAGE_KEYS.MIRRORED, false);
   const [flippedVertical, setFlippedVertical] = useStorage(STORAGE_KEYS.FLIPPED_VERTICAL, false);
@@ -38,19 +69,112 @@ export default function MediaStudio() {
   const [offsetX, setOffsetX] = useStorage(STORAGE_KEYS.OFFSET_X, 0);
   const [offsetY, setOffsetY] = useStorage(STORAGE_KEYS.OFFSET_Y, 0);
 
-  // Playback state
-  const [loopEnabled, setLoopEnabled] = useStorage(STORAGE_KEYS.LOOP_ENABLED, true);
-  const [loopStart, setLoopStart] = useStorage(STORAGE_KEYS.LOOP_START, 0);
-  const [loopEnd, setLoopEnd] = useStorage(STORAGE_KEYS.LOOP_END, 30);
+  useEffect(() => {
+    if (selectedMedia && recentFiles.length > 0) {
+      const found = recentFiles.find((f) => f.uri === selectedMedia);
+      if (found) {
+        setSelectedType(found.type);
+      }
+    }
+    // Resolve path whenever media changes
+    if (selectedMedia) {
+      resolveMediaPath(selectedMedia)
+        .then((resolved) => {
+          setResolvedPath(resolved);
+          // Update bridge config with resolved absolute path
+          writeBridgeConfig({ mediaSourcePath: resolved.absolutePath }).catch(() => {});
+        })
+        .catch(() => setResolvedPath(null));
+    } else {
+      setResolvedPath(null);
+    }
+  }, [selectedMedia, recentFiles]);
 
-  // Engine state
-  const [engineActive, setEngineActive] = useStorage(STORAGE_KEYS.ENGINE_ACTIVE, false);
+  const addToRecent = useCallback(
+    (item: MediaItem) => {
+      setRecentFiles((prev: MediaItem[]) => {
+        const filtered = prev.filter((f) => f.uri !== item.uri);
+        return [item, ...filtered].slice(0, 20);
+      });
+    },
+    [setRecentFiles]
+  );
 
-  // Handlers
-  const handleRotationChange = useCallback((angle: number) => {
-    setRotation(angle);
-    writeBridgeConfig({ rotation: angle }).catch(() => {});
-  }, [setRotation]);
+  const pickImage = useCallback(async () => {
+    try {
+      setLoading(true);
+      lightImpact();
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 1,
+        allowsEditing: false,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const item: MediaItem = {
+          uri: asset.uri,
+          type: 'image',
+          name: asset.fileName || `Image_${Date.now()}`,
+          timestamp: Date.now(),
+        };
+        setSelectedMedia(asset.uri);
+        setSelectedType('image');
+        addToRecent(item);
+        success();
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [lightImpact, success, setSelectedMedia, addToRecent]);
+
+  const pickVideo = useCallback(async () => {
+    try {
+      setLoading(true);
+      lightImpact();
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        quality: 1,
+        allowsEditing: false,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const item: MediaItem = {
+          uri: asset.uri,
+          type: 'video',
+          name: asset.fileName || `Video_${Date.now()}`,
+          timestamp: Date.now(),
+        };
+        setSelectedMedia(asset.uri);
+        setSelectedType('video');
+        addToRecent(item);
+        success();
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick video. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [lightImpact, success, setSelectedMedia, addToRecent]);
+
+  const selectRecent = useCallback(
+    (item: MediaItem) => {
+      lightImpact();
+      setSelectedMedia(item.uri);
+      setSelectedType(item.type);
+      addToRecent(item);
+    },
+    [lightImpact, setSelectedMedia, addToRecent]
+  );
+
+  const clearSelection = useCallback(() => {
+    lightImpact();
+    setSelectedMedia(null);
+    setSelectedType(null);
+  }, [lightImpact, setSelectedMedia]);
 
   const handleScaleModeChange = useCallback((mode: ScaleMode) => {
     setScaleMode(mode);
@@ -72,38 +196,8 @@ export default function MediaStudio() {
   const handleOffsetChange = useCallback((x: number, y: number) => {
     setOffsetX(x);
     setOffsetY(y);
+    writeBridgeConfig({ offsetX: x, offsetY: y }).catch(() => {});
   }, [setOffsetX, setOffsetY]);
-
-  const handleEngineToggle = useCallback((active: boolean) => {
-    setEngineActive(active);
-    writeBridgeConfig({ enabled: active }).catch(() => {});
-  }, [setEngineActive]);
-
-  const handleQuickPreset = useCallback((preset: string) => {
-    mediumImpact();
-    switch (preset) {
-      case 'default':
-        setRotation(0);
-        setMirrored(false);
-        setFlippedVertical(false);
-        setScaleMode('fit');
-        setOffsetX(0);
-        setOffsetY(0);
-        break;
-      case 'mirror':
-        setMirrored(true);
-        setFlippedVertical(false);
-        break;
-      case 'portrait':
-        setRotation(90);
-        setScaleMode('fill');
-        break;
-      case 'cinematic':
-        setScaleMode('fill');
-        setRotation(0);
-        break;
-    }
-  }, [mediumImpact, setRotation, setMirrored, setFlippedVertical, setScaleMode, setOffsetX, setOffsetY]);
 
   const handleResetAll = useCallback(() => {
     heavyImpact();
@@ -117,8 +211,18 @@ export default function MediaStudio() {
       rotation: 0,
       mirrored: false,
       scaleMode: 'fit',
+      offsetX: 0,
+      offsetY: 0,
     }).catch(() => {});
   }, [heavyImpact, setRotation, setMirrored, setFlippedVertical, setScaleMode, setOffsetX, setOffsetY]);
+
+  const renderRecentItem = ({ item }: { item: MediaItem }) => (
+    <RecentFileCard
+      item={item}
+      isSelected={selectedMedia === item.uri}
+      onPress={() => selectRecent(item)}
+    />
+  );
 
   return (
     <ScrollView
@@ -135,10 +239,10 @@ export default function MediaStudio() {
           <View>
             <View style={styles.titleRow}>
               <MaterialCommunityIcons name="monitor-cellphone" size={22} color={Colors.electricBlue} />
-              <Text style={styles.screenTitle}>Media Studio</Text>
+              <Text style={styles.screenTitle}>Studio</Text>
             </View>
             <Text style={styles.screenSubtitle}>
-              OBS-style virtual camera control
+              Media selection & transformation controls
             </Text>
           </View>
           <Pressable style={styles.resetAllButton} onPress={handleResetAll}>
@@ -156,46 +260,165 @@ export default function MediaStudio() {
             style={styles.statusGradient}
           >
             <StatusChip
-              label="Engine"
-              value={engineActive ? 'ON' : 'OFF'}
-              color={engineActive ? Colors.success : Colors.inactive}
-            />
-            <View style={styles.statusDivider} />
-            <StatusChip
-              label="Loop"
-              value={loopEnabled ? 'ON' : 'OFF'}
-              color={loopEnabled ? Colors.cyan : Colors.inactive}
-            />
-            <View style={styles.statusDivider} />
-            <StatusChip
               label="Media"
               value={selectedMedia ? 'LOADED' : 'NONE'}
               color={selectedMedia ? Colors.success : Colors.warning}
+            />
+            <View style={styles.statusDivider} />
+            <StatusChip
+              label="Scale"
+              value={scaleMode.toUpperCase()}
+              color={Colors.cyan}
+            />
+            <View style={styles.statusDivider} />
+            <StatusChip
+              label="Offset"
+              value={offsetX === 0 && offsetY === 0 ? 'CENTER' : 'CUSTOM'}
+              color={offsetX === 0 && offsetY === 0 ? Colors.success : Colors.electricBlue}
             />
           </LinearGradient>
         </View>
       </Animated.View>
 
-      {/* Live Viewfinder */}
-      <HUDViewfinder
-        mediaUri={selectedMedia}
-        rotation={rotation}
-        mirrored={mirrored}
-        flippedVertical={flippedVertical}
-        scaleMode={scaleMode}
-        offsetX={offsetX}
-        offsetY={offsetY}
-        aiOptimize={false}
-        aiSubjectLock={false}
-        aiLoading={false}
-        engineActive={engineActive}
-      />
+      {/* Media Library Section */}
+      <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="images" size={18} color={Colors.accent} />
+          <Text style={styles.sectionTitle}>Media Library</Text>
+        </View>
 
-      {/* The Transformer - Rotation Dial */}
-      <RotationDial
-        rotation={rotation}
-        onRotationChange={handleRotationChange}
-      />
+        {/* Live Preview */}
+        <View style={styles.previewCard}>
+          {selectedMedia ? (
+            <View style={styles.previewContainer}>
+              <Image
+                source={{ uri: selectedMedia }}
+                style={styles.previewImage}
+                contentFit="contain"
+                transition={300}
+              />
+              <View style={styles.previewOverlay}>
+                <View style={styles.previewBadge}>
+                  <Ionicons
+                    name={selectedType === 'video' ? 'videocam' : 'image'}
+                    size={12}
+                    color={Colors.textPrimary}
+                  />
+                  <Text style={styles.previewBadgeText}>
+                    {selectedType === 'video' ? 'VIDEO' : 'IMAGE'}
+                  </Text>
+                </View>
+                <Pressable onPress={clearSelection} style={styles.clearButton}>
+                  <Ionicons name="close-circle" size={20} color={Colors.textPrimary} />
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.emptyPreview}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="eye-off-outline" size={32} color={Colors.textTertiary} />
+              </View>
+              <Text style={styles.emptyTitle}>No Media Selected</Text>
+              <Text style={styles.emptySubtitle}>
+                Pick an image or video below to preview
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Media Picker */}
+        <View style={styles.pickerGrid}>
+          <PickerButton
+            icon="image-outline"
+            label="Pick Image"
+            sublabel="JPG, PNG, WEBP"
+            onPress={pickImage}
+            loading={loading}
+            color={Colors.accent}
+          />
+          <PickerButton
+            icon="videocam-outline"
+            label="Pick Video"
+            sublabel="MP4, MOV, MKV"
+            onPress={pickVideo}
+            loading={loading}
+            color={Colors.accentLight}
+          />
+        </View>
+
+        {/* Recent Files */}
+        {recentFiles.length > 0 && (
+          <>
+            <View style={styles.recentHeader}>
+              <Ionicons name="time-outline" size={16} color={Colors.textSecondary} />
+              <Text style={styles.recentTitle}>Recent Files</Text>
+              <Text style={styles.fileCount}>{recentFiles.length}</Text>
+            </View>
+            <FlatList
+              data={recentFiles}
+              renderItem={renderRecentItem}
+              keyExtractor={(item) => item.uri + item.timestamp}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.recentList}
+              scrollEnabled={true}
+            />
+          </>
+        )}
+
+        {/* Media Info */}
+        {selectedMedia && resolvedPath && (
+          <Animated.View entering={FadeIn.delay(200).duration(400)} style={styles.mediaInfoCard}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Type</Text>
+              <Text style={styles.detailValue}>
+                {selectedType === 'video' ? 'Video File' : 'Static Image'}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>MIME</Text>
+              <Text style={styles.detailValue}>
+                {resolvedPath?.mimeType || 'Unknown'}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Hook Status</Text>
+              <Text style={[styles.detailValue, { color: resolvedPath?.isAccessible ? Colors.electricBlue : Colors.warningAmber }]}>
+                {resolvedPath?.isAccessible ? 'Accessible' : 'Inaccessible'}
+              </Text>
+            </View>
+            {resolvedPath && resolvedPath.fileSize > 0 && (
+              <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.detailLabel}>File Size</Text>
+                <Text style={styles.detailValue}>
+                  {(resolvedPath.fileSize / 1024).toFixed(1)} KB
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
+      </Animated.View>
+
+      {/* Live Viewfinder */}
+      <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="monitor-eye" size={18} color={Colors.electricBlue} />
+          <Text style={styles.sectionTitle}>Live Viewfinder</Text>
+        </View>
+        <HUDViewfinder
+          mediaUri={selectedMedia}
+          rotation={rotation}
+          mirrored={mirrored}
+          flippedVertical={flippedVertical}
+          scaleMode={scaleMode}
+          offsetX={offsetX}
+          offsetY={offsetY}
+          aiOptimize={false}
+          aiSubjectLock={false}
+          aiLoading={false}
+          engineActive={false}
+        />
+      </Animated.View>
 
       {/* Span & Scale */}
       <SpanScalePanel
@@ -214,27 +437,6 @@ export default function MediaStudio() {
         onOffsetChange={handleOffsetChange}
       />
 
-      {/* Playback Engine */}
-      <PlaybackControls
-        loopEnabled={loopEnabled}
-        loopStart={loopStart}
-        loopEnd={loopEnd}
-        mediaDuration={30}
-        onLoopEnabledChange={setLoopEnabled}
-        onLoopStartChange={setLoopStart}
-        onLoopEndChange={setLoopEnd}
-      />
-
-      {/* Android Integration */}
-      <EngineOverlay
-        engineActive={engineActive}
-        onEngineToggle={handleEngineToggle}
-        rotation={rotation}
-        scaleMode={scaleMode}
-        selectedMedia={selectedMedia}
-        onQuickPreset={handleQuickPreset}
-      />
-
       {/* Footer spacer */}
       <View style={{ height: 60 }} />
     </ScrollView>
@@ -250,6 +452,100 @@ function StatusChip({ label, value, color }: { label: string; value: string; col
         <Text style={[styles.statusChipValue, { color }]}>{value}</Text>
       </View>
     </View>
+  );
+}
+
+function PickerButton({
+  icon,
+  label,
+  sublabel,
+  onPress,
+  loading,
+  color,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  sublabel: string;
+  onPress: () => void;
+  loading: boolean;
+  color: string;
+}) {
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={[styles.pickerButtonWrapper, animStyle]}>
+      <Pressable
+        onPressIn={() => {
+          scale.value = withSpring(0.96);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1);
+        }}
+        onPress={onPress}
+        disabled={loading}
+        style={[styles.pickerButton, { borderColor: color + '40' }]}
+      >
+        {loading ? (
+          <ActivityIndicator color={color} size="small" />
+        ) : (
+          <View style={[styles.pickerIconCircle, { backgroundColor: color + '20' }]}>
+            <Ionicons name={icon} size={24} color={color} />
+          </View>
+        )}
+        <Text style={styles.pickerLabel}>{label}</Text>
+        <Text style={styles.pickerSublabel}>{sublabel}</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function RecentFileCard({
+  item,
+  isSelected,
+  onPress,
+}: {
+  item: MediaItem;
+  isSelected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.recentCard,
+        isSelected && styles.recentCardSelected,
+      ]}
+    >
+      <Image
+        source={{ uri: item.uri }}
+        style={styles.recentThumb}
+        contentFit="cover"
+        transition={200}
+      />
+      <View style={styles.recentInfo}>
+        <Text style={styles.recentName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <View style={styles.recentMeta}>
+          <Ionicons
+            name={item.type === 'video' ? 'videocam' : 'image'}
+            size={10}
+            color={Colors.textTertiary}
+          />
+          <Text style={styles.recentType}>
+            {item.type === 'video' ? 'VID' : 'IMG'}
+          </Text>
+        </View>
+      </View>
+      {isSelected && (
+        <View style={styles.recentCheck}>
+          <Ionicons name="checkmark-circle" size={16} color={Colors.accent} />
+        </View>
+      )}
+    </Pressable>
   );
 }
 
@@ -345,5 +641,215 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+    marginTop: Spacing.sm,
+  },
+  sectionTitle: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    flex: 1,
+  },
+  previewCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: Spacing.md,
+  },
+  previewContainer: {
+    width: '100%',
+    height: PREVIEW_HEIGHT,
+    backgroundColor: Colors.surfaceLight,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewOverlay: {
+    position: 'absolute',
+    top: Spacing.md,
+    left: Spacing.md,
+    right: Spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  previewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.overlay,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+  },
+  previewBadgeText: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  clearButton: {
+    backgroundColor: Colors.overlay,
+    borderRadius: BorderRadius.full,
+    padding: 4,
+  },
+  emptyPreview: {
+    height: PREVIEW_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.md,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  emptyTitle: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.lg,
+    fontWeight: '600',
+  },
+  emptySubtitle: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.sm,
+  },
+  pickerGrid: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  pickerButtonWrapper: {
+    flex: 1,
+  },
+  pickerButton: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderWidth: 1,
+  },
+  pickerIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerLabel: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  pickerSublabel: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+  },
+  recentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  recentTitle: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    flex: 1,
+  },
+  fileCount: {
+    color: Colors.accent,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    backgroundColor: Colors.accent + '20',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  recentList: {
+    paddingVertical: Spacing.sm,
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  recentCard: {
+    width: 120,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginRight: Spacing.md,
+  },
+  recentCardSelected: {
+    borderColor: Colors.accent,
+    borderWidth: 2,
+  },
+  recentThumb: {
+    width: '100%',
+    height: 80,
+    backgroundColor: Colors.surfaceLight,
+  },
+  recentInfo: {
+    padding: Spacing.sm,
+  },
+  recentName: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+  },
+  recentMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  recentType: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+  },
+  recentCheck: {
+    position: 'absolute',
+    top: Spacing.xs,
+    right: Spacing.xs,
+  },
+  mediaInfoCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  detailLabel: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+  },
+  detailValue: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
   },
 });
