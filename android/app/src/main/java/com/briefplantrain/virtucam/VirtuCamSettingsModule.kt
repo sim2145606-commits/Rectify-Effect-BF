@@ -427,6 +427,68 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Get Xposed/LSPosed logs related to VirtuCam
+     */
+    @ReactMethod
+    fun getXposedLogs(promise: Promise) {
+        try {
+            val result = Arguments.createMap()
+            
+            // Try to get logcat entries related to VirtuCam and Xposed
+            val logcatCommand = "logcat -d -s VirtuCam:* Xposed:* LSPosed:* | tail -n 500"
+            val logs = executeCommand(logcatCommand)
+            
+            result.putString("logs", logs)
+            result.putBoolean("success", logs.isNotEmpty())
+            
+            promise.resolve(result)
+        } catch (e: Exception) {
+            val result = Arguments.createMap()
+            result.putString("logs", "")
+            result.putBoolean("success", false)
+            result.putString("error", e.message)
+            promise.resolve(result)
+        }
+    }
+
+    /**
+     * Get system logcat (last 1000 lines)
+     */
+    @ReactMethod
+    fun getSystemLogs(lineCount: Int, promise: Promise) {
+        try {
+            val count = if (lineCount > 0) lineCount else 1000
+            val logcatCommand = "logcat -d | tail -n $count"
+            val logs = executeCommand(logcatCommand)
+            
+            val result = Arguments.createMap()
+            result.putString("logs", logs)
+            result.putBoolean("success", logs.isNotEmpty())
+            
+            promise.resolve(result)
+        } catch (e: Exception) {
+            val result = Arguments.createMap()
+            result.putString("logs", "")
+            result.putBoolean("success", false)
+            result.putString("error", e.message)
+            promise.resolve(result)
+        }
+    }
+
+    /**
+     * Clear logcat buffer
+     */
+    @ReactMethod
+    fun clearSystemLogs(promise: Promise) {
+        try {
+            executeCommand("logcat -c")
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    /**
      * Execute a shell command and return output
      */
     private fun executeCommand(command: String): String {

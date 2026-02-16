@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Modal,
 } from 'react-native';
+import { useRouter, type Href } from 'expo-router';
 import Animated, {
   FadeInDown,
   FadeIn,
@@ -179,6 +180,7 @@ const DEFAULT_APPS: TargetApp[] = [
 ];
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { lightImpact, mediumImpact, success, warning, heavyImpact } = useHaptics();
 
@@ -741,10 +743,20 @@ export default function SettingsScreen() {
               <Text style={styles.aboutLabel}>Target SDK</Text>
               <Text style={styles.aboutValue}>Android 10 – 16</Text>
             </View>
-            <View style={[styles.aboutRow, { borderBottomWidth: 0 }]}>
+            <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>AI Engine</Text>
               <Text style={styles.aboutValue}>Newell AI v1.0</Text>
             </View>
+            <Pressable
+              onPress={() => router.push('/logs' as Href)}
+              style={[styles.aboutRow, { borderBottomWidth: 0 }]}
+            >
+              <View style={styles.logsButtonContent}>
+                <Ionicons name="document-text" size={16} color={Colors.electricBlue} />
+                <Text style={[styles.aboutLabel, { color: Colors.electricBlue }]}>Diagnostic Logs</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={Colors.electricBlue} />
+            </Pressable>
           </Card>
         </Animated.View>
 
@@ -1694,5 +1706,10 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: FontSize.sm,
     lineHeight: 18,
+  },
+  logsButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
 });
