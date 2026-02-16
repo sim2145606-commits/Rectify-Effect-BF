@@ -8,7 +8,6 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -28,15 +27,14 @@ import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constan
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
-import { getStatusColor, getStatusIcon, type SystemCheckStatus } from '@/services/SystemVerification';
-import { syncAllSettings, getBridgeStatus } from '@/services/ConfigBridge';
+import { getStatusColor, getStatusIcon, getSystemInfo, type SystemCheckStatus, type SystemInfo } from '@/services/SystemVerification';
+import { syncAllSettings, getBridgeStatus, getConfigPath } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
 
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { heavyImpact, success, warning, mediumImpact } = useHaptics();
 
   const [hookEnabled, setHookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
@@ -48,6 +46,10 @@ export default function Dashboard() {
   const { status: systemStatus, isChecking, refresh: refreshSystemStatus } = useSystemStatus(30000);
   const [bridgeVersion, setBridgeVersion] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
+  const [bridgePath, setBridgePath] = useState<string | null>(null);
+  const [bridgeReadable, setBridgeReadable] = useState(false);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
+  const [loadingSystemInfo, setLoadingSystemInfo] = useState(false);
 
   const masterGlow = useSharedValue(0);
   const masterScale = useSharedValue(1);
@@ -60,6 +62,8 @@ export default function Dashboard() {
         await syncAllSettings();
         const bridgeSt = await getBridgeStatus();
         setBridgeVersion(bridgeSt.version);
+        setBridgePath(bridgeSt.path);
+        setBridgeReadable(bridgeSt.readable);
         setLastSyncTime(new Date().toLocaleTimeString());
       } catch {
         // Silent
@@ -67,6 +71,17 @@ export default function Dashboard() {
     };
     doSync();
   }, [hookEnabled, frontCamera, backCamera, selectedMedia]);
+
+  // Load system info on mount
+  useEffect(() => {
+    const loadInfo = async () => {
+      setLoadingSystemInfo(true);
+      const info = await getSystemInfo();
+      setSystemInfo(info);
+      setLoadingSystemInfo(false);
+    };
+    loadInfo();
+  }, []);
 
   useEffect(() => {
     if (hookEnabled) {
@@ -105,6 +120,12 @@ export default function Dashboard() {
   }));
 
   const handleMasterToggle = useCallback(async () => {
+    // Verify prerequisites before enabling
+    if (!hookEnabled && !allSystemsReady) {
+      warning();
+      return;
+    }
+
     if (hookEnabled) {
       warning();
     } else {
@@ -112,7 +133,7 @@ export default function Dashboard() {
       setTimeout(() => success(), 200);
     }
     setHookEnabled(!hookEnabled);
-  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning]);
+  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning, allSystemsReady]);
 
   const handleRefreshStatus = useCallback(async () => {
     mediumImpact();
@@ -120,7 +141,15 @@ export default function Dashboard() {
     await syncAllSettings();
     const bridgeSt = await getBridgeStatus();
     setBridgeVersion(bridgeSt.version);
+    setBridgePath(bridgeSt.path);
+    setBridgeReadable(bridgeSt.readable);
     setLastSyncTime(new Date().toLocaleTimeString());
+    
+    // Refresh system info
+    setLoadingSystemInfo(true);
+    const info = await getSystemInfo();
+    setSystemInfo(info);
+    setLoadingSystemInfo(false);
   }, [mediumImpact, refreshSystemStatus]);
 
   const activeTargets = [
@@ -347,7 +376,7 @@ export default function Dashboard() {
         </View>
       </Animated.View>
 
-      {/* Bridge Status */}
+      {/* Config Bridge Status */}
       <Animated.View entering={FadeInDown.delay(500).duration(500)}>
         <View style={styles.sectionHeader}>
           <MaterialCommunityIcons name="bridge" size={18} color={Colors.cyan} />
@@ -357,8 +386,10 @@ export default function Dashboard() {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Bridge Status</Text>
             <View style={styles.infoValueRow}>
-              <View style={[styles.miniDot, { backgroundColor: Colors.electricBlue }]} />
-              <Text style={[styles.infoValue, { color: Colors.electricBlue }]}>Connected</Text>
+              <View style={[styles.miniDot, { backgroundColor: bridgeReadable ? Colors.success : Colors.danger }]} />
+              <Text style={[styles.infoValue, { color: bridgeReadable ? Colors.success : Colors.danger }]}>
+                {bridgeReadable ? 'Readable' : 'Not Readable'}
+              </Text>
             </View>
           </View>
           <View style={styles.infoRow}>
@@ -371,114 +402,93 @@ export default function Dashboard() {
           </View>
           <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
             <Text style={styles.infoLabel}>Storage Path</Text>
-            <Text style={styles.infoValue} numberOfLines={1}>
-              /virtucam/bridge.json
+            <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={2}>
+              {bridgePath || 'Unknown'}
             </Text>
           </View>
         </Card>
       </Animated.View>
 
-      {/* System Integrity Access */}
-      <Animated.View entering={FadeInDown.delay(520).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="shield-checkmark" size={18} color={Colors.success} />
-          <Text style={styles.sectionTitle}>System Integrity</Text>
-        </View>
-        <Pressable
-          onPress={() => {
-            mediumImpact();
-            router.push('/integrity');
-          }}
-          style={styles.integrityCard}
-        >
-          <View style={styles.integrityIconCircle}>
-            <Ionicons name="scan" size={28} color={Colors.success} />
-          </View>
-          <View style={styles.integrityText}>
-            <Text style={styles.integrityTitle}>Pre-Flight Diagnostic</Text>
-            <Text style={styles.integrityDesc}>
-              One-tap integrity scan, log exporter & connectivity heartbeat
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={Colors.success} />
-        </Pressable>
-      </Animated.View>
-
-      {/* System Engine Access */}
-      <Animated.View entering={FadeInDown.delay(550).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="hardware-chip" size={18} color={Colors.cyan} />
-          <Text style={styles.sectionTitle}>System Engine</Text>
-        </View>
-        <Pressable
-          onPress={() => {
-            mediumImpact();
-            router.push('/engine');
-          }}
-          style={styles.engineAccessCard}
-        >
-          <View style={styles.engineAccessIconCircle}>
-            <Ionicons name="cog" size={28} color={Colors.cyan} />
-          </View>
-          <View style={styles.engineAccessText}>
-            <Text style={styles.engineAccessTitle}>Engine Diagnostics & Control</Text>
-            <Text style={styles.engineAccessDesc}>
-              System setup, injection hooks & engine initialization
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={Colors.cyan} />
-        </Pressable>
-      </Animated.View>
-
-      {/* Cloud Command Access */}
-      <Animated.View entering={FadeInDown.delay(600).duration(500)}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="cloud-sync" size={18} color={Colors.electricBlue} />
-          <Text style={styles.sectionTitle}>Cloud Command</Text>
-        </View>
-        <Pressable
-          onPress={() => {
-            mediumImpact();
-            router.push('/cloud');
-          }}
-          style={styles.cloudCommandCard}
-        >
-          <View style={styles.cloudCommandIconCircle}>
-            <MaterialCommunityIcons name="cloud-sync" size={28} color={Colors.electricBlue} />
-          </View>
-          <View style={styles.cloudCommandText}>
-            <Text style={styles.cloudCommandTitle}>Cloud Command Dashboard</Text>
-            <Text style={styles.cloudCommandDesc}>
-              View sync status, cloud presets & verified configurations
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={Colors.electricBlue} />
-        </Pressable>
-      </Animated.View>
-
       {/* System Information */}
-      <Animated.View entering={FadeInDown.delay(700).duration(500)}>
+      <Animated.View entering={FadeInDown.delay(600).duration(500)}>
         <View style={styles.sectionHeader}>
           <Ionicons name="information-circle-outline" size={18} color={Colors.accent} />
           <Text style={styles.sectionTitle}>System Information</Text>
+          {loadingSystemInfo && <ActivityIndicator size="small" color={Colors.accent} />}
         </View>
         <Card>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Platform</Text>
-            <Text style={styles.infoValue}>{Platform.OS === 'android' ? 'Android' : Platform.OS}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Hook Method</Text>
-            <Text style={styles.infoValue}>Camera2 + Camera1 Adaptive</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Compatibility</Text>
-            <Text style={styles.infoValue}>Android 9 – 16</Text>
-          </View>
-          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.infoLabel}>Engine</Text>
-            <Text style={styles.infoValue}>VirtuCam Core v2.0</Text>
-          </View>
+          {systemInfo ? (
+            <>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Device</Text>
+                <Text style={styles.infoValue}>{systemInfo.manufacturer} {systemInfo.model}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Brand</Text>
+                <Text style={styles.infoValue}>{systemInfo.brand}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Product</Text>
+                <Text style={styles.infoValue}>{systemInfo.product}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Android Version</Text>
+                <Text style={styles.infoValue}>{systemInfo.androidVersion} (SDK {systemInfo.sdkLevel})</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Build Number</Text>
+                <Text style={styles.infoValue}>{systemInfo.buildNumber}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Security Patch</Text>
+                <Text style={styles.infoValue}>{systemInfo.securityPatch}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Kernel Version</Text>
+                <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={2}>
+                  {systemInfo.kernelVersion}
+                </Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>SELinux Status</Text>
+                <Text style={styles.infoValue}>{systemInfo.selinuxStatus}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Root Solution</Text>
+                <Text style={styles.infoValue}>
+                  {systemInfo.rootSolution}
+                  {systemInfo.rootVersion ? ` ${systemInfo.rootVersion}` : ''}
+                </Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>ABI List</Text>
+                <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={1}>
+                  {systemInfo.abiList}
+                </Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Storage</Text>
+                <Text style={styles.infoValue}>{systemInfo.storage}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Max Memory</Text>
+                <Text style={styles.infoValue}>{systemInfo.maxMemory}</Text>
+              </View>
+              <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.infoLabel}>Fingerprint</Text>
+                <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={2}>
+                  {systemInfo.fingerprint}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.infoLabel}>Status</Text>
+              <Text style={[styles.infoValue, { color: Colors.danger }]}>
+                {loadingSystemInfo ? 'Loading...' : 'Unavailable'}
+              </Text>
+            </View>
+          )}
         </Card>
       </Animated.View>
 
@@ -850,122 +860,5 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-  },
-  engineAccessCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.cyan + '30',
-    marginBottom: Spacing.lg,
-    shadowColor: Colors.cyan,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  engineAccessIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.cyan + '15',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.cyan + '30',
-  },
-  engineAccessText: {
-    flex: 1,
-  },
-  engineAccessTitle: {
-    color: Colors.cyan,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-  },
-  engineAccessDesc: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
-  integrityCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.success + '30',
-    marginBottom: Spacing.lg,
-    shadowColor: Colors.success,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  integrityIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.success + '15',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.success + '30',
-  },
-  integrityText: {
-    flex: 1,
-  },
-  integrityTitle: {
-    color: Colors.success,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-  },
-  integrityDesc: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
-  cloudCommandCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.electricBlue + '30',
-    marginBottom: Spacing.lg,
-    shadowColor: Colors.electricBlue,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  cloudCommandIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.electricBlue + '15',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.electricBlue + '30',
-  },
-  cloudCommandText: {
-    flex: 1,
-  },
-  cloudCommandTitle: {
-    color: Colors.electricBlue,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-  },
-  cloudCommandDesc: {
-    color: Colors.textTertiary,
-    fontSize: FontSize.xs,
-    marginTop: 2,
   },
 });

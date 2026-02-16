@@ -125,11 +125,11 @@ export default function TabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Targets',
+          title: 'Settings',
           tabBarIcon: ({ color, focused }) => (
             <TabIcon
-              name="crosshairs-gps"
-              library="material"
+              name="settings"
+              library="ionicons"
               color={color}
               focused={focused}
             />

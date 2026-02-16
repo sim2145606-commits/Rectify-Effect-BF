@@ -39,6 +39,7 @@ import {
 } from '@/services/PermissionManager';
 import { getStatusColor } from '@/services/SystemVerification';
 import { getSyncStatus } from '@/services/PresetService';
+import { resetToDefaults } from '@/services/ResetService';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
 
@@ -200,6 +201,7 @@ export default function SettingsScreen() {
   const [launchingApp, setLaunchingApp] = useState<string | null>(null);
   const [cloudVerifiedApps, setCloudVerifiedApps] = useState<string[]>([]);
   const [selectedApp, setSelectedApp] = useState<TargetApp | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Load cloud verified apps
   useEffect(() => {
@@ -362,6 +364,65 @@ export default function SettingsScreen() {
     },
     [lightImpact]
   );
+
+  const handleResetToDefaults = useCallback(() => {
+    Alert.alert(
+      'Reset to Defaults',
+      'This will reset ALL settings to their default values. Your permissions and onboarding status will be preserved. This action cannot be undone.\n\nAre you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            setIsResetting(true);
+            heavyImpact();
+            
+            try {
+              const result = await resetToDefaults();
+              
+              if (result.success && result.verification) {
+                if (result.verification.valuesVerified) {
+                  success();
+                  Alert.alert(
+                    'Reset Complete',
+                    'All settings have been reset to defaults and verified successfully. Please restart the app for changes to take full effect.',
+                    [
+                      {
+                        text: 'OK',
+                        onPress: () => {
+                          // Reload the target apps from storage
+                          setTargetApps(DEFAULT_APPS);
+                          setTargetMode('whitelist');
+                        },
+                      },
+                    ]
+                  );
+                } else {
+                  warning();
+                  Alert.alert(
+                    'Reset Completed with Warnings',
+                    'Settings were reset but verification detected some inconsistencies. Please check your settings and restart the app.',
+                  );
+                }
+              } else {
+                warning();
+                Alert.alert(
+                  'Reset Failed',
+                  result.error || 'Failed to reset settings. Please try again.',
+                );
+              }
+            } catch (error: any) {
+              warning();
+              Alert.alert('Reset Error', error.message || 'An unexpected error occurred.');
+            } finally {
+              setIsResetting(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [heavyImpact, success, warning, setTargetApps, setTargetMode]);
 
   return (
     <>
@@ -679,6 +740,38 @@ export default function SettingsScreen() {
             <View style={[styles.aboutRow, { borderBottomWidth: 0 }]}>
               <Text style={styles.aboutLabel}>AI Engine</Text>
               <Text style={styles.aboutValue}>Newell AI v1.0</Text>
+            </View>
+          </Card>
+        </Animated.View>
+
+        {/* Reset to Defaults */}
+        <Animated.View entering={FadeInDown.delay(700).duration(500)}>
+          <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
+            <Ionicons name="refresh" size={18} color={Colors.danger} />
+            <Text style={styles.sectionTitle}>Reset Settings</Text>
+          </View>
+          <Card>
+            <View style={styles.resetSection}>
+              <View style={styles.resetInfo}>
+                <Text style={styles.resetTitle}>Reset to Default Settings</Text>
+                <Text style={styles.resetDesc}>
+                  Restore all settings to their default values. Your permissions, onboarding status, and system logs will be preserved.
+                </Text>
+              </View>
+              <GlowButton
+                label={isResetting ? 'Resetting...' : 'Reset All'}
+                variant="danger"
+                size="medium"
+                onPress={handleResetToDefaults}
+                disabled={isResetting}
+                icon={
+                  isResetting ? (
+                    <ActivityIndicator size="small" color={Colors.textPrimary} />
+                  ) : (
+                    <Ionicons name="refresh" size={16} color={Colors.textPrimary} />
+                  )
+                }
+              />
             </View>
           </Card>
         </Animated.View>
@@ -1581,5 +1674,21 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '600',
+  },
+  resetSection: {
+    gap: Spacing.lg,
+  },
+  resetInfo: {
+    gap: Spacing.sm,
+  },
+  resetTitle: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+  },
+  resetDesc: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    lineHeight: 18,
   },
 });
