@@ -31,8 +31,14 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
       },
       onPanResponderMove: (_, gestureState) => {
         // Normalize to -100..100 range based on grid drag distance
-        const normX = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, Math.round((gestureState.dx / GRID_SIZE) * MAX_OFFSET * 2)));
-        const normY = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, Math.round((gestureState.dy / GRID_SIZE) * MAX_OFFSET * 2)));
+        const normX = Math.max(
+          -MAX_OFFSET,
+          Math.min(MAX_OFFSET, Math.round((gestureState.dx / GRID_SIZE) * MAX_OFFSET * 2))
+        );
+        const normY = Math.max(
+          -MAX_OFFSET,
+          Math.min(MAX_OFFSET, Math.round((gestureState.dy / GRID_SIZE) * MAX_OFFSET * 2))
+        );
         onOffsetChange(normX, normY);
       },
       onPanResponderRelease: () => {
@@ -41,12 +47,15 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
     })
   ).current;
 
-  const handleNudge = useCallback((dx: number, dy: number) => {
-    selection();
-    const newX = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, offsetX + dx));
-    const newY = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, offsetY + dy));
-    onOffsetChange(newX, newY);
-  }, [offsetX, offsetY, onOffsetChange, selection]);
+  const handleNudge = useCallback(
+    (dx: number, dy: number) => {
+      selection();
+      const newX = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, offsetX + dx));
+      const newY = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, offsetY + dy));
+      onOffsetChange(newX, newY);
+    },
+    [offsetX, offsetY, onOffsetChange, selection]
+  );
 
   const handleReset = useCallback(() => {
     heavyImpact();
@@ -62,7 +71,9 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
       <View style={styles.header}>
         <MaterialCommunityIcons name="cursor-move" size={16} color={Colors.electricBlue} />
         <Text style={styles.headerTitle}>POSITION OFFSET</Text>
-        <Text style={styles.headerValue}>X:{offsetX} Y:{offsetY}</Text>
+        <Text style={styles.headerValue}>
+          X:{offsetX} Y:{offsetY}
+        </Text>
       </View>
 
       <View style={styles.panel}>
@@ -142,8 +153,12 @@ function NudgeButton({
   return (
     <Animated.View style={animStyle}>
       <Pressable
-        onPressIn={() => { scale.value = withSpring(0.85); }}
-        onPressOut={() => { scale.value = withSpring(1); }}
+        onPressIn={() => {
+          scale.value = withSpring(0.85);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1);
+        }}
         onPress={onPress}
         style={styles.nudgeButton}
       >

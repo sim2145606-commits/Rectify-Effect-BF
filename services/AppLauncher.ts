@@ -9,7 +9,10 @@ type LaunchResult = {
  * Attempts to launch a target application by package name.
  * In the Expo dev client we fall back to an informational message so bundling never fails.
  */
-export async function launchTargetApp(packageName: string, appName?: string): Promise<LaunchResult> {
+export async function launchTargetApp(
+  packageName: string,
+  appName?: string
+): Promise<LaunchResult> {
   if (Platform.OS !== 'android') {
     return { success: false, message: 'Target launching is only supported on Android devices.' };
   }

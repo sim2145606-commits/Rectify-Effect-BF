@@ -1,11 +1,13 @@
 # VirtuCam Diagnostic Logging System
 
 ## Overview
+
 A comprehensive real-time logging system with error tracking, system information capture, and export capabilities for debugging and user support.
 
 ## Features
 
 ### 1. **Enhanced LogService** (`services/LogService.ts`)
+
 - Real-time log collection with automatic memory management (keeps last 1000 logs)
 - Multiple log levels: `info`, `warn`, `error`, `success`, `debug`
 - Source tracking for identifying log origin
@@ -17,13 +19,17 @@ A comprehensive real-time logging system with error tracking, system information
 - Statistics (error count, warning count)
 
 ### 2. **Native Module Integration** (`VirtuCamSettingsModule.kt`)
+
 Added three new methods:
+
 - `getXposedLogs()` - Retrieves Xposed/LSPosed related logs from logcat
 - `getSystemLogs(lineCount)` - Gets system logcat entries
 - `clearSystemLogs()` - Clears logcat buffer
 
 ### 3. **Log Viewer Screen** (`app/logs.tsx`)
+
 Full-featured diagnostic interface:
+
 - **Real-time updates** - Logs appear instantly as they're generated
 - **Search functionality** - Filter logs by text
 - **Level filtering** - Filter by info, warn, error, success, debug
@@ -42,6 +48,7 @@ Full-featured diagnostic interface:
 - **Long-press to copy** - Quick copy of individual entries
 
 ### 4. **Settings Integration**
+
 Added "Diagnostic Logs" button in the About section of Settings tab for easy access.
 
 ## Usage
@@ -49,6 +56,7 @@ Added "Diagnostic Logs" button in the About section of Settings tab for easy acc
 ### For Developers
 
 #### Basic Logging
+
 ```typescript
 import { logger } from '@/services/LogService';
 
@@ -60,14 +68,14 @@ logger.success('Settings saved');
 logger.debug('Frame processed', 'CameraHook');
 
 // With source and details
-logger.error(
-  'Failed to write config',
-  'ConfigBridge',
-  { error: error.message, stack: error.stack }
-);
+logger.error('Failed to write config', 'ConfigBridge', {
+  error: error.message,
+  stack: error.stack,
+});
 ```
 
 #### Export Logs Programmatically
+
 ```typescript
 import { logger } from '@/services/LogService';
 
@@ -82,6 +90,7 @@ const logText = await logger.formatLogsAsText();
 ```
 
 #### Filter Logs
+
 ```typescript
 // Get all errors
 const errors = logger.getLogsByLevel('error');
@@ -124,6 +133,7 @@ const recentLogs = logger.getLogsByTimeRange(
 ## Log Format
 
 ### Individual Log Entry
+
 ```
 [Timestamp] [LEVEL] [Source]
     Message
@@ -131,6 +141,7 @@ const recentLogs = logger.getLogsByTimeRange(
 ```
 
 ### Exported Log File
+
 ```
 ============================================================
 VirtuCam Diagnostic Log
@@ -185,7 +196,9 @@ End of Log
 ## Integration Points
 
 ### Automatic Logging
+
 The system automatically logs:
+
 - App startup
 - Configuration changes
 - Permission checks
@@ -194,6 +207,7 @@ The system automatically logs:
 - Success operations
 
 ### Manual Integration
+
 Add logging to any service or component:
 
 ```typescript
@@ -202,16 +216,12 @@ import { logger } from '@/services/LogService';
 export async function myFunction() {
   try {
     logger.info('Starting operation', 'MyService');
-    
+
     // ... your code ...
-    
+
     logger.success('Operation completed', 'MyService');
   } catch (error: any) {
-    logger.error(
-      'Operation failed',
-      'MyService',
-      { error: error.message, stack: error.stack }
-    );
+    logger.error('Operation failed', 'MyService', { error: error.message, stack: error.stack });
     throw error;
   }
 }
@@ -220,12 +230,14 @@ export async function myFunction() {
 ## Benefits
 
 ### For Users
+
 - **Easy troubleshooting** - See exactly what's happening
 - **Support assistance** - Share logs with support team
 - **Transparency** - Understand app behavior
 - **Problem diagnosis** - Identify issues quickly
 
 ### For Developers
+
 - **Remote debugging** - Users can send logs
 - **Error tracking** - See all errors in one place
 - **Performance monitoring** - Track operations
@@ -235,24 +247,28 @@ export async function myFunction() {
 ## Technical Details
 
 ### Memory Management
+
 - Keeps last 1000 log entries in memory
 - Automatically removes oldest entries
 - Minimal memory footprint
 - No performance impact
 
 ### Storage
+
 - Logs exported to app's document directory
 - Files named: `virtucam_log_YYYY-MM-DDTHH-MM-SS.txt`
 - Accessible via file manager
 - Can be shared via any app
 
 ### Privacy
+
 - Logs stored locally only
 - No automatic upload
 - User controls sharing
 - System info included for debugging
 
 ### Performance
+
 - Asynchronous operations
 - Non-blocking logging
 - Efficient filtering
@@ -261,6 +277,7 @@ export async function myFunction() {
 ## Future Enhancements
 
 Potential improvements:
+
 - Log rotation (automatic cleanup of old files)
 - Cloud sync option (opt-in)
 - Advanced filtering (regex, date ranges)
@@ -273,16 +290,19 @@ Potential improvements:
 ## Troubleshooting
 
 ### Logs Not Appearing
+
 - Check if app has storage permission
 - Verify LogService is imported correctly
 - Ensure logger methods are being called
 
 ### Export Fails
+
 - Check storage permission
 - Verify available storage space
 - Try clearing app cache
 
 ### System Logs Empty
+
 - Requires READ_LOGS permission (system app or root)
 - May not work on all devices
 - Check logcat access permissions
@@ -290,6 +310,7 @@ Potential improvements:
 ## Support
 
 For issues or questions about the logging system:
+
 1. Check the logs viewer for error messages
 2. Export and review the full log file
 3. Share logs with support team if needed

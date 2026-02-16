@@ -25,12 +25,14 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
-const SIZE_MAP: Record<Size, { paddingVertical: number; paddingHorizontal: number; fontSize: number }> =
-  {
-    small: { paddingVertical: Spacing.sm, paddingHorizontal: Spacing.lg, fontSize: FontSize.sm },
-    medium: { paddingVertical: Spacing.md, paddingHorizontal: Spacing.xl, fontSize: FontSize.md },
-    large: { paddingVertical: Spacing.lg, paddingHorizontal: Spacing.xl, fontSize: FontSize.md },
-  };
+const SIZE_MAP: Record<
+  Size,
+  { paddingVertical: number; paddingHorizontal: number; fontSize: number }
+> = {
+  small: { paddingVertical: Spacing.sm, paddingHorizontal: Spacing.lg, fontSize: FontSize.sm },
+  medium: { paddingVertical: Spacing.md, paddingHorizontal: Spacing.xl, fontSize: FontSize.md },
+  large: { paddingVertical: Spacing.lg, paddingHorizontal: Spacing.xl, fontSize: FontSize.md },
+};
 
 export default function GlowButton({
   label,

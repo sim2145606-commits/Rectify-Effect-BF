@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Native
+android/
+ios/
+
+# Build artifacts
+*.tsbuildinfo
+
+# Logs
+*.log

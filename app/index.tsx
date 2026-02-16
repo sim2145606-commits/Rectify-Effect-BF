@@ -10,7 +10,7 @@ export default function Index() {
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETE)
-      .then((value) => {
+      .then(value => {
         setOnboardingComplete(value === 'true');
       })
       .catch(() => {
@@ -30,7 +30,7 @@ export default function Index() {
   }
 
   if (!onboardingComplete) {
-    return <Redirect href={"/onboarding" as any} />;
+    return <Redirect href={'/onboarding' as any} />;
   }
 
   return <Redirect href="/(tabs)" />;

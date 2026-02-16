@@ -55,18 +55,12 @@ export default function HUDViewfinder({
       false
     );
     scanPulse.value = withRepeat(
-      withSequence(
-        withTiming(0.8, { duration: 1500 }),
-        withTiming(0.3, { duration: 1500 })
-      ),
+      withSequence(withTiming(0.8, { duration: 1500 }), withTiming(0.3, { duration: 1500 })),
       -1,
       true
     );
     cornerPulse.value = withRepeat(
-      withSequence(
-        withTiming(0.6, { duration: 2000 }),
-        withTiming(1, { duration: 2000 })
-      ),
+      withSequence(withTiming(0.6, { duration: 2000 }), withTiming(1, { duration: 2000 })),
       -1,
       true
     );
@@ -83,10 +77,14 @@ export default function HUDViewfinder({
 
   const getContentFit = (): 'contain' | 'cover' | 'fill' => {
     switch (scaleMode) {
-      case 'fit': return 'contain';
-      case 'fill': return 'cover';
-      case 'stretch': return 'fill';
-      default: return 'contain';
+      case 'fit':
+        return 'contain';
+      case 'fill':
+        return 'cover';
+      case 'stretch':
+        return 'fill';
+      default:
+        return 'contain';
     }
   };
 
@@ -161,14 +159,18 @@ export default function HUDViewfinder({
             >
               <View style={styles.hudTopRow}>
                 <View style={styles.hudBadge}>
-                  <View style={[styles.hudDot, { backgroundColor: engineActive ? Colors.success : Colors.danger }]} />
-                  <Text style={styles.hudBadgeText}>
-                    {engineActive ? 'LIVE' : 'IDLE'}
-                  </Text>
+                  <View
+                    style={[
+                      styles.hudDot,
+                      { backgroundColor: engineActive ? Colors.success : Colors.danger },
+                    ]}
+                  />
+                  <Text style={styles.hudBadgeText}>{engineActive ? 'LIVE' : 'IDLE'}</Text>
                 </View>
                 <Text style={styles.hudLabel}>VIRTUCAM STUDIO</Text>
                 <Text style={styles.hudTimecode}>
-                  {rotation}{'°'} {scaleMode.toUpperCase()}
+                  {rotation}
+                  {'°'} {scaleMode.toUpperCase()}
                 </Text>
               </View>
             </LinearGradient>
@@ -183,7 +185,10 @@ export default function HUDViewfinder({
               <View style={styles.hudBottomRow}>
                 <View style={styles.hudMetrics}>
                   <Text style={styles.hudMetricLabel}>ROT</Text>
-                  <Text style={styles.hudMetricValue}>{rotation}{'°'}</Text>
+                  <Text style={styles.hudMetricValue}>
+                    {rotation}
+                    {'°'}
+                  </Text>
                 </View>
                 <View style={styles.hudMetrics}>
                   <Text style={styles.hudMetricLabel}>SCALE</Text>
@@ -192,7 +197,8 @@ export default function HUDViewfinder({
                 <View style={styles.hudMetrics}>
                   <Text style={styles.hudMetricLabel}>MIRROR</Text>
                   <Text style={styles.hudMetricValue}>
-                    {mirrored ? 'H' : '-'}{flippedVertical ? 'V' : '-'}
+                    {mirrored ? 'H' : '-'}
+                    {flippedVertical ? 'V' : '-'}
                   </Text>
                 </View>
                 <View style={styles.hudMetrics}>

@@ -39,7 +39,6 @@ yarn-error.*
 
 app-example
 
-.vscode
 .expo/
 
 # Fastshot-specific excludes
@@ -48,3 +47,7 @@ examples/
 CLAUDE.md
 
 /ios
+
+# Java/JVM crash logs
+hs_err_pid*.log
+replay_pid*.log

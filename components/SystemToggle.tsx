@@ -1,17 +1,6 @@
 import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  Switch,
-  Platform,
-} from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-} from 'react-native-reanimated';
+import { View, Text, StyleSheet, Pressable, Switch, Platform } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
 
@@ -67,22 +56,13 @@ export default function SystemToggle({
         <View style={styles.leftContent}>
           {icon && <View style={styles.iconContainer}>{icon}</View>}
           <View style={styles.textContainer}>
-            <Text
-              style={[
-                styles.label,
-                size === 'large' && styles.labelLarge,
-              ]}
-            >
-              {label}
-            </Text>
-            {sublabel && (
-              <Text style={styles.sublabel}>{sublabel}</Text>
-            )}
+            <Text style={[styles.label, size === 'large' && styles.labelLarge]}>{label}</Text>
+            {sublabel && <Text style={styles.sublabel}>{sublabel}</Text>}
           </View>
         </View>
         <Switch
           value={value}
-          onValueChange={(val) => {
+          onValueChange={val => {
             mediumImpact();
             onValueChange(val);
           }}
@@ -92,11 +72,7 @@ export default function SystemToggle({
           }}
           thumbColor={value ? accentColor : Colors.textTertiary}
           ios_backgroundColor={Colors.surfaceLighter}
-          style={
-            Platform.OS === 'web'
-              ? { height: 24, width: 44 }
-              : undefined
-          }
+          style={Platform.OS === 'web' ? { height: 24, width: 44 } : undefined}
         />
       </Pressable>
     </Animated.View>

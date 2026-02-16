@@ -27,7 +27,7 @@ export default function LogsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterLevel, setFilterLevel] = useState<LogEntry['level'] | 'all'>('all');
-  const [includeSystemLogs, setIncludeSystemLogs] = useState(false);
+  const [includeSystemLogs] = useState(false);
   const [systemLogs, setSystemLogs] = useState<string>('');
 
   const loadLogs = useCallback(() => {
@@ -36,23 +36,19 @@ export default function LogsScreen() {
     applyFilters(allLogs, searchQuery, filterLevel);
   }, [searchQuery, filterLevel]);
 
-  const applyFilters = (
-    logList: LogEntry[],
-    query: string,
-    level: LogEntry['level'] | 'all'
-  ) => {
+  const applyFilters = (logList: LogEntry[], query: string, level: LogEntry['level'] | 'all') => {
     let filtered = logList;
 
     // Filter by level
     if (level !== 'all') {
-      filtered = filtered.filter((log) => log.level === level);
+      filtered = filtered.filter(log => log.level === level);
     }
 
     // Filter by search query
     if (query.trim()) {
       const lowerQuery = query.toLowerCase();
       filtered = filtered.filter(
-        (log) =>
+        log =>
           log.message.toLowerCase().includes(lowerQuery) ||
           log.source?.toLowerCase().includes(lowerQuery)
       );
@@ -77,11 +73,9 @@ export default function LogsScreen() {
     try {
       setIsExporting(true);
       const filePath = await logger.exportLogs(share);
-      Alert.alert(
-        'Success',
-        `Logs exported successfully!\n\nSaved to: ${filePath}`,
-        [{ text: 'OK' }]
-      );
+      Alert.alert('Success', `Logs exported successfully!\n\nSaved to: ${filePath}`, [
+        { text: 'OK' },
+      ]);
     } catch (error: any) {
       Alert.alert('Error', `Failed to export logs: ${error.message}`);
     } finally {
@@ -133,7 +127,7 @@ export default function LogsScreen() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     loadLogs();
-    
+
     // Load system logs if enabled
     if (includeSystemLogs && VirtuCamSettings) {
       try {
@@ -145,7 +139,7 @@ export default function LogsScreen() {
         console.error('Failed to load system logs:', error);
       }
     }
-    
+
     setIsRefreshing(false);
   };
 
@@ -269,13 +263,10 @@ export default function LogsScreen() {
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-          {(['all', 'error', 'warn', 'info', 'success', 'debug'] as const).map((level) => (
+          {(['all', 'error', 'warn', 'info', 'success', 'debug'] as const).map(level => (
             <TouchableOpacity
               key={level}
-              style={[
-                styles.filterChip,
-                filterLevel === level && styles.filterChipActive,
-              ]}
+              style={[styles.filterChip, filterLevel === level && styles.filterChipActive]}
               onPress={() => setFilterLevel(level)}
             >
               <Text
@@ -337,9 +328,7 @@ export default function LogsScreen() {
                     </View>
                   )}
                 </View>
-                <Text style={styles.logTime}>
-                  {new Date(log.timestamp).toLocaleTimeString()}
-                </Text>
+                <Text style={styles.logTime}>{new Date(log.timestamp).toLocaleTimeString()}</Text>
               </View>
               <Text style={styles.logMessage}>{log.message}</Text>
               {log.details && (

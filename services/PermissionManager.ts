@@ -35,7 +35,7 @@ export async function checkRootAccess(): Promise<PermissionCheckResult> {
     }
 
     const result = await VirtuCamSettings.checkRootAccess();
-    
+
     if (result.granted) {
       return {
         status: 'granted',
@@ -72,7 +72,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     }
 
     const result = await VirtuCamSettings.checkXposedStatus();
-    
+
     if (result.moduleActive) {
       return {
         status: 'granted',
@@ -123,7 +123,7 @@ export async function checkAllFilesAccess(): Promise<PermissionCheckResult> {
     }
 
     const granted = await VirtuCamSettings.checkAllFilesAccess();
-    
+
     if (granted) {
       return {
         status: 'granted',
@@ -152,7 +152,7 @@ export async function checkAllFilesAccess(): Promise<PermissionCheckResult> {
 export async function checkCameraPermission(): Promise<PermissionCheckResult> {
   try {
     const { status } = await ImagePicker.getCameraPermissionsAsync();
-    
+
     if (status === 'granted') {
       return {
         status: 'granted',
@@ -203,7 +203,7 @@ export async function checkOverlayPermission(): Promise<PermissionCheckResult> {
     }
 
     const granted = await VirtuCamSettings.checkOverlayPermission();
-    
+
     if (granted) {
       return {
         status: 'granted',

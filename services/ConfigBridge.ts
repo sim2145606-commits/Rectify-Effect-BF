@@ -77,9 +77,9 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
     }
 
     const config = await VirtuCamSettings.readConfig();
-    
+
     // Parse targetPackages string to array
-    const targetPackages = config.targetPackages 
+    const targetPackages = config.targetPackages
       ? config.targetPackages.split(',').filter((p: string) => p.length > 0)
       : [];
 
@@ -182,7 +182,7 @@ export async function getBridgeStatus(): Promise<{
 }> {
   try {
     const path = await getConfigPath();
-    
+
     // Verify config is readable
     let readable = false;
     if (VirtuCamSettings && VirtuCamSettings.verifyConfigReadable) {
@@ -193,7 +193,7 @@ export async function getBridgeStatus(): Promise<{
         readable = false;
       }
     }
-    
+
     return {
       available: !!VirtuCamSettings,
       path,
@@ -244,7 +244,7 @@ export async function verifyBridge(): Promise<{
 
     // Verify file is readable
     const verifyResult = await VirtuCamSettings.verifyConfigReadable();
-    
+
     return {
       success: verifyResult.exists && verifyResult.readable,
       details: verifyResult,

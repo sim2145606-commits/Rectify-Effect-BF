@@ -97,10 +97,7 @@ export default function PresetsScreen() {
       await loadPresets();
     } catch (err) {
       warning();
-      Alert.alert(
-        'Save Failed',
-        err instanceof Error ? err.message : 'Could not save preset.'
-      );
+      Alert.alert('Save Failed', err instanceof Error ? err.message : 'Could not save preset.');
     } finally {
       setSaving(false);
     }
@@ -114,10 +111,7 @@ export default function PresetsScreen() {
       try {
         await applyPreset(preset);
         success();
-        Alert.alert(
-          'Preset Applied',
-          `"${preset.name}" has been loaded. Settings are now active.`
-        );
+        Alert.alert('Preset Applied', `"${preset.name}" has been loaded. Settings are now active.`);
       } catch {
         warning();
         Alert.alert('Apply Failed', 'Could not apply this preset.');
@@ -131,36 +125,35 @@ export default function PresetsScreen() {
   const handleDeletePreset = useCallback(
     (preset: LocalPreset) => {
       lightImpact();
-      Alert.alert(
-        'Delete Preset',
-        `Remove "${preset.name}" permanently?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                await deletePreset(preset.id);
-                success();
-                await loadPresets();
-              } catch {
-                Alert.alert('Error', 'Failed to delete preset.');
-              }
-            },
+      Alert.alert('Delete Preset', `Remove "${preset.name}" permanently?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deletePreset(preset.id);
+              success();
+              await loadPresets();
+            } catch {
+              Alert.alert('Error', 'Failed to delete preset.');
+            }
           },
-        ]
-      );
+        },
+      ]);
     },
     [lightImpact, success, loadPresets]
   );
 
-  const handleStartRename = useCallback((preset: LocalPreset) => {
-    lightImpact();
-    setRenamingId(preset.id);
-    setRenameText(preset.name);
-    setRenameDesc(preset.description || '');
-  }, [lightImpact]);
+  const handleStartRename = useCallback(
+    (preset: LocalPreset) => {
+      lightImpact();
+      setRenamingId(preset.id);
+      setRenameText(preset.name);
+      setRenameDesc(preset.description || '');
+    },
+    [lightImpact]
+  );
 
   const handleSaveRename = useCallback(async () => {
     if (!renameText.trim() || !renamingId) {
@@ -213,10 +206,7 @@ export default function PresetsScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + Spacing.lg },
-      ]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
@@ -233,9 +223,7 @@ export default function PresetsScreen() {
         <View style={styles.headerRow}>
           <View style={styles.headerTextBlock}>
             <Text style={styles.screenTitle}>Local Presets</Text>
-            <Text style={styles.screenSubtitle}>
-              Save, manage & load camera configurations
-            </Text>
+            <Text style={styles.screenSubtitle}>Save, manage & load camera configurations</Text>
           </View>
           <View style={styles.presetCountBadge}>
             <Text style={styles.presetCountValue}>{presets.length}</Text>
@@ -278,7 +266,11 @@ export default function PresetsScreen() {
           <Animated.View entering={FadeIn.duration(300)}>
             <Card glow glowColor={Colors.electricBlueGlow} style={styles.saveFormCard}>
               <View style={styles.saveFormHeader}>
-                <MaterialCommunityIcons name="content-save-cog" size={20} color={Colors.electricBlue} />
+                <MaterialCommunityIcons
+                  name="content-save-cog"
+                  size={20}
+                  color={Colors.electricBlue}
+                />
                 <Text style={styles.saveFormTitle}>New Preset</Text>
               </View>
               <View style={styles.inputGroup}>
@@ -429,8 +421,12 @@ function PresetCard({
   return (
     <Animated.View style={animStyle}>
       <Pressable
-        onPressIn={() => { scale.value = withSpring(0.98); }}
-        onPressOut={() => { scale.value = withSpring(1); }}
+        onPressIn={() => {
+          scale.value = withSpring(0.98);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1);
+        }}
         style={styles.presetCard}
       >
         {/* Header */}
@@ -460,7 +456,9 @@ function PresetCard({
               </View>
             ) : (
               <>
-                <Text style={styles.presetName} numberOfLines={1}>{preset.name}</Text>
+                <Text style={styles.presetName} numberOfLines={1}>
+                  {preset.name}
+                </Text>
                 {preset.description && (
                   <Text style={styles.presetDescription} numberOfLines={1}>
                     {preset.description}
@@ -468,7 +466,9 @@ function PresetCard({
                 )}
               </>
             )}
-            <Text style={styles.presetSummary} numberOfLines={1}>{summary}</Text>
+            <Text style={styles.presetSummary} numberOfLines={1}>
+              {summary}
+            </Text>
           </View>
           <Text style={styles.presetDate}>{dateLabel}</Text>
         </View>
@@ -481,7 +481,10 @@ function PresetCard({
                 <Ionicons name="close" size={16} color={Colors.textSecondary} />
                 <Text style={styles.actionButtonText}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={onSaveRename} style={[styles.actionButton, styles.actionButtonPrimary]}>
+              <Pressable
+                onPress={onSaveRename}
+                style={[styles.actionButton, styles.actionButtonPrimary]}
+              >
                 <Ionicons name="checkmark" size={16} color={Colors.electricBlue} />
                 <Text style={[styles.actionButtonText, { color: Colors.electricBlue }]}>Save</Text>
               </Pressable>
@@ -494,19 +497,13 @@ function PresetCard({
               <Pressable onPress={onRename} style={styles.renameButton}>
                 <Ionicons name="pencil-outline" size={16} color={Colors.textSecondary} />
               </Pressable>
-              <Pressable
-                onPress={onApply}
-                disabled={isApplying}
-                style={styles.applyButton}
-              >
+              <Pressable onPress={onApply} disabled={isApplying} style={styles.applyButton}>
                 {isApplying ? (
                   <ActivityIndicator size={14} color={Colors.textPrimary} />
                 ) : (
                   <Ionicons name="flash" size={14} color={Colors.textPrimary} />
                 )}
-                <Text style={styles.applyButtonText}>
-                  {isApplying ? 'LOADING...' : 'LOAD'}
-                </Text>
+                <Text style={styles.applyButtonText}>{isApplying ? 'LOADING...' : 'LOAD'}</Text>
               </Pressable>
             </>
           )}

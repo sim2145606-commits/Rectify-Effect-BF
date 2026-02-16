@@ -43,8 +43,8 @@ export async function fetchPresets(): Promise<LocalPreset[]> {
     }
     const presets = JSON.parse(presetsJson) as LocalPreset[];
     // Sort by updated_at descending
-    return presets.sort((a, b) => 
-      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    return presets.sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     );
   } catch (err) {
     console.error('Failed to fetch presets:', err);
@@ -61,10 +61,10 @@ async function saveAllPresets(presets: LocalPreset[]): Promise<void> {
 export async function savePreset(config: PresetConfig): Promise<LocalPreset> {
   try {
     const presets = await fetchPresets();
-    
+
     const id = `preset_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
-    
+
     const newPreset: LocalPreset = {
       id,
       name: config.name,
@@ -105,11 +105,15 @@ export async function deletePreset(presetId: string): Promise<void> {
 }
 
 // Rename a preset
-export async function renamePreset(presetId: string, newName: string, newDescription?: string): Promise<void> {
+export async function renamePreset(
+  presetId: string,
+  newName: string,
+  newDescription?: string
+): Promise<void> {
   try {
     const presets = await fetchPresets();
     const preset = presets.find(p => p.id === presetId);
-    
+
     if (!preset) {
       throw new Error('Preset not found');
     }

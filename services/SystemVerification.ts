@@ -272,7 +272,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     result.xposedFramework,
     result.moduleActive,
     result.storagePermission,
-  ].every((check) => check.status === 'ok');
+  ].every(check => check.status === 'ok');
 
   // Cache the result
   try {
@@ -294,7 +294,7 @@ export async function getSystemInfo(): Promise<SystemInfo | null> {
     }
 
     const info = await VirtuCamSettings.getSystemInfo();
-    
+
     // Get root solution
     let rootSolution = 'None';
     let rootVersion = '';
