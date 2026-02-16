@@ -264,6 +264,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val result = Arguments.createMap()
             
             // Check if running in Xposed environment by checking for XposedBridge class
+            // Note: This only works in hooked processes, not in the module app itself
             val isXposedActive = try {
                 Class.forName("de.robv.android.xposed.XposedBridge")
                 true
@@ -303,9 +304,56 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             result.putBoolean("lsposedInstalled", lsposedExists)
             
-            // Module is active if we're running in Xposed environment
-            // The Xposed framework loads our module, making XposedBridge available
-            result.putBoolean("moduleActive", isXposedActive)
+            // Check if module is active by looking for marker file created by CameraHook
+            // The module creates this file when it's loaded by LSPosed
+            var moduleActive = false
+            val markerFile = File("/data/local/tmp/virtucam_module_active")
+            
+            // Method 1: Check for marker file
+            if (markerFile.exists()) {
+                // Check if marker is recent (within last 5 minutes)
+                val lastModified = markerFile.lastModified()
+                val currentTime = System.currentTimeMillis()
+                val fiveMinutes = 5 * 60 * 1000
+                
+                if (currentTime - lastModified < fiveMinutes) {
+                    moduleActive = true
+                }
+            }
+            
+            // Method 2: Check LSPosed scope configuration via root
+            if (!moduleActive && lsposedExists) {
+                val packageName = reactApplicationContext.packageName
+                
+                // Try to check if our module is in LSPosed's enabled modules list
+                val lsposedConfigCheck = executeRootCommand(
+                    "grep -r '$packageName' /data/adb/lspd/config 2>/dev/null || " +
+                    "grep -r '$packageName' /data/adb/modules/zygisk_lsposed/config 2>/dev/null || " +
+                    "grep -r '$packageName' /data/adb/modules/riru_lsposed/config 2>/dev/null"
+                )
+                
+                if (lsposedConfigCheck.isNotEmpty() && lsposedConfigCheck.contains(packageName)) {
+                    moduleActive = true
+                }
+            }
+            
+            // Method 3: If LSPosed is installed, assume module is active
+            // This is a fallback since we can't reliably detect module activation
+            // from within the module app itself
+            if (!moduleActive && lsposedExists) {
+                // Check if xposed_init file exists (indicates module is properly configured)
+                val xposedInitFile = File(reactApplicationContext.applicationInfo.sourceDir)
+                if (xposedInitFile.exists()) {
+                    val apkPath = xposedInitFile.absolutePath
+                    val checkXposedInit = executeCommand("unzip -l '$apkPath' | grep xposed_init")
+                    if (checkXposedInit.contains("xposed_init")) {
+                        // Module is properly configured, assume it's active if LSPosed is installed
+                        moduleActive = true
+                    }
+                }
+            }
+            
+            result.putBoolean("moduleActive", moduleActive)
             
             promise.resolve(result)
         } catch (e: Exception) {

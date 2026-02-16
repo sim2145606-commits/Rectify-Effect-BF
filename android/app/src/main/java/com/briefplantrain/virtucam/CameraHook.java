@@ -173,6 +173,9 @@ public class CameraHook implements IXposedHookLoadPackage {
             return;
         }
 
+        // Create marker file to indicate module is active
+        createModuleActiveMarker();
+
         loadPreferences();
 
         if (!isTargetedApp(lpparam.packageName)) {
@@ -197,6 +200,24 @@ public class CameraHook implements IXposedHookLoadPackage {
 
     private void log(String message) {
         XposedBridge.log(TAG + ": " + message);
+    }
+
+    /**
+     * Create a marker file to indicate the module is active and loaded by LSPosed.
+     * This file is used by the VirtuCam app to detect if the module is properly activated.
+     */
+    private void createModuleActiveMarker() {
+        try {
+            File markerFile = new File("/data/local/tmp/virtucam_module_active");
+            if (!markerFile.exists()) {
+                markerFile.createNewFile();
+            }
+            // Update timestamp to indicate recent activity
+            markerFile.setLastModified(System.currentTimeMillis());
+            log("Module active marker created/updated");
+        } catch (Exception e) {
+            log("Failed to create module active marker: " + e.getMessage());
+        }
     }
 
     private void loadPreferences() {
