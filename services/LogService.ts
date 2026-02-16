@@ -212,7 +212,7 @@ class LogService {
         });
       }
 
-      return filePath;
+``      return filePath;
     } catch (error: any) {
       this.error(`Failed to export logs: ${error.message}`, 'LogService', error);
       throw error;
