@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed Module Scope -->
+    <!-- This array defines which apps the module can hook -->
+    <!-- By default, it's empty - users must configure target apps in the VirtuCam settings -->
+    <!-- LSPosed will show this list in the module settings, but the actual scope -->
+    <!-- is dynamically controlled by the app's whitelist/blacklist configuration -->
+    <string-array name="xposed_scope">
+        <!-- Common camera apps that users might want to hook -->
+        <!-- These are suggestions - actual scope is managed by the app -->
+        <item>com.android.camera</item>
+        <item>com.android.camera2</item>
+        <item>com.google.android.GoogleCamera</item>
+        <item>com.sec.android.app.camera</item>
+        <item>com.huawei.camera</item>
+        <item>com.oppo.camera</item>
+        <item>com.vivo.camera</item>
+        <item>com.xiaomi.camera</item>
+        
+        <!-- Popular social media apps with camera -->
+        <item>com.whatsapp</item>
+        <item>com.facebook.katana</item>
+        <item>com.instagram.android</item>
+        <item>com.snapchat.android</item>
+        <item>com.twitter.android</item>
+        <item>com.tencent.mm</item>
+        <item>com.zhiliaoapp.musically</item>
+        
+        <!-- Video calling apps -->
+        <item>com.google.android.apps.meetings</item>
+        <item>us.zoom.videomeetings</item>
+        <item>com.microsoft.teams</item>
+        <item>com.skype.raider</item>
+        <item>com.discord</item>
+        
+        <!-- Note: Users can add more apps through VirtuCam's settings UI -->
+        <!-- The module's CameraHook.java checks the dynamic whitelist/blacklist -->
+    </string-array>
+</resources>
