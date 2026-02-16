@@ -6,25 +6,24 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.ImageWriter;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
 import android.media.MediaMetadataRetriever;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
-import android.os.Looper;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -32,26 +31,27 @@ import java.lang.reflect.Proxy;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 /**
- * VirtuCam Xposed Hook Module - Revised
+ * VirtuCam Xposed Hook Module — Patched Production Version
  *
- * Hooks Camera1 API, Camera2 API (via ImageReader listener interception),
- * and Surface-level rendering for comprehensive virtual camera injection.
+ * Hooks Camera1 API, Camera2 API (ImageReader listener interception + Surface replacement),
+ * for comprehensive virtual camera injection.
  */
 public class CameraHook implements IXposedHookLoadPackage {
 
@@ -77,62 +77,73 @@ public class CameraHook implements IXposedHookLoadPackage {
     private String cachedMediaPath = null;
     private final Object frameLock = new Object();
 
-    // Reusable buffers to reduce GC pressure
-    private int[] reusableArgbBuffer = null;
-    private byte[] reusableYuvBuffer = null;
-    private int reusableBufferWidth = 0;
-    private int reusableBufferHeight = 0;
+    // Thread-local YUV buffers to avoid races
+    private final ThreadLocal<int[]> threadLocalArgbBuffer = new ThreadLocal<>();
+    private final ThreadLocal<byte[]> threadLocalYuvBuffer = new ThreadLocal<>();
+    private final ThreadLocal<int[]> threadLocalBufferDims = new ThreadLocal<>();
 
-    // Video frame tracking
-    private MediaMetadataRetriever activeRetriever = null;
-    private long videoDurationUs = 0;
-    private long videoStartTime = 0;
-    private boolean isVideoSource = false;
+    // Video frame decoding
+    private final Object videoLock = new Object();
+    private volatile boolean isVideoSource = false;
+    private volatile long videoDurationUs = 0;
+    private volatile long videoStartTime = 0;
+    // Pre-decoded video frame queue
+    private final LinkedBlockingQueue<Bitmap> videoFrameQueue = new LinkedBlockingQueue<>(4);
+    private HandlerThread videoDecodeThread;
+    private Handler videoDecodeHandler;
+    private volatile boolean videoDecoderRunning = false;
+    private MediaExtractor videoExtractor;
+    private MediaCodec videoCodec;
+    private volatile Bitmap currentVideoFrame = null;
 
     private long lastConfigReload = 0;
     private static final long CONFIG_RELOAD_INTERVAL = 3000;
 
-    // FIX 6: Frame processing thread
+    // Frame processing thread
     private HandlerThread frameProcessThread;
     private Handler frameProcessHandler;
 
     // Track original ImageReader listeners for wrapping
     private final Map<ImageReader, Object> originalListeners = new ConcurrentHashMap<>();
-    
-    // FIX 13: Track which ImageReaders are hooked
-    private final Set<ImageReader> hookedImageReaders = ConcurrentHashMap.newKeySet();
-    
-    // Surface replacement mappings for CameraCaptureSession hooks
+
+    // Track which ImageReaders are hooked
+    private final Set<ImageReader> hookedImageReaders = Collections.newSetFromMap(new ConcurrentHashMap<ImageReader, Boolean>());
+
+    // Surface replacement mappings
     private final Map<Surface, SurfaceMapping> surfaceMappings = new ConcurrentHashMap<>();
-    private final Map<Surface, SurfaceTexture> surfaceToTextureMap = new ConcurrentHashMap<>();
     private final Map<Object, List<SurfaceMapping>> sessionToMappings = new ConcurrentHashMap<>();
-    
-    // FIX 2: Track surface types (ImageReader vs SurfaceTexture)
-    private final Map<Surface, String> surfaceTypeTracker = new ConcurrentHashMap<>();
-    
-    // FIX 7: Track which camera devices should be hooked
-    private final Map<Object, Boolean> cameraDeviceHookStatus = new ConcurrentHashMap<>();
-    
-    // FIX 9: Track surface dimensions
-    private final Map<Surface, int[]> surfaceDimensionTracker = new ConcurrentHashMap<>();
-    private final Map<SurfaceTexture, int[]> surfaceTextureDimensions = new ConcurrentHashMap<>();
-    
-    // FIX 10: Track mappings per camera device for cleanup
-    private final Map<Object, List<SurfaceMapping>> deviceToMappings = new ConcurrentHashMap<>();
-    
+
+    // Surface type tracking (use WeakReference keys to avoid leaks)
+    private final Map<Integer, String> surfaceTypeByIdentity = new ConcurrentHashMap<>();
+    private final Map<Integer, int[]> surfaceDimsByIdentity = new ConcurrentHashMap<>();
+
+    // Camera device tracking — use identity hash to avoid leaking device references
+    private final Map<Integer, Boolean> cameraDeviceHookStatus = new ConcurrentHashMap<>();
+    private final Map<Integer, List<SurfaceMapping>> deviceToMappings = new ConcurrentHashMap<>();
+
+    // Track SurfaceTexture dimensions
+    private final Map<Integer, int[]> surfaceTextureDimensions = new ConcurrentHashMap<>();
+
+    // Track which concrete StateCallback classes we've already hooked
+    private final Set<Class<?>> hookedCallbackClasses = Collections.newSetFromMap(new ConcurrentHashMap<Class<?>, Boolean>());
+
+    // Track which concrete onOpened classes we've already hooked
+    private final Set<Class<?>> hookedOnOpenedClasses = Collections.newSetFromMap(new ConcurrentHashMap<Class<?>, Boolean>());
+
     // Helper class to track surface replacements
     private static class SurfaceMapping {
-        Surface originalSurface;
-        Surface replacementSurface;
+        final Surface originalSurface;
+        final Surface replacementSurface;
         ImageReader imageReader;
         ImageWriter imageWriter;
-        int width;
-        int height;
-        int format;
-        String detectedType; // FIX 2: Store detected surface type
+        final int width;
+        final int height;
+        final int format;
+        final String detectedType;
         volatile boolean closed = false;
-        
-        SurfaceMapping(Surface original, Surface replacement, ImageReader reader, int w, int h, int fmt, String type) {
+
+        SurfaceMapping(Surface original, Surface replacement, ImageReader reader,
+                       int w, int h, int fmt, String type) {
             this.originalSurface = original;
             this.replacementSurface = replacement;
             this.imageReader = reader;
@@ -141,21 +152,16 @@ public class CameraHook implements IXposedHookLoadPackage {
             this.format = fmt;
             this.detectedType = type;
         }
-        
-        void cleanup() {
+
+        synchronized void cleanup() {
             if (closed) return;
             closed = true;
-            
             if (imageReader != null) {
-                try {
-                    imageReader.close();
-                } catch (Exception ignored) {}
+                try { imageReader.close(); } catch (Exception ignored) {}
                 imageReader = null;
             }
             if (imageWriter != null) {
-                try {
-                    imageWriter.close();
-                } catch (Exception ignored) {}
+                try { imageWriter.close(); } catch (Exception ignored) {}
                 imageWriter = null;
             }
         }
@@ -163,8 +169,6 @@ public class CameraHook implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(final LoadPackageParam lpparam) throws Throwable {
-        log("Hook loaded in package: " + lpparam.packageName);
-
         if (lpparam.packageName.equals(PACKAGE_NAME)) {
             return;
         }
@@ -172,7 +176,6 @@ public class CameraHook implements IXposedHookLoadPackage {
         loadPreferences();
 
         if (!isTargetedApp(lpparam.packageName)) {
-            log("Package not targeted: " + lpparam.packageName);
             return;
         }
 
@@ -180,9 +183,8 @@ public class CameraHook implements IXposedHookLoadPackage {
 
         hookCamera2API(lpparam);
         hookCamera1API(lpparam);
-        hookSurfaceLevelRendering(lpparam);
         hookCameraCaptureSession(lpparam);
-        hookSurfaceTextureAttachment(lpparam);
+        hookSurfaceTextureTracking(lpparam);
         hookCaptureRequestBuilder(lpparam);
         hookCamera1SurfaceBinding(lpparam);
 
@@ -226,22 +228,17 @@ public class CameraHook implements IXposedHookLoadPackage {
             // Invalidate frame cache if media source changed
             if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
                 synchronized (frameLock) {
-                    if (cachedFrame != null) {
+                    if (cachedFrame != null && cachedFrame != currentVideoFrame) {
                         cachedFrame.recycle();
-                        cachedFrame = null;
                     }
+                    cachedFrame = null;
                     cachedMediaPath = null;
-                    closeVideoRetriever();
                 }
+                stopVideoDecoder();
             }
             mediaSourcePath = newMediaPath;
-
             lastConfigReload = System.currentTimeMillis();
 
-            log("Config loaded - enabled=" + enabled
-                    + ", mediaPath=" + (mediaSourcePath != null ? "set" : "null")
-                    + ", target=" + cameraTarget
-                    + ", targetMode=" + targetMode);
         } catch (Exception e) {
             log("Failed to load preferences: " + e.getMessage());
         }
@@ -266,9 +263,6 @@ public class CameraHook implements IXposedHookLoadPackage {
         return enabled && mediaSourcePath != null;
     }
 
-    /**
-     * FIX 6: Get frame processing handler (off main thread)
-     */
     private synchronized Handler getFrameProcessHandler() {
         if (frameProcessThread == null || !frameProcessThread.isAlive()) {
             frameProcessThread = new HandlerThread("VirtuCamFrameProcess");
@@ -278,13 +272,18 @@ public class CameraHook implements IXposedHookLoadPackage {
         return frameProcessHandler;
     }
 
+    // Identity-based key helpers (avoid holding strong refs in map keys)
+    private static int identityKey(Object obj) {
+        return System.identityHashCode(obj);
+    }
+
     // =========================================================================
     // Camera2 API Hooks
     // =========================================================================
 
     private void hookCamera2API(final LoadPackageParam lpparam) {
         try {
-            // Hook CameraManager.openCamera for logging and config reload
+            // Hook CameraManager.openCamera to track which cameras to hook
             XposedHelpers.findAndHookMethod(
                     "android.hardware.camera2.CameraManager",
                     lpparam.classLoader,
@@ -296,36 +295,51 @@ public class CameraHook implements IXposedHookLoadPackage {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             reloadPreferencesIfNeeded();
+                            if (!isActive()) return;
+
                             final String cameraId = (String) param.args[0];
                             final Object cameraManager = param.thisObject;
-                            log("Camera2 openCamera - ID: " + cameraId);
-                            
-                            // FIX 7: Hook the StateCallback's onOpened to track which devices to hook
+
                             Object stateCallback = param.args[1];
                             if (stateCallback != null) {
-                                try {
-                                    Class<?> callbackClass = stateCallback.getClass();
-                                    XposedHelpers.findAndHookMethod(callbackClass, "onOpened",
-                                            "android.hardware.camera2.CameraDevice",
-                                            new XC_MethodHook() {
-                                                @Override
-                                                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                                                    Object cameraDevice = param.args[0];
-                                                    boolean shouldHook = shouldHookCamera(cameraManager, cameraId, lpparam.classLoader);
-                                                    cameraDeviceHookStatus.put(cameraDevice, shouldHook);
-                                                    log("Camera device opened: " + cameraId + ", shouldHook=" + shouldHook);
-                                                }
-                                            });
-                                } catch (Exception e) {
-                                    log("Failed to hook StateCallback.onOpened: " + e.getMessage());
-                                }
+                                hookOnOpenedForTracking(stateCallback, cameraManager,
+                                        cameraId, lpparam.classLoader);
                             }
                         }
                     }
             );
 
-            // Key hook: ImageReader.setOnImageAvailableListener
-            // We wrap the listener to intercept frames before the app sees them
+            // Also hook the Executor variant (API 28+)
+            if (Build.VERSION.SDK_INT >= 28) {
+                try {
+                    XposedHelpers.findAndHookMethod(
+                            "android.hardware.camera2.CameraManager",
+                            lpparam.classLoader,
+                            "openCamera",
+                            String.class,
+                            java.util.concurrent.Executor.class,
+                            "android.hardware.camera2.CameraDevice$StateCallback",
+                            new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) {
+                                    reloadPreferencesIfNeeded();
+                                    if (!isActive()) return;
+
+                                    final String cameraId = (String) param.args[0];
+                                    final Object cameraManager = param.thisObject;
+
+                                    Object stateCallback = param.args[2];
+                                    if (stateCallback != null) {
+                                        hookOnOpenedForTracking(stateCallback, cameraManager,
+                                                cameraId, lpparam.classLoader);
+                                    }
+                                }
+                            }
+                    );
+                } catch (Exception ignored) {}
+            }
+
+            // Hook ImageReader.setOnImageAvailableListener
             XposedHelpers.findAndHookMethod(
                     "android.media.ImageReader",
                     lpparam.classLoader,
@@ -342,52 +356,30 @@ public class CameraHook implements IXposedHookLoadPackage {
 
                             ImageReader reader = (ImageReader) param.thisObject;
                             originalListeners.put(reader, originalListener);
-                            
-                            // FIX 13: Track this ImageReader as hooked
                             hookedImageReaders.add(reader);
 
-                            // Replace with our wrapper listener
                             param.args[0] = createWrappedImageReaderListener(
                                     originalListener, reader, lpparam.classLoader);
-                            log("Wrapped ImageReader.OnImageAvailableListener");
                         }
                     }
             );
 
-            // Hook acquireLatestImage — replace the Image data after acquisition
-            XposedHelpers.findAndHookMethod(
-                    "android.media.ImageReader",
-                    lpparam.classLoader,
-                    "acquireLatestImage",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            if (!isActive()) return;
-                            // FIX 13: Only replace image data for hooked ImageReaders
-                            if (!hookedImageReaders.contains(param.thisObject)) return;
-                            replaceImageData((Image) param.getResult(),
-                                    (ImageReader) param.thisObject);
-                        }
-                    }
-            );
+            // Hook acquireLatestImage / acquireNextImage
+            XC_MethodHook imageAcquireHook = new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (!isActive()) return;
+                    if (!hookedImageReaders.contains(param.thisObject)) return;
+                    replaceImageData((Image) param.getResult(), (ImageReader) param.thisObject);
+                }
+            };
 
-            XposedHelpers.findAndHookMethod(
-                    "android.media.ImageReader",
-                    lpparam.classLoader,
-                    "acquireNextImage",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            if (!isActive()) return;
-                            // FIX 13: Only replace image data for hooked ImageReaders
-                            if (!hookedImageReaders.contains(param.thisObject)) return;
-                            replaceImageData((Image) param.getResult(),
-                                    (ImageReader) param.thisObject);
-                        }
-                    }
-            );
+            XposedHelpers.findAndHookMethod("android.media.ImageReader",
+                    lpparam.classLoader, "acquireLatestImage", imageAcquireHook);
+            XposedHelpers.findAndHookMethod("android.media.ImageReader",
+                    lpparam.classLoader, "acquireNextImage", imageAcquireHook);
 
-            // FIX 2 & 9: Hook ImageReader.getSurface() to track ImageReader surfaces and dimensions
+            // Track ImageReader surfaces and dimensions
             XposedHelpers.findAndHookMethod(
                     "android.media.ImageReader",
                     lpparam.classLoader,
@@ -399,10 +391,9 @@ public class CameraHook implements IXposedHookLoadPackage {
                             if (s != null) {
                                 ImageReader reader = (ImageReader) param.thisObject;
                                 int format = reader.getImageFormat();
-                                surfaceTypeTracker.put(s, "ImageReader:" + format);
-                                // FIX 9: Also store dimensions
-                                surfaceDimensionTracker.put(s, new int[]{reader.getWidth(), reader.getHeight()});
-                                log("Tracked ImageReader surface: format=" + format + ", " + reader.getWidth() + "x" + reader.getHeight());
+                                surfaceTypeByIdentity.put(identityKey(s), "ImageReader:" + format);
+                                surfaceDimsByIdentity.put(identityKey(s),
+                                        new int[]{reader.getWidth(), reader.getHeight()});
                             }
                         }
                     }
@@ -415,7 +406,65 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Wraps the app's OnImageAvailableListener so we can intercept frames.
+     * Hook onOpened on a per-class basis (not per-instance) to track camera device targeting.
+     * Only hooks each concrete class once to avoid stacking.
+     */
+    private void hookOnOpenedForTracking(Object stateCallback, final Object cameraManager,
+                                         final String cameraId, final ClassLoader classLoader) {
+        Class<?> callbackClass = stateCallback.getClass();
+        if (hookedOnOpenedClasses.contains(callbackClass)) {
+            return; // Already hooked this class
+        }
+
+        try {
+            // Find onOpened method walking up hierarchy
+            Method onOpenedMethod = findMethodInHierarchy(callbackClass,
+                    "onOpened", "android.hardware.camera2.CameraDevice");
+            if (onOpenedMethod == null) return;
+
+            Class<?> declaringClass = onOpenedMethod.getDeclaringClass();
+            if (hookedOnOpenedClasses.contains(declaringClass)) return;
+
+            XposedHelpers.findAndHookMethod(declaringClass, "onOpened",
+                    "android.hardware.camera2.CameraDevice",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            Object cameraDevice = param.args[0];
+                            boolean shouldHook = shouldHookCamera(cameraManager, cameraId, classLoader);
+                            cameraDeviceHookStatus.put(identityKey(cameraDevice), shouldHook);
+                        }
+                    });
+
+            hookedOnOpenedClasses.add(declaringClass);
+        } catch (Exception e) {
+            log("Failed to hook onOpened: " + e.getMessage());
+        }
+    }
+
+    private Method findMethodInHierarchy(Class<?> clazz, String methodName, String... paramTypeNames) {
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            for (Method m : current.getDeclaredMethods()) {
+                if (!m.getName().equals(methodName)) continue;
+                Class<?>[] paramTypes = m.getParameterTypes();
+                if (paramTypes.length != paramTypeNames.length) continue;
+                boolean match = true;
+                for (int i = 0; i < paramTypes.length; i++) {
+                    if (!paramTypes[i].getName().equals(paramTypeNames[i])) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return m;
+            }
+            current = current.getSuperclass();
+        }
+        return null;
+    }
+
+    /**
+     * Wraps the app's OnImageAvailableListener.
      */
     private Object createWrappedImageReaderListener(
             final Object originalListener,
@@ -430,13 +479,9 @@ public class CameraHook implements IXposedHookLoadPackage {
                     new Class<?>[]{listenerClass},
                     new InvocationHandler() {
                         @Override
-                        public Object invoke(Object proxy, Method method, Object[] args)
-                                throws Throwable {
+                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                             if ("onImageAvailable".equals(method.getName())) {
                                 reloadPreferencesIfNeeded();
-                                // The image data will be replaced when the app
-                                // calls acquireLatestImage/acquireNextImage
-                                // (hooked above), so just forward the callback.
                             }
                             return method.invoke(originalListener, args);
                         }
@@ -449,10 +494,7 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Replace data in a Camera2 Image object.
-     * Since Image planes are typically read-only, we use reflection to
-     * write directly into the underlying buffer when possible, or replace
-     * the plane data via native-level access.
+     * Replace data in a Camera2 Image object, respecting plane strides.
      */
     private void replaceImageData(Image image, ImageReader reader) {
         if (image == null) return;
@@ -468,115 +510,172 @@ public class CameraHook implements IXposedHookLoadPackage {
             Image.Plane[] planes = image.getPlanes();
 
             if (format == ImageFormat.YUV_420_888 && planes.length >= 3) {
-                byte[] yuvData = getYuvData(frame, width, height);
-                if (yuvData == null) return;
+                byte[] nv21 = getYuvData(frame, width, height);
+                if (nv21 == null) { recycleTempFrame(frame); return; }
 
                 int frameSize = width * height;
 
-                // Y plane
-                writeToPlaneBuffer(planes[0], yuvData, 0, frameSize);
+                // Write Y plane respecting row stride
+                writeYPlane(planes[0], nv21, width, height);
 
-                // U and V planes (interleaved in NV21, but YUV_420_888 has separate planes)
-                // planes[1] = U, planes[2] = V
-                int uvSize = frameSize / 4;
-                byte[] uData = new byte[uvSize];
-                byte[] vData = new byte[uvSize];
-
-                // Extract U and V from NV21 interleaved UV data
-                for (int i = 0; i < uvSize; i++) {
-                    vData[i] = yuvData[frameSize + i * 2];
-                    uData[i] = yuvData[frameSize + i * 2 + 1];
-                }
-
-                writeToPlaneBuffer(planes[1], uData, 0, uvSize);
-                writeToPlaneBuffer(planes[2], vData, 0, uvSize);
+                // Write U and V planes respecting pixel stride and row stride
+                writeUVPlanes(planes[1], planes[2], nv21, frameSize, width, height);
 
             } else if (format == ImageFormat.JPEG) {
                 ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 frame.compress(Bitmap.CompressFormat.JPEG, 90, bos);
                 byte[] jpegData = bos.toByteArray();
-                writeToPlaneBuffer(planes[0], jpegData, 0, jpegData.length);
+                ByteBuffer buf = planes[0].getBuffer();
+                try {
+                    buf.rewind();
+                    buf.put(jpegData, 0, Math.min(jpegData.length, buf.remaining()));
+                } catch (Exception e) {
+                    log("JPEG plane write failed: " + e.getMessage());
+                }
             }
 
-            if (frame != cachedFrame) {
-                frame.recycle();
-            }
+            recycleTempFrame(frame);
         } catch (Exception e) {
             log("replaceImageData error: " + e.getMessage());
         }
     }
 
-    /**
-     * Attempt to write data into an Image.Plane's ByteBuffer.
-     * Uses reflection to make the buffer writable if needed.
-     */
-    private void writeToPlaneBuffer(Image.Plane plane, byte[] data, int offset, int length) {
-        try {
-            ByteBuffer buffer = plane.getBuffer();
-
-            // Try direct write first
-            try {
-                buffer.rewind();
-                int writeLen = Math.min(length, buffer.remaining());
-                buffer.put(data, offset, writeLen);
-                return;
-            } catch (Exception ignored) {
-                // Buffer is read-only, try reflection
+    private void recycleTempFrame(Bitmap frame) {
+        synchronized (frameLock) {
+            if (frame != cachedFrame && frame != currentVideoFrame) {
+                frame.recycle();
             }
-
-            // Use reflection to access the underlying byte array or native pointer
-            try {
-                // Try to get a writable duplicate via reflection on the
-                // DirectByteBuffer's internal address
-                Field addressField = null;
-                Class<?> bufClass = buffer.getClass();
-                while (bufClass != null) {
-                    try {
-                        addressField = bufClass.getDeclaredField("address");
-                        addressField.setAccessible(true);
-                        break;
-                    } catch (NoSuchFieldException e) {
-                        bufClass = bufClass.getSuperclass();
-                    }
-                }
-
-                if (addressField != null) {
-                    long address = addressField.getLong(buffer);
-                    if (address != 0) {
-                        // FIX 14: Use Unsafe via reflection for direct memory access
-                        Object unsafe = getUnsafe();
-                        if (unsafe != null) {
-                            try {
-                                Method putByteMethod = unsafe.getClass().getMethod("putByte", long.class, byte.class);
-                                int writeLen = Math.min(length, buffer.capacity());
-                                for (int i = 0; i < writeLen; i++) {
-                                    putByteMethod.invoke(unsafe, address + i, data[offset + i]);
-                                }
-                            } catch (Exception e) {
-                                log("Unsafe putByte failed: " + e.getMessage());
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                log("Reflection buffer write failed: " + e.getMessage());
-            }
-        } catch (Exception e) {
-            log("writeToPlaneBuffer error: " + e.getMessage());
         }
     }
 
     /**
-     * FIX 14: Access Unsafe purely through reflection to avoid direct class reference
+     * Write Y plane data respecting the plane's row stride.
      */
-    private static Object getUnsafe() {
+    private void writeYPlane(Image.Plane yPlane, byte[] nv21, int width, int height) {
+        ByteBuffer yBuffer = yPlane.getBuffer();
+        int rowStride = yPlane.getRowStride();
+
         try {
-            Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
-            Field f = unsafeClass.getDeclaredField("theUnsafe");
-            f.setAccessible(true);
-            return f.get(null);
+            yBuffer.rewind();
+            if (rowStride == width) {
+                // Contiguous — fast path
+                yBuffer.put(nv21, 0, Math.min(width * height, yBuffer.remaining()));
+            } else {
+                // Strided
+                for (int row = 0; row < height; row++) {
+                    int srcOffset = row * width;
+                    int remaining = yBuffer.remaining();
+                    if (remaining <= 0) break;
+                    int writeLen = Math.min(width, remaining);
+                    yBuffer.put(nv21, srcOffset, writeLen);
+                    if (rowStride > width && row < height - 1 && yBuffer.remaining() > 0) {
+                        // Skip padding bytes
+                        int skip = Math.min(rowStride - width, yBuffer.remaining());
+                        yBuffer.position(yBuffer.position() + skip);
+                    }
+                }
+            }
         } catch (Exception e) {
-            return null;
+            log("writeYPlane error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Write UV plane data respecting pixel stride and row stride.
+     * Source NV21: after Y data, interleaved V,U bytes.
+     */
+    private void writeUVPlanes(Image.Plane uPlane, Image.Plane vPlane,
+                               byte[] nv21, int frameSize, int width, int height) {
+        try {
+            int uvHeight = height / 2;
+            int uvWidth = width / 2;
+
+            int uPixelStride = uPlane.getPixelStride();
+            int vPixelStride = vPlane.getPixelStride();
+            int uRowStride = uPlane.getRowStride();
+            int vRowStride = vPlane.getRowStride();
+
+            ByteBuffer uBuffer = uPlane.getBuffer();
+            ByteBuffer vBuffer = vPlane.getBuffer();
+            uBuffer.rewind();
+            vBuffer.rewind();
+
+            if (uPixelStride == 1 && vPixelStride == 1) {
+                // Fully planar — write U and V separately
+                for (int row = 0; row < uvHeight; row++) {
+                    for (int col = 0; col < uvWidth; col++) {
+                        int nv21Index = frameSize + row * width + col * 2;
+                        byte vVal = nv21[nv21Index];       // V in NV21
+                        byte uVal = nv21[nv21Index + 1];   // U in NV21
+
+                        if (uBuffer.remaining() > 0) uBuffer.put(uVal);
+                        if (vBuffer.remaining() > 0) vBuffer.put(vVal);
+                    }
+                    // Skip row stride padding
+                    if (row < uvHeight - 1) {
+                        if (uRowStride > uvWidth && uBuffer.remaining() > 0) {
+                            int skip = Math.min(uRowStride - uvWidth, uBuffer.remaining());
+                            uBuffer.position(uBuffer.position() + skip);
+                        }
+                        if (vRowStride > uvWidth && vBuffer.remaining() > 0) {
+                            int skip = Math.min(vRowStride - uvWidth, vBuffer.remaining());
+                            vBuffer.position(vBuffer.position() + skip);
+                        }
+                    }
+                }
+            } else if (uPixelStride == 2 && vPixelStride == 2) {
+                // Semi-planar (NV12 or NV21 style) — U and V buffers overlap
+                // Write interleaved UV to whichever buffer has lower address
+                // Typically U buffer starts at V+1 or V buffer starts at U+1
+                // We write to both, letting the stride handle interleaving
+                for (int row = 0; row < uvHeight; row++) {
+                    for (int col = 0; col < uvWidth; col++) {
+                        int nv21Index = frameSize + row * width + col * 2;
+                        byte vVal = nv21[nv21Index];
+                        byte uVal = nv21[nv21Index + 1];
+
+                        if (uBuffer.remaining() > 0) {
+                            uBuffer.put(uVal);
+                            if (uBuffer.remaining() > 0) {
+                                uBuffer.position(uBuffer.position() + 1); // skip interleaved byte
+                            }
+                        }
+                        if (vBuffer.remaining() > 0) {
+                            vBuffer.put(vVal);
+                            if (vBuffer.remaining() > 0) {
+                                vBuffer.position(vBuffer.position() + 1);
+                            }
+                        }
+                    }
+                    // Row stride padding
+                    if (row < uvHeight - 1) {
+                        int uExpected = uvWidth * 2;
+                        int vExpected = uvWidth * 2;
+                        if (uRowStride > uExpected && uBuffer.remaining() > 0) {
+                            int skip = Math.min(uRowStride - uExpected, uBuffer.remaining());
+                            uBuffer.position(uBuffer.position() + skip);
+                        }
+                        if (vRowStride > vExpected && vBuffer.remaining() > 0) {
+                            int skip = Math.min(vRowStride - vExpected, vBuffer.remaining());
+                            vBuffer.position(vBuffer.position() + skip);
+                        }
+                    }
+                }
+            } else {
+                // Unknown stride layout — best effort
+                log("Unknown UV pixel stride: u=" + uPixelStride + " v=" + vPixelStride);
+                int uvSize = uvWidth * uvHeight;
+                for (int i = 0; i < uvSize; i++) {
+                    int nv21Index = frameSize + i * 2;
+                    if (nv21Index + 1 >= nv21.length) break;
+                    byte vVal = nv21[nv21Index];
+                    byte uVal = nv21[nv21Index + 1];
+                    if (uBuffer.remaining() > 0) uBuffer.put(uVal);
+                    if (vBuffer.remaining() > 0) vBuffer.put(vVal);
+                }
+            }
+        } catch (Exception e) {
+            log("writeUVPlanes error: " + e.getMessage());
         }
     }
 
@@ -586,35 +685,28 @@ public class CameraHook implements IXposedHookLoadPackage {
 
     private void hookCamera1API(final LoadPackageParam lpparam) {
         try {
-            // Hook Camera.open(int)
             XposedHelpers.findAndHookMethod(
-                    "android.hardware.Camera",
-                    lpparam.classLoader,
+                    "android.hardware.Camera", lpparam.classLoader,
                     "open", int.class,
                     new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             reloadPreferencesIfNeeded();
-                            log("Camera1 open(int) - ID: " + param.args[0]);
                         }
                     }
             );
 
-            // Hook Camera.open()
             XposedHelpers.findAndHookMethod(
-                    "android.hardware.Camera",
-                    lpparam.classLoader,
+                    "android.hardware.Camera", lpparam.classLoader,
                     "open",
                     new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             reloadPreferencesIfNeeded();
-                            log("Camera1 open() - default");
                         }
                     }
             );
 
-            // Hook all three preview callback setters
             String[] callbackMethods = {
                     "setPreviewCallback",
                     "setPreviewCallbackWithBuffer",
@@ -623,15 +715,13 @@ public class CameraHook implements IXposedHookLoadPackage {
 
             for (String methodName : callbackMethods) {
                 XposedHelpers.findAndHookMethod(
-                        "android.hardware.Camera",
-                        lpparam.classLoader,
+                        "android.hardware.Camera", lpparam.classLoader,
                         methodName,
                         "android.hardware.Camera$PreviewCallback",
                         new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) {
                                 if (!isActive()) return;
-
                                 Object originalCallback = param.args[0];
                                 if (originalCallback == null) return;
 
@@ -643,30 +733,12 @@ public class CameraHook implements IXposedHookLoadPackage {
                 );
             }
 
-            // Hook Camera.addCallbackBuffer to ensure we keep getting callbacks
-            XposedHelpers.findAndHookMethod(
-                    "android.hardware.Camera",
-                    lpparam.classLoader,
-                    "addCallbackBuffer",
-                    byte[].class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            // Just let it through — ensures buffer recycling works
-                        }
-                    }
-            );
-
             log("Camera1 API hooks installed");
         } catch (Exception e) {
             log("Failed to hook Camera1 API: " + e.getMessage());
         }
     }
 
-    /**
-     * Create a wrapped Camera.PreviewCallback that injects our frames.
-     * We store a reference to the Camera at wrap time to avoid casting issues.
-     */
     private Object createWrappedPreviewCallback(
             final Object originalCallback,
             final Camera camera,
@@ -680,14 +752,11 @@ public class CameraHook implements IXposedHookLoadPackage {
                     new Class<?>[]{callbackClass},
                     new InvocationHandler() {
                         @Override
-                        public Object invoke(Object proxy, Method method, Object[] args)
-                                throws Throwable {
+                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                             if ("onPreviewFrame".equals(method.getName())
                                     && isActive() && args.length >= 2) {
                                 try {
                                     reloadPreferencesIfNeeded();
-
-                                    // args[0] = byte[] data, args[1] = Camera
                                     Camera callbackCamera = (Camera) args[1];
                                     Camera.Parameters params = callbackCamera.getParameters();
                                     Camera.Size previewSize = params.getPreviewSize();
@@ -700,17 +769,10 @@ public class CameraHook implements IXposedHookLoadPackage {
                                                     frame, previewSize.width, previewSize.height);
                                             if (yuvData != null && args[0] != null) {
                                                 byte[] origData = (byte[]) args[0];
-                                                int copyLen = Math.min(
-                                                        yuvData.length, origData.length);
-                                                System.arraycopy(
-                                                        yuvData, 0, origData, 0, copyLen);
-                                                // Write into the same buffer instead
-                                                // of replacing the reference, so
-                                                // addCallbackBuffer still works
+                                                int copyLen = Math.min(yuvData.length, origData.length);
+                                                System.arraycopy(yuvData, 0, origData, 0, copyLen);
                                             }
-                                            if (frame != cachedFrame) {
-                                                frame.recycle();
-                                            }
+                                            recycleTempFrame(frame);
                                         }
                                     }
                                 } catch (Exception e) {
@@ -728,58 +790,9 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     // =========================================================================
-    // Surface-Level Hooks (replaces ineffective SurfaceView/TextureView draw)
-    // =========================================================================
-
-    private void hookSurfaceLevelRendering(final LoadPackageParam lpparam) {
-        try {
-            // Hook Surface.lockCanvas — used by apps that draw camera
-            // preview manually to a Surface
-            XposedHelpers.findAndHookMethod(
-                    "android.view.Surface",
-                    lpparam.classLoader,
-                    "lockCanvas",
-                    android.graphics.Rect.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            // Tag the canvas so we can inject in unlockCanvasAndPost
-                        }
-                    }
-            );
-
-            // Hook SurfaceTexture.updateTexImage
-            // This is called when a new camera frame is ready on a GL texture.
-            // We can't directly replace GL texture content from Java, but we
-            // can detect when camera frames arrive.
-            XposedHelpers.findAndHookMethod(
-                    "android.graphics.SurfaceTexture",
-                    lpparam.classLoader,
-                    "updateTexImage",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            // For GL-based camera previews, the most effective
-                            // approach is hooking at the ImageReader/callback
-                            // level (already done above). This hook is a
-                            // placeholder for future GL injection.
-                        }
-                    }
-            );
-
-            log("Surface-level hooks installed");
-        } catch (Exception e) {
-            log("Failed to hook Surface-level rendering: " + e.getMessage());
-        }
-    }
-
-    // =========================================================================
     // Frame Loading & Processing
     // =========================================================================
 
-    /**
-     * Get a processed (scaled, rotated, mirrored) frame ready for injection.
-     */
     private Bitmap getProcessedFrame(int targetWidth, int targetHeight) {
         synchronized (frameLock) {
             ensureFrameLoaded();
@@ -788,16 +801,23 @@ public class CameraHook implements IXposedHookLoadPackage {
         }
     }
 
-    /**
-     * Load the media frame if not already cached.
-     */
     private void ensureFrameLoaded() {
+        if (isVideoSource) {
+            // Grab latest decoded video frame
+            Bitmap latest = videoFrameQueue.poll();
+            if (latest != null) {
+                Bitmap old = cachedFrame;
+                cachedFrame = latest;
+                currentVideoFrame = latest;
+                if (old != null && old != latest) {
+                    old.recycle();
+                }
+            }
+            if (cachedFrame != null) return;
+        }
+
         if (cachedFrame != null && mediaSourcePath != null
                 && mediaSourcePath.equals(cachedMediaPath)) {
-            // For video sources, get the current frame based on elapsed time
-            if (isVideoSource && activeRetriever != null) {
-                updateVideoFrame();
-            }
             return;
         }
 
@@ -820,41 +840,58 @@ public class CameraHook implements IXposedHookLoadPackage {
             loadImageSource();
         }
         cachedMediaPath = mediaSourcePath;
-
-        if (cachedFrame != null) {
-            log("Frame loaded: " + cachedFrame.getWidth() + "x" + cachedFrame.getHeight());
-        }
     }
 
     private void loadImageSource() {
         try {
             isVideoSource = false;
-            closeVideoRetriever();
+            stopVideoDecoder();
 
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
             cachedFrame = BitmapFactory.decodeFile(mediaSourcePath, opts);
+
+            if (cachedFrame != null) {
+                log("Image loaded: " + cachedFrame.getWidth() + "x" + cachedFrame.getHeight());
+            }
         } catch (Exception e) {
             log("Image loading failed: " + e.getMessage());
         }
     }
 
+    /**
+     * Video loading: use MediaMetadataRetriever for first frame,
+     * then start async MediaCodec decoder for subsequent frames.
+     */
     private void loadVideoSource() {
         try {
             isVideoSource = true;
-            closeVideoRetriever();
+            stopVideoDecoder();
 
-            activeRetriever = new MediaMetadataRetriever();
-            activeRetriever.setDataSource(mediaSourcePath);
+            // Get first frame and duration with retriever
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(mediaSourcePath);
+                String durationStr = retriever.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_DURATION);
+                videoDurationUs = (durationStr != null)
+                        ? Long.parseLong(durationStr) * 1000 : 0;
+                videoStartTime = System.currentTimeMillis();
 
-            String durationStr = activeRetriever.extractMetadata(
-                    MediaMetadataRetriever.METADATA_KEY_DURATION);
-            videoDurationUs = (durationStr != null)
-                    ? Long.parseLong(durationStr) * 1000 : 0; // convert ms to us
-            videoStartTime = System.currentTimeMillis();
+                cachedFrame = retriever.getFrameAtTime(0,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                currentVideoFrame = cachedFrame;
+            } finally {
+                try { retriever.release(); } catch (Exception ignored) {}
+            }
 
-            cachedFrame = activeRetriever.getFrameAtTime(0,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            // Start async decoder
+            startVideoDecoder();
+
+            if (cachedFrame != null) {
+                log("Video loaded, first frame: " + cachedFrame.getWidth() + "x"
+                        + cachedFrame.getHeight() + ", duration=" + (videoDurationUs / 1000) + "ms");
+            }
         } catch (Exception e) {
             log("Video loading failed: " + e.getMessage());
             isVideoSource = false;
@@ -862,36 +899,263 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Update the cached frame to the current video position (looping).
+     * Start async video decoder using MediaCodec for efficient frame extraction.
      */
-    private void updateVideoFrame() {
-        if (activeRetriever == null || videoDurationUs <= 0) return;
+    private void startVideoDecoder() {
+        synchronized (videoLock) {
+            if (videoDecoderRunning) return;
+            videoDecoderRunning = true;
 
-        try {
-            long elapsed = (System.currentTimeMillis() - videoStartTime) * 1000; // to us
-            long positionUs = elapsed % videoDurationUs;
+            videoDecodeThread = new HandlerThread("VirtuCamVideoDecode");
+            videoDecodeThread.start();
+            videoDecodeHandler = new Handler(videoDecodeThread.getLooper());
 
-            Bitmap newFrame = activeRetriever.getFrameAtTime(positionUs,
-                    MediaMetadataRetriever.OPTION_CLOSEST);
-            if (newFrame != null) {
-                Bitmap old = cachedFrame;
-                cachedFrame = newFrame;
-                if (old != null && old != newFrame) {
-                    old.recycle();
+            final String path = mediaSourcePath;
+            videoDecodeHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    runVideoDecoderLoop(path);
                 }
-            }
-        } catch (Exception e) {
-            log("Video frame update error: " + e.getMessage());
+            });
         }
     }
 
-    private void closeVideoRetriever() {
-        if (activeRetriever != null) {
-            try {
-                activeRetriever.release();
-            } catch (Exception ignored) {
+    private void runVideoDecoderLoop(String path) {
+        MediaExtractor extractor = null;
+        MediaCodec codec = null;
+
+        try {
+            extractor = new MediaExtractor();
+            extractor.setDataSource(path);
+
+            int videoTrackIndex = -1;
+            MediaFormat format = null;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat trackFormat = extractor.getTrackFormat(i);
+                String mime = trackFormat.getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("video/")) {
+                    videoTrackIndex = i;
+                    format = trackFormat;
+                    break;
+                }
             }
-            activeRetriever = null;
+
+            if (videoTrackIndex < 0 || format == null) {
+                log("No video track found");
+                return;
+            }
+
+            extractor.selectTrack(videoTrackIndex);
+            String mime = format.getString(MediaFormat.KEY_MIME);
+
+            codec = MediaCodec.createDecoderByType(mime);
+            codec.configure(format, null, null, 0);
+            codec.start();
+
+            synchronized (videoLock) {
+                videoExtractor = extractor;
+                videoCodec = codec;
+            }
+
+            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+            boolean inputDone = false;
+            long startTimeMs = System.currentTimeMillis();
+
+            while (videoDecoderRunning) {
+                // Feed input
+                if (!inputDone) {
+                    int inputIndex = codec.dequeueInputBuffer(10000);
+                    if (inputIndex >= 0) {
+                        ByteBuffer inputBuffer;
+                        if (Build.VERSION.SDK_INT >= 21) {
+                            inputBuffer = codec.getInputBuffer(inputIndex);
+                        } else {
+                            inputBuffer = codec.getInputBuffers()[inputIndex];
+                        }
+
+                        int sampleSize = extractor.readSampleData(inputBuffer, 0);
+                        if (sampleSize < 0) {
+                            // End of stream — loop
+                            codec.queueInputBuffer(inputIndex, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            inputDone = true;
+                        } else {
+                            long pts = extractor.getSampleTime();
+                            codec.queueInputBuffer(inputIndex, 0, sampleSize, pts, 0);
+                            extractor.advance();
+                        }
+                    }
+                }
+
+                // Get output
+                int outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10000);
+                if (outputIndex >= 0) {
+                    if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        // Loop: seek back to beginning
+                        codec.flush();
+                        extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
+                        inputDone = false;
+                        startTimeMs = System.currentTimeMillis();
+                        codec.releaseOutputBuffer(outputIndex, false);
+                        continue;
+                    }
+
+                    // Rate control: wait for correct presentation time
+                    long framePtsUs = bufferInfo.presentationTimeUs;
+                    long elapsedUs = (System.currentTimeMillis() - startTimeMs) * 1000;
+                    long waitUs = framePtsUs - elapsedUs;
+                    if (waitUs > 5000) { // More than 5ms ahead
+                        try { Thread.sleep(waitUs / 1000); } catch (InterruptedException ignored) { break; }
+                    }
+
+                    // Extract frame as Bitmap
+                    Bitmap frameBitmap = extractFrameFromCodecOutput(codec, outputIndex,
+                            bufferInfo, format);
+                    codec.releaseOutputBuffer(outputIndex, false);
+
+                    if (frameBitmap != null) {
+                        // Non-blocking offer — drop old frames if queue is full
+                        if (!videoFrameQueue.offer(frameBitmap)) {
+                            Bitmap dropped = videoFrameQueue.poll();
+                            if (dropped != null) dropped.recycle();
+                            videoFrameQueue.offer(frameBitmap);
+                        }
+                    }
+                } else if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    format = codec.getOutputFormat();
+                }
+            }
+        } catch (Exception e) {
+            log("Video decoder error: " + e.getMessage());
+        } finally {
+            if (codec != null) {
+                try { codec.stop(); } catch (Exception ignored) {}
+                try { codec.release(); } catch (Exception ignored) {}
+            }
+            if (extractor != null) {
+                try { extractor.release(); } catch (Exception ignored) {}
+            }
+            synchronized (videoLock) {
+                videoExtractor = null;
+                videoCodec = null;
+            }
+        }
+    }
+
+    /**
+     * Extract a Bitmap from MediaCodec output buffer.
+     * The output format is typically YUV — we convert to ARGB.
+     */
+    private Bitmap extractFrameFromCodecOutput(MediaCodec codec, int outputIndex,
+                                                MediaCodec.BufferInfo info,
+                                                MediaFormat format) {
+        try {
+            ByteBuffer outputBuffer;
+            if (Build.VERSION.SDK_INT >= 21) {
+                outputBuffer = codec.getOutputBuffer(outputIndex);
+            } else {
+                outputBuffer = codec.getOutputBuffers()[outputIndex];
+            }
+            if (outputBuffer == null) return null;
+
+            int width, height;
+            try {
+                // Use output format which may differ from input format
+                MediaFormat outputFormat = codec.getOutputFormat();
+                width = outputFormat.getInteger(MediaFormat.KEY_WIDTH);
+                height = outputFormat.getInteger(MediaFormat.KEY_HEIGHT);
+
+                // Check for stride/slice height
+                int stride = width;
+                int sliceHeight = height;
+                try { stride = outputFormat.getInteger(MediaFormat.KEY_STRIDE); } catch (Exception ignored) {}
+                try { sliceHeight = outputFormat.getInteger("slice-height"); } catch (Exception ignored) {}
+                if (stride <= 0) stride = width;
+                if (sliceHeight <= 0) sliceHeight = height;
+
+                // Check color format
+                int colorFormat = 0;
+                try { colorFormat = outputFormat.getInteger(MediaFormat.KEY_COLOR_FORMAT); } catch (Exception ignored) {}
+
+                outputBuffer.position(info.offset);
+                outputBuffer.limit(info.offset + info.size);
+
+                byte[] yuvBytes = new byte[info.size];
+                outputBuffer.get(yuvBytes);
+
+                // Convert YUV to ARGB
+                int[] argb = new int[width * height];
+                decodeYUV420ToARGB(argb, yuvBytes, stride, sliceHeight, width, height);
+
+                Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                bitmap.setPixels(argb, 0, width, 0, 0, width, height);
+                return bitmap;
+
+            } catch (Exception e) {
+                log("Frame extraction format error: " + e.getMessage());
+                return null;
+            }
+        } catch (Exception e) {
+            log("extractFrameFromCodecOutput error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Decode YUV420 (semi-planar NV12/NV21 or planar) to ARGB.
+     */
+    private static void decodeYUV420ToARGB(int[] argb, byte[] yuv,
+                                            int stride, int sliceHeight,
+                                            int width, int height) {
+        int frameSize = stride * sliceHeight;
+
+        for (int j = 0; j < height; j++) {
+            for (int i = 0; i < width; i++) {
+                int yIndex = j * stride + i;
+                int uvIndex = frameSize + (j / 2) * stride + (i / 2) * 2;
+
+                int Y = (yuv[yIndex] & 0xFF) - 16;
+                if (Y < 0) Y = 0;
+
+                int U, V;
+                if (uvIndex + 1 < yuv.length) {
+                    // NV12: U then V
+                    U = (yuv[uvIndex] & 0xFF) - 128;
+                    V = (yuv[uvIndex + 1] & 0xFF) - 128;
+                } else {
+                    U = 0;
+                    V = 0;
+                }
+
+                int R = (int) (1.164f * Y + 1.596f * V);
+                int G = (int) (1.164f * Y - 0.813f * V - 0.391f * U);
+                int B = (int) (1.164f * Y + 2.018f * U);
+
+                R = Math.max(0, Math.min(255, R));
+                G = Math.max(0, Math.min(255, G));
+                B = Math.max(0, Math.min(255, B));
+
+                argb[j * width + i] = 0xFF000000 | (R << 16) | (G << 8) | B;
+            }
+        }
+    }
+
+    private void stopVideoDecoder() {
+        synchronized (videoLock) {
+            videoDecoderRunning = false;
+
+            if (videoDecodeThread != null) {
+                videoDecodeThread.quitSafely();
+                videoDecodeThread = null;
+                videoDecodeHandler = null;
+            }
+
+            // Drain frame queue
+            Bitmap frame;
+            while ((frame = videoFrameQueue.poll()) != null) {
+                frame.recycle();
+            }
+            currentVideoFrame = null;
         }
     }
 
@@ -905,30 +1169,26 @@ public class CameraHook implements IXposedHookLoadPackage {
             Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight,
                     Bitmap.Config.ARGB_8888);
             Canvas canvas = new Canvas(output);
-            canvas.drawColor(Color.BLACK); // Black letterbox
+            canvas.drawColor(Color.BLACK);
 
             float srcW = source.getWidth();
             float srcH = source.getHeight();
 
-            // Fit within target while maintaining aspect ratio
             float fitScale = Math.min(targetWidth / srcW, targetHeight / srcH);
 
             Matrix matrix = new Matrix();
 
-            // Center the source in the target
             float scaledW = srcW * fitScale;
             float scaledH = srcH * fitScale;
             float translateX = (targetWidth - scaledW) / 2f;
             float translateY = (targetHeight - scaledH) / 2f;
 
-            // Apply user scale factors on top of fit scale
             float finalScaleX = fitScale * scaleX * (mirrored ? -1 : 1);
             float finalScaleY = fitScale * scaleY;
 
             matrix.postScale(finalScaleX, finalScaleY);
 
             if (mirrored) {
-                // After negative X scale, translate to compensate
                 matrix.postTranslate(scaledW * scaleX, 0);
             }
 
@@ -938,52 +1198,52 @@ public class CameraHook implements IXposedHookLoadPackage {
                 matrix.postRotate(rotation, targetWidth / 2f, targetHeight / 2f);
             }
 
-            // Apply user offset (as fraction of target dimensions)
             matrix.postTranslate(offsetX * targetWidth, offsetY * targetHeight);
 
             canvas.drawBitmap(source, matrix, null);
             return output;
         } catch (Exception e) {
             log("processFrame error: " + e.getMessage());
-            // FIX 11: Force a copy if createScaledBitmap returns the same bitmap
-            Bitmap scaled = Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true);
-            if (scaled == source) {
-                scaled = source.copy(Bitmap.Config.ARGB_8888, false);
+            try {
+                Bitmap scaled = Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true);
+                if (scaled == source) {
+                    scaled = source.copy(Bitmap.Config.ARGB_8888, false);
+                }
+                return scaled;
+            } catch (Exception e2) {
+                return null;
             }
-            return scaled;
         }
     }
 
     // =========================================================================
-    // YUV Conversion (with buffer reuse)
+    // YUV Conversion (thread-safe with ThreadLocal buffers)
     // =========================================================================
 
-    /**
-     * Convert a bitmap to NV21 YUV data, reusing buffers when possible.
-     */
     private byte[] getYuvData(Bitmap bitmap, int width, int height) {
         try {
-            // Reuse buffers if dimensions match
-            if (width != reusableBufferWidth || height != reusableBufferHeight) {
-                reusableArgbBuffer = new int[width * height];
-                reusableYuvBuffer = new byte[width * height * 3 / 2];
-                reusableBufferWidth = width;
-                reusableBufferHeight = height;
+            int[] dims = threadLocalBufferDims.get();
+            int[] argbBuf = threadLocalArgbBuffer.get();
+            byte[] yuvBuf = threadLocalYuvBuffer.get();
+
+            if (dims == null || dims[0] != width || dims[1] != height
+                    || argbBuf == null || yuvBuf == null) {
+                argbBuf = new int[width * height];
+                yuvBuf = new byte[width * height * 3 / 2];
+                threadLocalArgbBuffer.set(argbBuf);
+                threadLocalYuvBuffer.set(yuvBuf);
+                threadLocalBufferDims.set(new int[]{width, height});
             }
 
-            bitmap.getPixels(reusableArgbBuffer, 0, width, 0, 0, width, height);
-            encodeNV21(reusableYuvBuffer, reusableArgbBuffer, width, height);
-            return reusableYuvBuffer;
+            bitmap.getPixels(argbBuf, 0, width, 0, 0, width, height);
+            encodeNV21(yuvBuf, argbBuf, width, height);
+            return yuvBuf;
         } catch (Exception e) {
             log("YUV conversion failed: " + e.getMessage());
             return null;
         }
     }
 
-    /**
-     * Encode ARGB pixels to NV21 format.
-     * NV21 layout: [Y plane (w*h bytes)] [VU interleaved (w*h/2 bytes)]
-     */
     private static void encodeNV21(byte[] nv21, int[] argb, int width, int height) {
         final int frameSize = width * height;
         int yIndex = 0;
@@ -1014,941 +1274,720 @@ public class CameraHook implements IXposedHookLoadPackage {
     // Camera Filtering Helper
     // =========================================================================
 
-    /**
-     * Check if a camera should be hooked based on cameraTarget preference
-     */
-    private boolean shouldHookCamera(Object cameraManager, String cameraId, ClassLoader classLoader) {
-        if ("all".equals(cameraTarget)) {
-            return true;
-        }
-        
+    private boolean shouldHookCamera(Object cameraManager, String cameraId,
+                                     ClassLoader classLoader) {
+        if ("all".equals(cameraTarget)) return true;
+
         try {
-            // Get CameraCharacteristics for this camera
             Object characteristics = XposedHelpers.callMethod(
                     cameraManager, "getCameraCharacteristics", cameraId);
-            
-            // Get LENS_FACING
+
             Class<?> characteristicsClass = XposedHelpers.findClass(
                     "android.hardware.camera2.CameraCharacteristics", classLoader);
-            Class<?> keyClass = XposedHelpers.findClass(
-                    "android.hardware.camera2.CameraCharacteristics$Key", classLoader);
-            
             Object lensFacingKey = XposedHelpers.getStaticObjectField(
                     characteristicsClass, "LENS_FACING");
-            
-            Object lensFacing = XposedHelpers.callMethod(
-                    characteristics, "get", lensFacingKey);
-            
-            if (lensFacing == null) return true; // Hook if we can't determine
-            
+            Object lensFacing = XposedHelpers.callMethod(characteristics, "get", lensFacingKey);
+
+            if (lensFacing == null) return true;
             int facing = (Integer) lensFacing;
-            
-            // CameraCharacteristics.LENS_FACING_FRONT = 0
-            // CameraCharacteristics.LENS_FACING_BACK = 1
-            // CameraCharacteristics.LENS_FACING_EXTERNAL = 2
-            
-            if ("front".equals(cameraTarget)) {
-                return facing == 0;
-            } else if ("back".equals(cameraTarget)) {
-                return facing == 1;
-            }
-            
+
+            if ("front".equals(cameraTarget)) return facing == 0;
+            if ("back".equals(cameraTarget)) return facing == 1;
             return true;
         } catch (Exception e) {
-            log("Failed to check camera facing: " + e.getMessage());
-            return true; // Hook by default if we can't determine
+            return true;
         }
     }
 
     // =========================================================================
-    // Strategy 1: Hook CameraCaptureSession Surface Replacement
+    // CameraCaptureSession Hooks (Surface Replacement Strategy)
     // =========================================================================
 
-    /**
-     * FIX 10: Cleanup existing mappings for rapid camera reopen
-     */
     private void cleanupExistingMappings(Object cameraDevice) {
-        List<SurfaceMapping> existing = deviceToMappings.remove(cameraDevice);
+        List<SurfaceMapping> existing = deviceToMappings.remove(identityKey(cameraDevice));
         if (existing != null) {
             for (SurfaceMapping mapping : existing) {
                 mapping.cleanup();
                 surfaceMappings.remove(mapping.replacementSurface);
             }
-            log("Cleaned up " + existing.size() + " existing mappings for camera reopen");
         }
     }
 
     private void hookCameraCaptureSession(final LoadPackageParam lpparam) {
         try {
-            // Hook createCaptureSession(List<Surface>, StateCallback, Handler)
-            XposedHelpers.findAndHookMethod(
-                    "android.hardware.camera2.CameraDevice",
-                    lpparam.classLoader,
-                    "createCaptureSession",
-                    List.class,
-                    "android.hardware.camera2.CameraCaptureSession$StateCallback",
-                    Handler.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            if (!isActive()) return;
-                            
-                            // FIX 7: Check if this camera device should be hooked
-                            Object cameraDevice = param.thisObject;
-                            Boolean shouldHook = cameraDeviceHookStatus.get(cameraDevice);
-                            if (shouldHook != null && !shouldHook) {
-                                log("Skipping session hook - camera not targeted");
-                                return;
-                            }
-                            
-                            // FIX 10: Cleanup any existing mappings for this camera device
-                            cleanupExistingMappings(cameraDevice);
-                            
-                            reloadPreferencesIfNeeded();
-                            log("Hooking createCaptureSession with Surface list");
-                            
-                            @SuppressWarnings("unchecked")
-                            List<Surface> surfaces = (List<Surface>) param.args[0];
-                            if (surfaces == null || surfaces.isEmpty()) return;
-                            
-                            List<Surface> replacementSurfaces = new ArrayList<>();
-                            List<SurfaceMapping> sessionMappings = new ArrayList<>();
-                            
-                            for (Surface originalSurface : surfaces) {
-                                try {
-                                    // FIX 2: Check surface type before replacing
-                                    String surfaceType = surfaceTypeTracker.get(originalSurface);
-                                    if (surfaceType == null) {
-                                        surfaceType = "Unknown";
-                                    }
-                                    
-                                    // Get surface dimensions
-                                    int[] dims = getSurfaceDimensions(originalSurface);
-                                    int width = dims[0];
-                                    int height = dims[1];
-                                    
-                                    if (width <= 0 || height <= 0) {
-                                        // Use default dimensions if we can't determine
-                                        width = 1920;
-                                        height = 1080;
-                                    }
-                                    
-                                    // FIX 2: Determine format based on surface type
-                                    int format = ImageFormat.YUV_420_888;
-                                    if (surfaceType.startsWith("ImageReader:")) {
-                                        int detectedFormat = Integer.parseInt(surfaceType.substring(12));
-                                        if (detectedFormat == ImageFormat.JPEG) {
-                                            format = ImageFormat.JPEG;
-                                        } else if (detectedFormat == ImageFormat.PRIVATE) {
-                                            // Pass through PRIVATE surfaces
-                                            replacementSurfaces.add(originalSurface);
-                                            continue;
-                                        }
-                                    }
-                                    
-                                    // Create ImageReader for this surface
-                                    ImageReader reader = ImageReader.newInstance(
-                                            width, height, format, 2);
-                                    
-                                    Surface replacementSurface = reader.getSurface();
-                                    
-                                    // Store mapping
-                                    SurfaceMapping mapping = new SurfaceMapping(
-                                            originalSurface, replacementSurface, reader,
-                                            width, height, format, surfaceType);
-                                    surfaceMappings.put(replacementSurface, mapping);
-                                    sessionMappings.add(mapping);
-                                    
-                                    // Set up listener to process frames
-                                    setupImageReaderListener(reader, originalSurface, width, height);
-                                    
-                                    replacementSurfaces.add(replacementSurface);
-                                    log("Replaced surface: " + width + "x" + height + " type=" + surfaceType);
-                                } catch (Exception e) {
-                                    log("Failed to replace surface: " + e.getMessage());
-                                    replacementSurfaces.add(originalSurface);
-                                }
-                            }
-                            
-                            // Replace the surface list
-                            param.args[0] = replacementSurfaces;
-                            
-                            // FIX 10: Store mappings for this camera device
-                            deviceToMappings.put(cameraDevice, new ArrayList<>(sessionMappings));
-                            
-                            // FIX 1: Hook the StateCallback instance methods instead of wrapping
-                            Object originalCallback = param.args[1];
-                            hookStateCallbackInstance(originalCallback, lpparam.classLoader, sessionMappings);
-                        }
-                    }
-            );
-            
-            // Hook createCaptureSessionByOutputConfigurations for API 24+
-            if (Build.VERSION.SDK_INT >= 24) {
-                try {
-                    XposedHelpers.findAndHookMethod(
-                            "android.hardware.camera2.CameraDevice",
-                            lpparam.classLoader,
-                            "createCaptureSessionByOutputConfigurations",
-                            List.class,
-                            "android.hardware.camera2.CameraCaptureSession$StateCallback",
-                            Handler.class,
-                            new XC_MethodHook() {
-                                @Override
-                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                    if (!isActive()) return;
-                                    
-                                    // FIX 7: Check if this camera device should be hooked
-                                    Object cameraDevice = param.thisObject;
-                                    Boolean shouldHook = cameraDeviceHookStatus.get(cameraDevice);
-                                    if (shouldHook != null && !shouldHook) {
-                                        log("Skipping session hook - camera not targeted");
-                                        return;
-                                    }
-                                    
-                                    // FIX 10: Cleanup any existing mappings for this camera device
-                                    cleanupExistingMappings(cameraDevice);
-                                    
-                                    reloadPreferencesIfNeeded();
-                                    log("Hooking createCaptureSessionByOutputConfigurations");
-                                    
-                                    @SuppressWarnings("unchecked")
-                                    List<Object> outputConfigs = (List<Object>) param.args[0];
-                                    if (outputConfigs == null || outputConfigs.isEmpty()) return;
-                                    
-                                    List<Object> replacementConfigs = new ArrayList<>();
-                                    List<SurfaceMapping> sessionMappings = new ArrayList<>();
-                                    
-                                    for (Object config : outputConfigs) {
-                                        try {
-                                            @SuppressWarnings("unchecked")
-                                            List<Surface> surfaces = (List<Surface>) XposedHelpers.callMethod(
-                                                    config, "getSurfaces");
-                                            
-                                            if (surfaces != null && !surfaces.isEmpty()) {
-                                                Surface originalSurface = surfaces.get(0);
-                                                
-                                                // FIX 2: Check surface type
-                                                String surfaceType = surfaceTypeTracker.get(originalSurface);
-                                                if (surfaceType == null) surfaceType = "Unknown";
-                                                
-                                                int[] dims = getSurfaceDimensions(originalSurface);
-                                                int width = dims[0] > 0 ? dims[0] : 1920;
-                                                int height = dims[1] > 0 ? dims[1] : 1080;
-                                                
-                                                // FIX 2: Determine format based on surface type
-                                                int format = ImageFormat.YUV_420_888;
-                                                if (surfaceType.startsWith("ImageReader:")) {
-                                                    int detectedFormat = Integer.parseInt(surfaceType.substring(12));
-                                                    if (detectedFormat == ImageFormat.JPEG) {
-                                                        format = ImageFormat.JPEG;
-                                                    } else if (detectedFormat == ImageFormat.PRIVATE) {
-                                                        replacementConfigs.add(config);
-                                                        continue;
-                                                    }
-                                                }
-                                                
-                                                ImageReader reader = ImageReader.newInstance(
-                                                        width, height, format, 2);
-                                                Surface replacementSurface = reader.getSurface();
-                                                
-                                                SurfaceMapping mapping = new SurfaceMapping(
-                                                        originalSurface, replacementSurface, reader,
-                                                        width, height, format, surfaceType);
-                                                surfaceMappings.put(replacementSurface, mapping);
-                                                sessionMappings.add(mapping);
-                                                
-                                                setupImageReaderListener(reader, originalSurface, width, height);
-                                                
-                                                // Create new OutputConfiguration with our surface
-                                                Class<?> outputConfigClass = XposedHelpers.findClass(
-                                                        "android.hardware.camera2.params.OutputConfiguration",
-                                                        lpparam.classLoader);
-                                                Object newConfig = XposedHelpers.newInstance(
-                                                        outputConfigClass, replacementSurface);
-                                                replacementConfigs.add(newConfig);
-                                                
-                                                log("Replaced OutputConfiguration surface: " + width + "x" + height + " type=" + surfaceType);
-                                            } else {
-                                                replacementConfigs.add(config);
-                                            }
-                                        } catch (Exception e) {
-                                            log("Failed to replace OutputConfiguration: " + e.getMessage());
-                                            replacementConfigs.add(config);
-                                        }
-                                    }
-                                    
-                                    param.args[0] = replacementConfigs;
-                                    
-                                    // FIX 10: Store mappings for this camera device
-                                    deviceToMappings.put(cameraDevice, new ArrayList<>(sessionMappings));
-                                    
-                                    // FIX 1: Hook the StateCallback instance methods instead of wrapping
-                                    Object originalCallback = param.args[1];
-                                    hookStateCallbackInstance(originalCallback, lpparam.classLoader, sessionMappings);
-                                }
-                            }
-                    );
-                } catch (Exception e) {
-                    log("createCaptureSessionByOutputConfigurations not available: " + e.getMessage());
-                }
-            }
-            
-            // Hook createCaptureSession(SessionConfiguration) for API 28+
-            if (Build.VERSION.SDK_INT >= 28) {
-                try {
-                    XposedHelpers.findAndHookMethod(
-                            "android.hardware.camera2.CameraDevice",
-                            lpparam.classLoader,
-                            "createCaptureSession",
-                            "android.hardware.camera2.params.SessionConfiguration",
-                            new XC_MethodHook() {
-                                @Override
-                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                    if (!isActive()) return;
-                                    
-                                    // FIX 7: Check if this camera device should be hooked
-                                    Object cameraDevice = param.thisObject;
-                                    Boolean shouldHook = cameraDeviceHookStatus.get(cameraDevice);
-                                    if (shouldHook != null && !shouldHook) {
-                                        log("Skipping session hook - camera not targeted");
-                                        return;
-                                    }
-                                    
-                                    // FIX 10: Cleanup any existing mappings for this camera device
-                                    cleanupExistingMappings(cameraDevice);
-                                    
-                                    reloadPreferencesIfNeeded();
-                                    log("Hooking createCaptureSession with SessionConfiguration");
-                                    
-                                    Object sessionConfig = param.args[0];
-                                    
-                                    @SuppressWarnings("unchecked")
-                                    List<Object> outputConfigs = (List<Object>) XposedHelpers.callMethod(
-                                            sessionConfig, "getOutputConfigurations");
-                                    
-                                    if (outputConfigs == null || outputConfigs.isEmpty()) return;
-                                    
-                                    List<Object> replacementConfigs = new ArrayList<>();
-                                    List<SurfaceMapping> sessionMappings = new ArrayList<>();
-                                    
-                                    for (Object config : outputConfigs) {
-                                        try {
-                                            @SuppressWarnings("unchecked")
-                                            List<Surface> surfaces = (List<Surface>) XposedHelpers.callMethod(
-                                                    config, "getSurfaces");
-                                            
-                                            if (surfaces != null && !surfaces.isEmpty()) {
-                                                Surface originalSurface = surfaces.get(0);
-                                                
-                                                // FIX 2: Check surface type
-                                                String surfaceType = surfaceTypeTracker.get(originalSurface);
-                                                if (surfaceType == null) surfaceType = "Unknown";
-                                                
-                                                int[] dims = getSurfaceDimensions(originalSurface);
-                                                int width = dims[0] > 0 ? dims[0] : 1920;
-                                                int height = dims[1] > 0 ? dims[1] : 1080;
-                                                
-                                                // FIX 2: Determine format based on surface type
-                                                int format = ImageFormat.YUV_420_888;
-                                                if (surfaceType.startsWith("ImageReader:")) {
-                                                    int detectedFormat = Integer.parseInt(surfaceType.substring(12));
-                                                    if (detectedFormat == ImageFormat.JPEG) {
-                                                        format = ImageFormat.JPEG;
-                                                    } else if (detectedFormat == ImageFormat.PRIVATE) {
-                                                        replacementConfigs.add(config);
-                                                        continue;
-                                                    }
-                                                }
-                                                
-                                                ImageReader reader = ImageReader.newInstance(
-                                                        width, height, format, 2);
-                                                Surface replacementSurface = reader.getSurface();
-                                                
-                                                SurfaceMapping mapping = new SurfaceMapping(
-                                                        originalSurface, replacementSurface, reader,
-                                                        width, height, format, surfaceType);
-                                                surfaceMappings.put(replacementSurface, mapping);
-                                                sessionMappings.add(mapping);
-                                                
-                                                setupImageReaderListener(reader, originalSurface, width, height);
-                                                
-                                                Class<?> outputConfigClass = XposedHelpers.findClass(
-                                                        "android.hardware.camera2.params.OutputConfiguration",
-                                                        lpparam.classLoader);
-                                                Object newConfig = XposedHelpers.newInstance(
-                                                        outputConfigClass, replacementSurface);
-                                                replacementConfigs.add(newConfig);
-                                                
-                                                log("Replaced SessionConfiguration surface: " + width + "x" + height + " type=" + surfaceType);
-                                            } else {
-                                                replacementConfigs.add(config);
-                                            }
-                                        } catch (Exception e) {
-                                            log("Failed to replace SessionConfiguration output: " + e.getMessage());
-                                            replacementConfigs.add(config);
-                                        }
-                                    }
-                                    
-                                    // FIX 5: SessionConfiguration is immutable - create a new one
-                                    // Get the session type
-                                    int sessionType = (int) XposedHelpers.callMethod(sessionConfig, "getSessionType");
-                                    
-                                    // Get the executor
-                                    Object executor = XposedHelpers.callMethod(sessionConfig, "getExecutor");
-                                    
-                                    // Get the state callback
-                                    Object originalCallback = XposedHelpers.callMethod(sessionConfig, "getStateCallback");
-                                    
-                                    // FIX 10: Store mappings for this camera device
-                                    deviceToMappings.put(cameraDevice, new ArrayList<>(sessionMappings));
-                                    
-                                    // FIX 1: Hook the callback's methods for cleanup (don't wrap it)
-                                    hookStateCallbackInstance(originalCallback, lpparam.classLoader, sessionMappings);
-                                    
-                                    // Create new SessionConfiguration
-                                    Class<?> sessionConfigClass = XposedHelpers.findClass(
-                                        "android.hardware.camera2.params.SessionConfiguration", lpparam.classLoader);
-                                    Object newSessionConfig = XposedHelpers.newInstance(sessionConfigClass,
-                                        sessionType, replacementConfigs, executor, originalCallback);
-                                    
-                                    // Copy over any session parameters if they exist
-                                    try {
-                                        Object sessionParams = XposedHelpers.callMethod(sessionConfig, "getSessionParameters");
-                                        if (sessionParams != null) {
-                                            XposedHelpers.callMethod(newSessionConfig, "setSessionParameters", sessionParams);
-                                        }
-                                    } catch (Exception ignored) {}
-                                    
-                                    // Replace the argument
-                                    param.args[0] = newSessionConfig;
-                                }
-                            }
-                    );
-                } catch (Exception e) {
-                    log("SessionConfiguration hook not available: " + e.getMessage());
-                }
-            }
-            
-            // FIX 8: Hook implementation classes as fallbacks
-            // Try to hook CameraDeviceImpl for better compatibility
+            // === Primary hook: createCaptureSession(List, StateCallback, Handler) ===
+            hookCreateCaptureSessionList(lpparam, "android.hardware.camera2.CameraDevice");
+
+            // Also try CameraDeviceImpl
             try {
-                XposedHelpers.findAndHookMethod(
-                        "android.hardware.camera2.impl.CameraDeviceImpl",
-                        lpparam.classLoader,
-                        "createCaptureSession",
-                        List.class,
-                        "android.hardware.camera2.CameraCaptureSession$StateCallback",
-                        Handler.class,
-                        new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                // Same logic as abstract class hook - will be called if abstract hook doesn't fire
-                                log("CameraDeviceImpl.createCaptureSession called (fallback)");
-                            }
-                        }
-                );
-                log("Also hooked CameraDeviceImpl.createCaptureSession");
-            } catch (Exception e) {
-                log("CameraDeviceImpl.createCaptureSession hook not available (this is OK): " + e.getMessage());
-            }
-            
+                hookCreateCaptureSessionList(lpparam, "android.hardware.camera2.impl.CameraDeviceImpl");
+            } catch (Exception ignored) {}
+
+            // === API 24+: createCaptureSessionByOutputConfigurations ===
             if (Build.VERSION.SDK_INT >= 24) {
                 try {
-                    XposedHelpers.findAndHookMethod(
-                            "android.hardware.camera2.impl.CameraDeviceImpl",
-                            lpparam.classLoader,
-                            "createCaptureSessionByOutputConfigurations",
-                            List.class,
-                            "android.hardware.camera2.CameraCaptureSession$StateCallback",
-                            Handler.class,
-                            new XC_MethodHook() {
-                                @Override
-                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                    log("CameraDeviceImpl.createCaptureSessionByOutputConfigurations called (fallback)");
-                                }
-                            }
-                    );
-                    log("Also hooked CameraDeviceImpl.createCaptureSessionByOutputConfigurations");
-                } catch (Exception e) {
-                    log("CameraDeviceImpl.createCaptureSessionByOutputConfigurations hook not available (this is OK): " + e.getMessage());
-                }
+                    hookCreateCaptureSessionOutputConfigs(lpparam, "android.hardware.camera2.CameraDevice");
+                } catch (Exception ignored) {}
+                try {
+                    hookCreateCaptureSessionOutputConfigs(lpparam, "android.hardware.camera2.impl.CameraDeviceImpl");
+                } catch (Exception ignored) {}
             }
-            
+
+            // === API 28+: createCaptureSession(SessionConfiguration) ===
             if (Build.VERSION.SDK_INT >= 28) {
                 try {
-                    XposedHelpers.findAndHookMethod(
-                            "android.hardware.camera2.impl.CameraDeviceImpl",
-                            lpparam.classLoader,
-                            "createCaptureSession",
-                            "android.hardware.camera2.params.SessionConfiguration",
-                            new XC_MethodHook() {
-                                @Override
-                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                    log("CameraDeviceImpl.createCaptureSession(SessionConfiguration) called (fallback)");
-                                }
-                            }
-                    );
-                    log("Also hooked CameraDeviceImpl.createCaptureSession(SessionConfiguration)");
-                } catch (Exception e) {
-                    log("CameraDeviceImpl.createCaptureSession(SessionConfiguration) hook not available (this is OK): " + e.getMessage());
-                }
+                    hookCreateCaptureSessionConfig(lpparam, "android.hardware.camera2.CameraDevice");
+                } catch (Exception ignored) {}
+                try {
+                    hookCreateCaptureSessionConfig(lpparam, "android.hardware.camera2.impl.CameraDeviceImpl");
+                } catch (Exception ignored) {}
             }
-            
+
             log("CameraCaptureSession hooks installed");
         } catch (Exception e) {
             log("Failed to hook CameraCaptureSession: " + e.getMessage());
         }
     }
 
+    private void hookCreateCaptureSessionList(final LoadPackageParam lpparam,
+                                               final String className) {
+        XposedHelpers.findAndHookMethod(
+                className, lpparam.classLoader,
+                "createCaptureSession",
+                List.class,
+                "android.hardware.camera2.CameraCaptureSession$StateCallback",
+                Handler.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!isActive()) return;
+
+                        Object cameraDevice = param.thisObject;
+                        Boolean shouldHook = cameraDeviceHookStatus.get(identityKey(cameraDevice));
+                        if (shouldHook != null && !shouldHook) return;
+
+                        cleanupExistingMappings(cameraDevice);
+                        reloadPreferencesIfNeeded();
+
+                        @SuppressWarnings("unchecked")
+                        List<Surface> surfaces = (List<Surface>) param.args[0];
+                        if (surfaces == null || surfaces.isEmpty()) return;
+
+                        ReplacementResult result = replaceSurfaces(surfaces, lpparam.classLoader);
+                        param.args[0] = result.replacementSurfaces;
+
+                        deviceToMappings.put(identityKey(cameraDevice),
+                                new ArrayList<>(result.sessionMappings));
+
+                        hookStateCallbackForCleanup(param.args[1],
+                                lpparam.classLoader, result.sessionMappings);
+                    }
+                }
+        );
+    }
+
+    private void hookCreateCaptureSessionOutputConfigs(final LoadPackageParam lpparam,
+                                                        final String className) {
+        XposedHelpers.findAndHookMethod(
+                className, lpparam.classLoader,
+                "createCaptureSessionByOutputConfigurations",
+                List.class,
+                "android.hardware.camera2.CameraCaptureSession$StateCallback",
+                Handler.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!isActive()) return;
+
+                        Object cameraDevice = param.thisObject;
+                        Boolean shouldHook = cameraDeviceHookStatus.get(identityKey(cameraDevice));
+                        if (shouldHook != null && !shouldHook) return;
+
+                        cleanupExistingMappings(cameraDevice);
+                        reloadPreferencesIfNeeded();
+
+                        @SuppressWarnings("unchecked")
+                        List<Object> outputConfigs = (List<Object>) param.args[0];
+                        if (outputConfigs == null || outputConfigs.isEmpty()) return;
+
+                        List<Object> replacementConfigs = new ArrayList<>();
+                        List<SurfaceMapping> sessionMappings = new ArrayList<>();
+
+                        for (Object config : outputConfigs) {
+                            try {
+                                Surface originalSurface = extractSurfaceFromOutputConfig(config);
+                                if (originalSurface == null) {
+                                    replacementConfigs.add(config);
+                                    continue;
+                                }
+
+                                SurfaceMapping mapping = createSurfaceMapping(originalSurface);
+                                if (mapping == null) {
+                                    replacementConfigs.add(config);
+                                    continue;
+                                }
+
+                                sessionMappings.add(mapping);
+
+                                Class<?> outputConfigClass = XposedHelpers.findClass(
+                                        "android.hardware.camera2.params.OutputConfiguration",
+                                        lpparam.classLoader);
+                                Object newConfig = XposedHelpers.newInstance(
+                                        outputConfigClass, mapping.replacementSurface);
+                                replacementConfigs.add(newConfig);
+                            } catch (Exception e) {
+                                replacementConfigs.add(config);
+                            }
+                        }
+
+                        param.args[0] = replacementConfigs;
+                        deviceToMappings.put(identityKey(cameraDevice),
+                                new ArrayList<>(sessionMappings));
+                        hookStateCallbackForCleanup(param.args[1],
+                                lpparam.classLoader, sessionMappings);
+                    }
+                }
+        );
+    }
+
+    private void hookCreateCaptureSessionConfig(final LoadPackageParam lpparam,
+                                                 final String className) {
+        XposedHelpers.findAndHookMethod(
+                className, lpparam.classLoader,
+                "createCaptureSession",
+                "android.hardware.camera2.params.SessionConfiguration",
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!isActive()) return;
+
+                        Object cameraDevice = param.thisObject;
+                        Boolean shouldHook = cameraDeviceHookStatus.get(identityKey(cameraDevice));
+                        if (shouldHook != null && !shouldHook) return;
+
+                        cleanupExistingMappings(cameraDevice);
+                        reloadPreferencesIfNeeded();
+
+                        Object sessionConfig = param.args[0];
+
+                        @SuppressWarnings("unchecked")
+                        List<Object> outputConfigs = (List<Object>) XposedHelpers.callMethod(
+                                sessionConfig, "getOutputConfigurations");
+                        if (outputConfigs == null || outputConfigs.isEmpty()) return;
+
+                        List<Object> replacementConfigs = new ArrayList<>();
+                        List<SurfaceMapping> sessionMappings = new ArrayList<>();
+
+                        for (Object config : outputConfigs) {
+                            try {
+                                Surface originalSurface = extractSurfaceFromOutputConfig(config);
+                                if (originalSurface == null) {
+                                    replacementConfigs.add(config);
+                                    continue;
+                                }
+
+                                SurfaceMapping mapping = createSurfaceMapping(originalSurface);
+                                if (mapping == null) {
+                                    replacementConfigs.add(config);
+                                    continue;
+                                }
+
+                                sessionMappings.add(mapping);
+
+                                Class<?> outputConfigClass = XposedHelpers.findClass(
+                                        "android.hardware.camera2.params.OutputConfiguration",
+                                        lpparam.classLoader);
+                                Object newConfig = XposedHelpers.newInstance(
+                                        outputConfigClass, mapping.replacementSurface);
+                                replacementConfigs.add(newConfig);
+                            } catch (Exception e) {
+                                replacementConfigs.add(config);
+                            }
+                        }
+
+                        // Build new SessionConfiguration
+                        int sessionType = (int) XposedHelpers.callMethod(sessionConfig, "getSessionType");
+                        Object executor = XposedHelpers.callMethod(sessionConfig, "getExecutor");
+                        Object originalCallback = XposedHelpers.callMethod(sessionConfig, "getStateCallback");
+
+                        deviceToMappings.put(identityKey(cameraDevice),
+                                new ArrayList<>(sessionMappings));
+                        hookStateCallbackForCleanup(originalCallback,
+                                lpparam.classLoader, sessionMappings);
+
+                        Class<?> sessionConfigClass = XposedHelpers.findClass(
+                                "android.hardware.camera2.params.SessionConfiguration",
+                                lpparam.classLoader);
+                        Object newSessionConfig = XposedHelpers.newInstance(sessionConfigClass,
+                                sessionType, replacementConfigs, executor, originalCallback);
+
+                        try {
+                            Object sessionParams = XposedHelpers.callMethod(
+                                    sessionConfig, "getSessionParameters");
+                            if (sessionParams != null) {
+                                XposedHelpers.callMethod(newSessionConfig,
+                                        "setSessionParameters", sessionParams);
+                            }
+                        } catch (Exception ignored) {}
+
+                        param.args[0] = newSessionConfig;
+                    }
+                }
+        );
+    }
+
     /**
-     * FIX 9: Get surface dimensions using tracker first, then reflection fallback
+     * Extract the first Surface from an OutputConfiguration.
      */
+    private Surface extractSurfaceFromOutputConfig(Object config) {
+        try {
+            Object surfaceObj = XposedHelpers.callMethod(config, "getSurface");
+            if (surfaceObj instanceof Surface) return (Surface) surfaceObj;
+        } catch (Exception ignored) {}
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<Surface> surfaces = (List<Surface>) XposedHelpers.callMethod(config, "getSurfaces");
+            if (surfaces != null && !surfaces.isEmpty()) return surfaces.get(0);
+        } catch (Exception ignored) {}
+
+        return null;
+    }
+
+    /**
+     * Shared logic for replacing a list of Surfaces.
+     */
+    private static class ReplacementResult {
+        List<Surface> replacementSurfaces;
+        List<SurfaceMapping> sessionMappings;
+    }
+
+    private ReplacementResult replaceSurfaces(List<Surface> surfaces, ClassLoader classLoader) {
+        ReplacementResult result = new ReplacementResult();
+        result.replacementSurfaces = new ArrayList<>();
+        result.sessionMappings = new ArrayList<>();
+
+        for (Surface originalSurface : surfaces) {
+            SurfaceMapping mapping = createSurfaceMapping(originalSurface);
+            if (mapping != null) {
+                result.sessionMappings.add(mapping);
+                result.replacementSurfaces.add(mapping.replacementSurface);
+            } else {
+                result.replacementSurfaces.add(originalSurface);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Create a SurfaceMapping for the given original surface.
+     * Returns null if the surface should be passed through unmodified.
+     */
+    private SurfaceMapping createSurfaceMapping(Surface originalSurface) {
+        try {
+            String surfaceType = surfaceTypeByIdentity.get(identityKey(originalSurface));
+            if (surfaceType == null) surfaceType = "Unknown";
+
+            int[] dims = getSurfaceDimensions(originalSurface);
+            int width = dims[0] > 0 ? dims[0] : 1920;
+            int height = dims[1] > 0 ? dims[1] : 1080;
+
+            int format = ImageFormat.YUV_420_888;
+            if (surfaceType.startsWith("ImageReader:")) {
+                try {
+                    int detectedFormat = Integer.parseInt(surfaceType.substring(12));
+                    if (detectedFormat == ImageFormat.JPEG) {
+                        format = ImageFormat.JPEG;
+                    } else if (detectedFormat == ImageFormat.PRIVATE) {
+                        // Can't write to PRIVATE format — pass through
+                        return null;
+                    }
+                } catch (NumberFormatException e) {
+                    log("Invalid format in surface type: " + surfaceType);
+                }
+            } else if ("SurfaceTexture".equals(surfaceType)) {
+                // SurfaceTexture-backed surfaces use YUV for ImageWriter injection
+                format = ImageFormat.YUV_420_888;
+            }
+
+            // maxImages=4 to avoid buffer exhaustion
+            ImageReader reader = ImageReader.newInstance(width, height, format, 4);
+            Surface replacementSurface = reader.getSurface();
+
+            SurfaceMapping mapping = new SurfaceMapping(
+                    originalSurface, replacementSurface, reader,
+                    width, height, format, surfaceType);
+            surfaceMappings.put(replacementSurface, mapping);
+
+            setupImageReaderForForwarding(reader, mapping);
+
+            log("Replaced surface: " + width + "x" + height
+                    + " type=" + surfaceType + " format=" + format);
+            return mapping;
+        } catch (Exception e) {
+            log("Failed to create surface mapping: " + e.getMessage());
+            return null;
+        }
+    }
+
     private int[] getSurfaceDimensions(Surface surface) {
-        // Check tracker first
-        int[] tracked = surfaceDimensionTracker.get(surface);
+        int[] tracked = surfaceDimsByIdentity.get(identityKey(surface));
         if (tracked != null && tracked[0] > 0 && tracked[1] > 0) {
             return tracked;
         }
-        
+
         // Reflection fallback
-        int[] dims = new int[]{0, 0};
         try {
-            Field widthField = null;
-            Field heightField = null;
-            
             Class<?> surfaceClass = surface.getClass();
             while (surfaceClass != null) {
                 try {
-                    widthField = surfaceClass.getDeclaredField("mWidth");
-                    heightField = surfaceClass.getDeclaredField("mHeight");
-                    widthField.setAccessible(true);
-                    heightField.setAccessible(true);
+                    Field wf = surfaceClass.getDeclaredField("mWidth");
+                    Field hf = surfaceClass.getDeclaredField("mHeight");
+                    wf.setAccessible(true);
+                    hf.setAccessible(true);
+                    int w = wf.getInt(surface);
+                    int h = hf.getInt(surface);
+                    if (w > 0 && h > 0) return new int[]{w, h};
                     break;
                 } catch (NoSuchFieldException e) {
                     surfaceClass = surfaceClass.getSuperclass();
                 }
             }
-            
-            if (widthField != null && heightField != null) {
-                dims[0] = widthField.getInt(surface);
-                dims[1] = heightField.getInt(surface);
-            }
-        } catch (Exception e) {
-            log("Failed to get surface dimensions: " + e.getMessage());
-        }
-        
-        // Default fallback
-        if (dims[0] <= 0 || dims[1] <= 0) {
-            return new int[]{1920, 1080};
-        }
-        return dims;
+        } catch (Exception ignored) {}
+
+        return new int[]{1920, 1080};
     }
 
     /**
-     * Setup ImageReader listener to process and forward frames
+     * Setup ImageReader to intercept camera frames and forward virtual frames.
      */
-    private void setupImageReaderListener(final ImageReader reader,
-                                         final Surface originalSurface,
-                                         final int width, final int height) {
+    private void setupImageReaderForForwarding(final ImageReader reader,
+                                                final SurfaceMapping mapping) {
         reader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
             @Override
             public void onImageAvailable(ImageReader imageReader) {
+                if (mapping.closed) return;
+
                 Image image = null;
                 try {
                     image = imageReader.acquireLatestImage();
                     if (image == null) return;
-                    
-                    // FIX 3: Don't modify the intercepted image - just forward our virtual frame
-                    // to the original surface
-                    forwardVirtualFrameToSurface(originalSurface, width, height);
-                    
+
+                    // Forward virtual frame to the original surface
+                    forwardVirtualFrame(mapping);
                 } catch (Exception e) {
-                    log("ImageReader listener error: " + e.getMessage());
+                    // Silently handle — common during session teardown
                 } finally {
                     if (image != null) {
-                        image.close();
+                        try { image.close(); } catch (Exception ignored) {}
                     }
                 }
             }
-        }, getFrameProcessHandler()); // FIX 6: Use background thread instead of main looper
+        }, getFrameProcessHandler());
     }
 
     /**
-     * FIX 3 & 4: Forward virtual frame to the original surface (renamed and fixed)
+     * Forward virtual frame to the original surface via ImageWriter.
      */
-    private void forwardVirtualFrameToSurface(Surface originalSurface,
-                                              int width, int height) {
-        if (originalSurface == null || !originalSurface.isValid()) return;
-        
+    private void forwardVirtualFrame(SurfaceMapping mapping) {
+        if (mapping.closed || mapping.originalSurface == null
+                || !mapping.originalSurface.isValid()) return;
+
         try {
-            // Try Canvas-based drawing first
-            Canvas canvas = null;
-            try {
-                canvas = originalSurface.lockCanvas(null);
-                if (canvas != null) {
-                    Bitmap frame = getProcessedFrame(width, height);
-                    if (frame != null) {
-                        canvas.drawBitmap(frame, 0, 0, null);
-                        if (frame != cachedFrame) {
-                            frame.recycle();
-                        }
+            // Initialize ImageWriter lazily
+            if (mapping.imageWriter == null) {
+                try {
+                    if (Build.VERSION.SDK_INT >= 23) {
+                        mapping.imageWriter = ImageWriter.newInstance(
+                                mapping.originalSurface, 2);
+                    } else {
+                        // API < 23: try Canvas fallback
+                        forwardVirtualFrameViaCanvas(mapping);
+                        return;
                     }
-                    originalSurface.unlockCanvasAndPost(canvas);
+                } catch (Exception e) {
+                    // Canvas fallback
+                    forwardVirtualFrameViaCanvas(mapping);
                     return;
                 }
+            }
+
+            Image outputImage = null;
+            try {
+                outputImage = mapping.imageWriter.dequeueInputImage();
             } catch (Exception e) {
-                // Canvas approach failed, try ImageWriter
+                return; // No buffer available
             }
-            
-            // FIX 4: Fallback to ImageWriter for GL surfaces (API 23+)
-            // Write virtual frame YUV data, not copy from source image
-            if (Build.VERSION.SDK_INT >= 23) {
-                SurfaceMapping mapping = findMappingByOriginalSurface(originalSurface);
-                
-                if (mapping != null && mapping.imageWriter == null && !mapping.closed) {
-                    try {
-                        mapping.imageWriter = ImageWriter.newInstance(originalSurface, 2);
-                    } catch (Exception e) {
-                        log("Failed to create ImageWriter: " + e.getMessage());
-                    }
-                }
-                
-                if (mapping != null && mapping.imageWriter != null) {
-                    try {
-                        Image outputImage = mapping.imageWriter.dequeueInputImage();
-                        
-                        Bitmap frame = getProcessedFrame(width, height);
-                        if (frame != null) {
-                            // Convert frame to YUV and write to output image planes
-                            byte[] yuvData = getYuvData(frame, width, height);
-                            if (yuvData != null) {
-                                Image.Plane[] dstPlanes = outputImage.getPlanes();
-                                int frameSize = width * height;
-                                
-                                // Y plane
-                                ByteBuffer yBuffer = dstPlanes[0].getBuffer();
-                                yBuffer.rewind();
-                                yBuffer.put(yuvData, 0, frameSize);
-                                
-                                // U plane
-                                int uvSize = frameSize / 4;
-                                byte[] uData = new byte[uvSize];
-                                byte[] vData = new byte[uvSize];
-                                for (int i = 0; i < uvSize; i++) {
-                                    vData[i] = yuvData[frameSize + i * 2];
-                                    uData[i] = yuvData[frameSize + i * 2 + 1];
-                                }
-                                
-                                if (dstPlanes.length >= 3) {
-                                    ByteBuffer uBuffer = dstPlanes[1].getBuffer();
-                                    uBuffer.rewind();
-                                    uBuffer.put(uData);
-                                    
-                                    ByteBuffer vBuffer = dstPlanes[2].getBuffer();
-                                    vBuffer.rewind();
-                                    vBuffer.put(vData);
-                                }
-                                
-                                if (frame != cachedFrame) {
-                                    frame.recycle();
-                                }
-                            }
-                            
-                            mapping.imageWriter.queueInputImage(outputImage);
-                        }
-                    } catch (Exception e) {
-                        log("ImageWriter forward error: " + e.getMessage());
-                    }
-                }
+
+            Bitmap frame = getProcessedFrame(mapping.width, mapping.height);
+            if (frame == null) {
+                outputImage.close();
+                return;
             }
+
+            try {
+                int format = outputImage.getFormat();
+
+                if (format == ImageFormat.YUV_420_888) {
+                    byte[] nv21 = getYuvData(frame, mapping.width, mapping.height);
+                    if (nv21 != null) {
+                        Image.Plane[] planes = outputImage.getPlanes();
+                        writeYPlane(planes[0], nv21, mapping.width, mapping.height);
+                        writeUVPlanes(planes[1], planes[2], nv21,
+                                mapping.width * mapping.height, mapping.width, mapping.height);
+                    }
+                } else if (format == ImageFormat.JPEG) {
+                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    frame.compress(Bitmap.CompressFormat.JPEG, 90, bos);
+                    byte[] jpegData = bos.toByteArray();
+                    ByteBuffer buf = outputImage.getPlanes()[0].getBuffer();
+                    buf.rewind();
+                    buf.put(jpegData, 0, Math.min(jpegData.length, buf.remaining()));
+                }
+
+                mapping.imageWriter.queueInputImage(outputImage);
+            } catch (Exception e) {
+                try { outputImage.close(); } catch (Exception ignored) {}
+                log("ImageWriter queue error: " + e.getMessage());
+            }
+
+            recycleTempFrame(frame);
         } catch (Exception e) {
-            log("forwardVirtualFrameToSurface error: " + e.getMessage());
+            log("forwardVirtualFrame error: " + e.getMessage());
         }
     }
 
     /**
-     * FIX 4: Helper method to find mapping by original surface
+     * Canvas-based fallback for forwarding frames to surfaces.
      */
-    private SurfaceMapping findMappingByOriginalSurface(Surface originalSurface) {
-        for (SurfaceMapping m : surfaceMappings.values()) {
-            if (m.originalSurface == originalSurface) {
-                return m;
+    private void forwardVirtualFrameViaCanvas(SurfaceMapping mapping) {
+        if (mapping.originalSurface == null || !mapping.originalSurface.isValid()) return;
+
+        Canvas canvas = null;
+        try {
+            canvas = mapping.originalSurface.lockCanvas(null);
+            if (canvas != null) {
+                Bitmap frame = getProcessedFrame(mapping.width, mapping.height);
+                if (frame != null) {
+                    canvas.drawBitmap(frame, 0, 0, null);
+                    recycleTempFrame(frame);
+                }
+                mapping.originalSurface.unlockCanvasAndPost(canvas);
             }
+        } catch (Exception e) {
+            // Surface doesn't support Canvas — nothing we can do
         }
-        return null;
     }
 
     /**
-     * FIX 1: Hook StateCallback instance methods directly instead of wrapping
-     * This avoids the Proxy.newProxyInstance issue with abstract classes
+     * Hook StateCallback for session lifecycle cleanup.
+     * Hooks per-class, not per-instance, to avoid stack accumulation.
      */
-    private void hookStateCallbackInstance(final Object callbackInstance,
-                                           final ClassLoader classLoader,
-                                           final List<SurfaceMapping> sessionMappings) {
-        try {
-            // Get the actual class of the callback instance
-            Class<?> callbackClass = callbackInstance.getClass();
-            
-            // Hook onConfigured
-            XposedHelpers.findAndHookMethod(callbackClass, "onConfigured",
-                    "android.hardware.camera2.CameraCaptureSession",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            Object session = param.args[0];
-                            sessionToMappings.put(session, new ArrayList<>(sessionMappings));
-                            log("CameraCaptureSession configured, tracking " + sessionMappings.size() + " surfaces");
-                        }
-                    });
-            
-            // Hook onClosed
-            XposedHelpers.findAndHookMethod(callbackClass, "onClosed",
-                    "android.hardware.camera2.CameraCaptureSession",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            Object session = param.args[0];
-                            List<SurfaceMapping> mappings = sessionToMappings.remove(session);
-                            if (mappings != null) {
-                                for (SurfaceMapping mapping : mappings) {
-                                    mapping.cleanup();
-                                    surfaceMappings.remove(mapping.replacementSurface);
-                                }
-                                log("CameraCaptureSession closed, cleaned up " + mappings.size() + " mappings");
+    private void hookStateCallbackForCleanup(final Object callbackInstance,
+                                              final ClassLoader classLoader,
+                                              final List<SurfaceMapping> sessionMappings) {
+        if (callbackInstance == null) return;
+
+        Class<?> callbackClass = callbackInstance.getClass();
+        if (hookedCallbackClasses.contains(callbackClass)) {
+            // Already hooked this class — just register the mappings
+            // They'll be cleaned up when onClosed fires via sessionToMappings
+            return;
+        }
+
+        // Hook onConfigured — track session → mappings
+        Method onConfigured = findMethodInHierarchy(callbackClass,
+                "onConfigured", "android.hardware.camera2.CameraCaptureSession");
+        if (onConfigured != null) {
+            Class<?> declaring = onConfigured.getDeclaringClass();
+            try {
+                XposedHelpers.findAndHookMethod(declaring, "onConfigured",
+                        "android.hardware.camera2.CameraCaptureSession",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                Object session = param.args[0];
+                                // Store the most recent mappings for this session
+                                sessionToMappings.put(session, new ArrayList<>(sessionMappings));
                             }
-                        }
-                    });
-            
-            // Hook onConfigureFailed
-            XposedHelpers.findAndHookMethod(callbackClass, "onConfigureFailed",
-                    "android.hardware.camera2.CameraCaptureSession",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            Object session = param.args[0];
-                            List<SurfaceMapping> mappings = sessionToMappings.remove(session);
-                            if (mappings != null) {
-                                for (SurfaceMapping mapping : mappings) {
-                                    mapping.cleanup();
-                                    surfaceMappings.remove(mapping.replacementSurface);
-                                }
+                        });
+            } catch (Exception e) {
+                log("Failed to hook onConfigured: " + e.getMessage());
+            }
+        }
+
+        // Hook onClosed — cleanup
+        Method onClosed = findMethodInHierarchy(callbackClass,
+                "onClosed", "android.hardware.camera2.CameraCaptureSession");
+        if (onClosed != null) {
+            Class<?> declaring = onClosed.getDeclaringClass();
+            try {
+                XposedHelpers.findAndHookMethod(declaring, "onClosed",
+                        "android.hardware.camera2.CameraCaptureSession",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                Object session = param.args[0];
+                                cleanupSessionMappings(session);
                             }
-                            log("CameraCaptureSession configuration failed, cleaned up mappings");
-                        }
-                    });
-            
-            log("Hooked StateCallback instance methods for cleanup");
-        } catch (Exception e) {
-            log("Failed to hook StateCallback instance: " + e.getMessage());
+                        });
+            } catch (Exception e) {
+                log("Failed to hook onClosed: " + e.getMessage());
+            }
+        }
+
+        // Hook onConfigureFailed — cleanup
+        Method onFailed = findMethodInHierarchy(callbackClass,
+                "onConfigureFailed", "android.hardware.camera2.CameraCaptureSession");
+        if (onFailed != null) {
+            Class<?> declaring = onFailed.getDeclaringClass();
+            try {
+                XposedHelpers.findAndHookMethod(declaring, "onConfigureFailed",
+                        "android.hardware.camera2.CameraCaptureSession",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                Object session = param.args[0];
+                                cleanupSessionMappings(session);
+                            }
+                        });
+            } catch (Exception e) {
+                log("Failed to hook onConfigureFailed: " + e.getMessage());
+            }
+        }
+
+        hookedCallbackClasses.add(callbackClass);
+    }
+
+    private void cleanupSessionMappings(Object session) {
+        List<SurfaceMapping> mappings = sessionToMappings.remove(session);
+        if (mappings != null) {
+            for (SurfaceMapping mapping : mappings) {
+                mapping.cleanup();
+                surfaceMappings.remove(mapping.replacementSurface);
+            }
         }
     }
 
     // =========================================================================
-    // Strategy 2: Hook SurfaceTexture Attachment
+    // SurfaceTexture Tracking Hooks
     // =========================================================================
 
-    private void hookSurfaceTextureAttachment(final LoadPackageParam lpparam) {
+    private void hookSurfaceTextureTracking(final LoadPackageParam lpparam) {
         try {
-            // Hook SurfaceTexture.updateTexImage
+            // Track SurfaceTexture buffer sizes
             XposedHelpers.findAndHookMethod(
-                    "android.graphics.SurfaceTexture",
-                    lpparam.classLoader,
-                    "updateTexImage",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            if (!isActive()) return;
-                            
-                            // FIX 15: GL texture injection not implemented — frame replacement
-                            // handled via ImageReader interception and Surface forwarding
-                            // in hookCameraCaptureSession
-                            SurfaceTexture texture = (SurfaceTexture) param.thisObject;
-                            // log("SurfaceTexture.updateTexImage called");
-                        }
-                    }
-            );
-            
-            // Hook SurfaceTexture.attachToGLContext
-            XposedHelpers.findAndHookMethod(
-                    "android.graphics.SurfaceTexture",
-                    lpparam.classLoader,
-                    "attachToGLContext",
-                    int.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            if (!isActive()) return;
-                            
-                            SurfaceTexture texture = (SurfaceTexture) param.thisObject;
-                            int texName = (int) param.args[0];
-                            log("SurfaceTexture.attachToGLContext: texName=" + texName);
-                        }
-                    }
-            );
-            
-            // FIX 9: Hook SurfaceTexture.setDefaultBufferSize to track dimensions
-            XposedHelpers.findAndHookMethod(
-                    "android.graphics.SurfaceTexture",
-                    lpparam.classLoader,
-                    "setDefaultBufferSize",
-                    int.class,
-                    int.class,
+                    "android.graphics.SurfaceTexture", lpparam.classLoader,
+                    "setDefaultBufferSize", int.class, int.class,
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             SurfaceTexture texture = (SurfaceTexture) param.thisObject;
                             int w = (int) param.args[0];
                             int h = (int) param.args[1];
-                            surfaceTextureDimensions.put(texture, new int[]{w, h});
-                            log("SurfaceTexture.setDefaultBufferSize: " + w + "x" + h);
+                            surfaceTextureDimensions.put(identityKey(texture), new int[]{w, h});
                         }
                     }
             );
-            
-            // Hook Surface constructor with SurfaceTexture
+
+            // Track Surface(SurfaceTexture) constructor
             XposedHelpers.findAndHookConstructor(
-                    "android.view.Surface",
-                    lpparam.classLoader,
+                    "android.view.Surface", lpparam.classLoader,
                     SurfaceTexture.class,
                     new XC_MethodHook() {
                         @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            if (!isActive()) return;
-                            
+                        protected void afterHookedMethod(MethodHookParam param) {
                             Surface surface = (Surface) param.thisObject;
                             SurfaceTexture texture = (SurfaceTexture) param.args[0];
-                            surfaceToTextureMap.put(surface, texture);
-                            // FIX 2: Track SurfaceTexture surfaces
-                            surfaceTypeTracker.put(surface, "SurfaceTexture");
-                            // FIX 9: Track dimensions from SurfaceTexture
-                            try {
-                                int[] tracked = surfaceTextureDimensions.get(texture);
-                                if (tracked != null) {
-                                    surfaceDimensionTracker.put(surface, tracked);
-                                }
-                            } catch (Exception ignored) {}
-                            log("Surface created from SurfaceTexture");
+                            surfaceTypeByIdentity.put(identityKey(surface), "SurfaceTexture");
+
+                            int[] dims = surfaceTextureDimensions.get(identityKey(texture));
+                            if (dims != null) {
+                                surfaceDimsByIdentity.put(identityKey(surface), dims);
+                            }
                         }
                     }
             );
-            
-            log("SurfaceTexture attachment hooks installed");
+
+            log("SurfaceTexture tracking hooks installed");
         } catch (Exception e) {
-            log("Failed to hook SurfaceTexture attachment: " + e.getMessage());
+            log("Failed to hook SurfaceTexture tracking: " + e.getMessage());
         }
     }
 
     // =========================================================================
-    // Strategy 3: Hook CaptureRequest Builder
+    // CaptureRequest Builder Hooks
     // =========================================================================
 
     private void hookCaptureRequestBuilder(final LoadPackageParam lpparam) {
         try {
-            // Hook CaptureRequest.Builder.addTarget
+            // Hook addTarget to swap surfaces
             XposedHelpers.findAndHookMethod(
-                    "android.hardware.camera2.CaptureRequest$Builder",
-                    lpparam.classLoader,
-                    "addTarget",
-                    Surface.class,
+                    "android.hardware.camera2.CaptureRequest$Builder", lpparam.classLoader,
+                    "addTarget", Surface.class,
                     new XC_MethodHook() {
                         @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        protected void beforeHookedMethod(MethodHookParam param) {
                             if (!isActive()) return;
-                            
+
                             Surface targetSurface = (Surface) param.args[0];
-                            
-                            // Check if we have a replacement for this surface
                             for (SurfaceMapping mapping : surfaceMappings.values()) {
-                                if (mapping.originalSurface == targetSurface) {
+                                if (mapping.originalSurface == targetSurface && !mapping.closed) {
                                     param.args[0] = mapping.replacementSurface;
-                                    log("Replaced target surface in CaptureRequest.Builder");
                                     break;
                                 }
                             }
                         }
                     }
             );
-            
-            // Hook CameraCaptureSession.setRepeatingRequest
+
+            // Hook removeTarget as well
             XposedHelpers.findAndHookMethod(
-                    "android.hardware.camera2.CameraCaptureSession",
-                    lpparam.classLoader,
-                    "setRepeatingRequest",
-                    "android.hardware.camera2.CaptureRequest",
-                    "android.hardware.camera2.CameraCaptureSession$CaptureCallback",
-                    Handler.class,
+                    "android.hardware.camera2.CaptureRequest$Builder", lpparam.classLoader,
+                    "removeTarget", Surface.class,
                     new XC_MethodHook() {
                         @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        protected void beforeHookedMethod(MethodHookParam param) {
                             if (!isActive()) return;
-                            reloadPreferencesIfNeeded();
-                            // log("setRepeatingRequest called");
+
+                            Surface targetSurface = (Surface) param.args[0];
+                            for (SurfaceMapping mapping : surfaceMappings.values()) {
+                                if (mapping.originalSurface == targetSurface && !mapping.closed) {
+                                    param.args[0] = mapping.replacementSurface;
+                                    break;
+                                }
+                            }
                         }
                     }
             );
-            
-            // Hook CameraCaptureSession.capture
-            XposedHelpers.findAndHookMethod(
+
+            // Hook setRepeatingRequest and capture for config reload
+            String[] sessionMethods = {"setRepeatingRequest", "capture"};
+            String[] sessionClasses = {
                     "android.hardware.camera2.CameraCaptureSession",
-                    lpparam.classLoader,
-                    "capture",
-                    "android.hardware.camera2.CaptureRequest",
-                    "android.hardware.camera2.CameraCaptureSession$CaptureCallback",
-                    Handler.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            if (!isActive()) return;
-                            reloadPreferencesIfNeeded();
-                            // log("capture called");
-                        }
-                    }
-            );
-            
-            // FIX 8: Hook CameraCaptureSessionImpl as fallback
-            try {
-                XposedHelpers.findAndHookMethod(
-                        "android.hardware.camera2.impl.CameraCaptureSessionImpl",
-                        lpparam.classLoader,
-                        "setRepeatingRequest",
-                        "android.hardware.camera2.CaptureRequest",
-                        "android.hardware.camera2.CameraCaptureSession$CaptureCallback",
-                        Handler.class,
-                        new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                if (!isActive()) return;
-                                reloadPreferencesIfNeeded();
-                            }
-                        }
-                );
-                log("Also hooked CameraCaptureSessionImpl.setRepeatingRequest");
-            } catch (Exception e) {
-                log("CameraCaptureSessionImpl.setRepeatingRequest hook not available (this is OK): " + e.getMessage());
+                    "android.hardware.camera2.impl.CameraCaptureSessionImpl"
+            };
+
+            for (String sessionClass : sessionClasses) {
+                for (String methodName : sessionMethods) {
+                    try {
+                        XposedHelpers.findAndHookMethod(
+                                sessionClass, lpparam.classLoader,
+                                methodName,
+                                "android.hardware.camera2.CaptureRequest",
+                                "android.hardware.camera2.CameraCaptureSession$CaptureCallback",
+                                Handler.class,
+                                new XC_MethodHook() {
+                                    @Override
+                                    protected void beforeHookedMethod(MethodHookParam param) {
+                                        if (isActive()) reloadPreferencesIfNeeded();
+                                    }
+                                }
+                        );
+                    } catch (Exception ignored) {}
+                }
             }
-            
-            try {
-                XposedHelpers.findAndHookMethod(
-                        "android.hardware.camera2.impl.CameraCaptureSessionImpl",
-                        lpparam.classLoader,
-                        "capture",
-                        "android.hardware.camera2.CaptureRequest",
-                        "android.hardware.camera2.CameraCaptureSession$CaptureCallback",
-                        Handler.class,
-                        new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                if (!isActive()) return;
-                                reloadPreferencesIfNeeded();
-                            }
-                        }
-                );
-                log("Also hooked CameraCaptureSessionImpl.capture");
-            } catch (Exception e) {
-                log("CameraCaptureSessionImpl.capture hook not available (this is OK): " + e.getMessage());
-            }
-            
+
             log("CaptureRequest builder hooks installed");
         } catch (Exception e) {
             log("Failed to hook CaptureRequest builder: " + e.getMessage());
@@ -1956,54 +1995,33 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     // =========================================================================
-    // Strategy 4: Hook Camera1 Surface Binding
+    // Camera1 Surface Binding Hooks
     // =========================================================================
 
     private void hookCamera1SurfaceBinding(final LoadPackageParam lpparam) {
         try {
-            // FIX 15: These hooks provide logging for Camera1 surface binding.
-            // Actual frame injection for Camera1 is handled by PreviewCallback wrapping
-            // in hookCamera1API.
-            
-            // Hook Camera.setPreviewTexture
             XposedHelpers.findAndHookMethod(
-                    "android.hardware.Camera",
-                    lpparam.classLoader,
-                    "setPreviewTexture",
-                    SurfaceTexture.class,
+                    "android.hardware.Camera", lpparam.classLoader,
+                    "setPreviewTexture", SurfaceTexture.class,
                     new XC_MethodHook() {
                         @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            if (!isActive()) return;
-                            
-                            reloadPreferencesIfNeeded();
-                            log("Camera1 setPreviewTexture called");
-                            
-                            // We could replace the SurfaceTexture here, but it's complex
-                            // The PreviewCallback hook is more reliable for Camera1
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (isActive()) reloadPreferencesIfNeeded();
                         }
                     }
             );
-            
-            // Hook Camera.setPreviewDisplay
+
             XposedHelpers.findAndHookMethod(
-                    "android.hardware.Camera",
-                    lpparam.classLoader,
-                    "setPreviewDisplay",
-                    SurfaceHolder.class,
+                    "android.hardware.Camera", lpparam.classLoader,
+                    "setPreviewDisplay", SurfaceHolder.class,
                     new XC_MethodHook() {
                         @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            if (!isActive()) return;
-                            
-                            reloadPreferencesIfNeeded();
-                            log("Camera1 setPreviewDisplay called");
-                            
-                            // Similar to setPreviewTexture, PreviewCallback is more reliable
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (isActive()) reloadPreferencesIfNeeded();
                         }
                     }
             );
-            
+
             log("Camera1 surface binding hooks installed");
         } catch (Exception e) {
             log("Failed to hook Camera1 surface binding: " + e.getMessage());
