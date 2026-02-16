@@ -96,6 +96,7 @@ public class CameraHook implements IXposedHookLoadPackage {
     // Surface replacement mappings for CameraCaptureSession hooks
     private final Map<Surface, SurfaceMapping> surfaceMappings = new ConcurrentHashMap<>();
     private final Map<Surface, SurfaceTexture> surfaceToTextureMap = new ConcurrentHashMap<>();
+    private final Map<Object, List<SurfaceMapping>> sessionToMappings = new ConcurrentHashMap<>();
     
     // Helper class to track surface replacements
     private static class SurfaceMapping {
@@ -106,6 +107,7 @@ public class CameraHook implements IXposedHookLoadPackage {
         int width;
         int height;
         int format;
+        volatile boolean closed = false;
         
         SurfaceMapping(Surface original, Surface replacement, ImageReader reader, int w, int h, int fmt) {
             this.originalSurface = original;
@@ -117,15 +119,20 @@ public class CameraHook implements IXposedHookLoadPackage {
         }
         
         void cleanup() {
+            if (closed) return;
+            closed = true;
+            
             if (imageReader != null) {
                 try {
                     imageReader.close();
                 } catch (Exception ignored) {}
+                imageReader = null;
             }
             if (imageWriter != null) {
                 try {
                     imageWriter.close();
                 } catch (Exception ignored) {}
+                imageWriter = null;
             }
         }
     }
@@ -253,7 +260,13 @@ public class CameraHook implements IXposedHookLoadPackage {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             reloadPreferencesIfNeeded();
-                            log("Camera2 openCamera - ID: " + param.args[0]);
+                            String cameraId = (String) param.args[0];
+                            log("Camera2 openCamera - ID: " + cameraId);
+                            
+                            // Check if this camera should be hooked based on cameraTarget preference
+                            if (!shouldHookCamera(param.thisObject, cameraId, lpparam.classLoader)) {
+                                log("Skipping camera ID " + cameraId + " (doesn't match target: " + cameraTarget + ")");
+                            }
                         }
                     }
             );
@@ -904,6 +917,56 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     // =========================================================================
+    // Camera Filtering Helper
+    // =========================================================================
+
+    /**
+     * Check if a camera should be hooked based on cameraTarget preference
+     */
+    private boolean shouldHookCamera(Object cameraManager, String cameraId, ClassLoader classLoader) {
+        if ("all".equals(cameraTarget)) {
+            return true;
+        }
+        
+        try {
+            // Get CameraCharacteristics for this camera
+            Object characteristics = XposedHelpers.callMethod(
+                    cameraManager, "getCameraCharacteristics", cameraId);
+            
+            // Get LENS_FACING
+            Class<?> characteristicsClass = XposedHelpers.findClass(
+                    "android.hardware.camera2.CameraCharacteristics", classLoader);
+            Class<?> keyClass = XposedHelpers.findClass(
+                    "android.hardware.camera2.CameraCharacteristics$Key", classLoader);
+            
+            Object lensFacingKey = XposedHelpers.getStaticObjectField(
+                    characteristicsClass, "LENS_FACING");
+            
+            Object lensFacing = XposedHelpers.callMethod(
+                    characteristics, "get", lensFacingKey);
+            
+            if (lensFacing == null) return true; // Hook if we can't determine
+            
+            int facing = (Integer) lensFacing;
+            
+            // CameraCharacteristics.LENS_FACING_FRONT = 0
+            // CameraCharacteristics.LENS_FACING_BACK = 1
+            // CameraCharacteristics.LENS_FACING_EXTERNAL = 2
+            
+            if ("front".equals(cameraTarget)) {
+                return facing == 0;
+            } else if ("back".equals(cameraTarget)) {
+                return facing == 1;
+            }
+            
+            return true;
+        } catch (Exception e) {
+            log("Failed to check camera facing: " + e.getMessage());
+            return true; // Hook by default if we can't determine
+        }
+    }
+
+    // =========================================================================
     // Strategy 1: Hook CameraCaptureSession Surface Replacement
     // =========================================================================
 
@@ -930,6 +993,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                             if (surfaces == null || surfaces.isEmpty()) return;
                             
                             List<Surface> replacementSurfaces = new ArrayList<>();
+                            List<SurfaceMapping> sessionMappings = new ArrayList<>();
                             
                             for (Surface originalSurface : surfaces) {
                                 try {
@@ -955,6 +1019,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                                             originalSurface, replacementSurface, reader,
                                             width, height, ImageFormat.YUV_420_888);
                                     surfaceMappings.put(replacementSurface, mapping);
+                                    sessionMappings.add(mapping);
                                     
                                     // Set up listener to process frames
                                     setupImageReaderListener(reader, originalSurface, width, height);
@@ -972,7 +1037,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                             
                             // Wrap the StateCallback for cleanup
                             Object originalCallback = param.args[1];
-                            param.args[1] = wrapStateCallback(originalCallback, lpparam.classLoader);
+                            param.args[1] = wrapStateCallback(originalCallback, lpparam.classLoader, sessionMappings);
                         }
                     }
             );
@@ -1000,6 +1065,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                                     if (outputConfigs == null || outputConfigs.isEmpty()) return;
                                     
                                     List<Object> replacementConfigs = new ArrayList<>();
+                                    List<SurfaceMapping> sessionMappings = new ArrayList<>();
                                     
                                     for (Object config : outputConfigs) {
                                         try {
@@ -1022,6 +1088,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                                                         originalSurface, replacementSurface, reader,
                                                         width, height, ImageFormat.YUV_420_888);
                                                 surfaceMappings.put(replacementSurface, mapping);
+                                                sessionMappings.add(mapping);
                                                 
                                                 setupImageReaderListener(reader, originalSurface, width, height);
                                                 
@@ -1046,7 +1113,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                                     param.args[0] = replacementConfigs;
                                     
                                     Object originalCallback = param.args[1];
-                                    param.args[1] = wrapStateCallback(originalCallback, lpparam.classLoader);
+                                    param.args[1] = wrapStateCallback(originalCallback, lpparam.classLoader, sessionMappings);
                                 }
                             }
                     );
@@ -1080,6 +1147,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                                     if (outputConfigs == null || outputConfigs.isEmpty()) return;
                                     
                                     List<Object> replacementConfigs = new ArrayList<>();
+                                    List<SurfaceMapping> sessionMappings = new ArrayList<>();
                                     
                                     for (Object config : outputConfigs) {
                                         try {
@@ -1102,6 +1170,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                                                         originalSurface, replacementSurface, reader,
                                                         width, height, ImageFormat.YUV_420_888);
                                                 surfaceMappings.put(replacementSurface, mapping);
+                                                sessionMappings.add(mapping);
                                                 
                                                 setupImageReaderListener(reader, originalSurface, width, height);
                                                 
@@ -1125,6 +1194,13 @@ public class CameraHook implements IXposedHookLoadPackage {
                                     // Update the session configuration
                                     XposedHelpers.callMethod(sessionConfig, "setOutputConfigurations",
                                             replacementConfigs);
+                                    
+                                    // Wrap the StateCallback for cleanup
+                                    Object originalCallback = XposedHelpers.callMethod(
+                                            sessionConfig, "getStateCallback");
+                                    Object wrappedCallback = wrapStateCallback(
+                                            originalCallback, lpparam.classLoader, sessionMappings);
+                                    XposedHelpers.callMethod(sessionConfig, "setStateCallback", wrappedCallback);
                                 }
                             }
                     );
@@ -1284,7 +1360,8 @@ public class CameraHook implements IXposedHookLoadPackage {
      * Wrap StateCallback for cleanup
      */
     private Object wrapStateCallback(final Object originalCallback,
-                                    final ClassLoader classLoader) {
+                                    final ClassLoader classLoader,
+                                    final List<SurfaceMapping> sessionMappings) {
         try {
             Class<?> callbackClass = XposedHelpers.findClass(
                     "android.hardware.camera2.CameraCaptureSession$StateCallback",
@@ -1299,13 +1376,29 @@ public class CameraHook implements IXposedHookLoadPackage {
                                 throws Throwable {
                             String methodName = method.getName();
                             
-                            if ("onClosed".equals(methodName)) {
-                                // Cleanup surface mappings
-                                for (SurfaceMapping mapping : surfaceMappings.values()) {
-                                    mapping.cleanup();
+                            if ("onConfigured".equals(methodName) && args.length > 0) {
+                                // Store session -> mappings association
+                                Object session = args[0];
+                                sessionToMappings.put(session, new ArrayList<>(sessionMappings));
+                                log("CameraCaptureSession configured, tracking " + sessionMappings.size() + " surfaces");
+                            } else if ("onClosed".equals(methodName) && args.length > 0) {
+                                // Cleanup only this session's mappings
+                                Object session = args[0];
+                                List<SurfaceMapping> mappings = sessionToMappings.remove(session);
+                                if (mappings != null) {
+                                    for (SurfaceMapping mapping : mappings) {
+                                        mapping.cleanup();
+                                        surfaceMappings.remove(mapping.replacementSurface);
+                                    }
+                                    log("CameraCaptureSession closed, cleaned up " + mappings.size() + " mappings");
                                 }
-                                surfaceMappings.clear();
-                                log("CameraCaptureSession closed, cleaned up mappings");
+                            } else if ("onConfigureFailed".equals(methodName)) {
+                                // Cleanup on failure
+                                for (SurfaceMapping mapping : sessionMappings) {
+                                    mapping.cleanup();
+                                    surfaceMappings.remove(mapping.replacementSurface);
+                                }
+                                log("CameraCaptureSession configuration failed, cleaned up mappings");
                             }
                             
                             return method.invoke(originalCallback, args);
