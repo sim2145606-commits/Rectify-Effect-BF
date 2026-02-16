@@ -43,7 +43,9 @@
     },
     "owner": "briefplantrain",
     "extra": {
-      "router": {},
+      "router": {
+        "origin": false
+      },
       "eas": {
         "projectId": "e6ca5e6e-504c-4b64-9c1d-36eed2ff423b"
       }

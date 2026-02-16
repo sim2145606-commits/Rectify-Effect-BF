@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'react-native';
 import { Colors } from '@/constants/theme';
+import 'react-native-gesture-handler';
 
 export default function RootLayout() {
   return (
@@ -40,6 +41,7 @@ export default function RootLayout() {
             presentation: 'card',
           }}
         />
+        <Stack.Screen name="+not-found" options={{ headerShown: false }} />
       </Stack>
     </>
   );
