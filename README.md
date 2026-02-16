@@ -1,4 +1,4 @@
-irtuCam
+VirtuCam
 VirtuCam is a powerful, system-wide virtual camera engine for Android. Inspired by the "Virtual Camera" functionality of desktop software like OBS Studio, this tool allows you to hook into the Android Camera API and replace physical camera feeds with custom media sources.
 
 By leveraging the LSPosed (Xposed) framework and Root access, VirtuCam injects media directly at the system level, making it compatible with a wide range of applications that utilize the device's camera.
