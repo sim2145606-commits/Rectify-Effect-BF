@@ -77,6 +77,8 @@ export const STORAGE_KEYS = {
   SELECTED_MEDIA: 'virtucam_selected_media',
   RECENT_FILES: 'virtucam_recent_files',
   SCALE_MODE: 'virtucam_scale_mode',
+  SCALE_X: 'virtucam_scale_x',
+  SCALE_Y: 'virtucam_scale_y',
   ROTATION: 'virtucam_rotation',
   MIRRORED: 'virtucam_mirrored',
   FLIPPED_VERTICAL: 'virtucam_flipped_vertical',

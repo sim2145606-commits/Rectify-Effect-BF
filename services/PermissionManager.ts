@@ -1,183 +1,315 @@
-import { Platform, Linking, AppState } from 'react-native';
+import { Platform, Linking, AppState, NativeModules, PermissionsAndroid } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { STORAGE_KEYS } from '@/constants/theme';
 
-export type PermissionStatus = 'granted' | 'denied' | 'undetermined' | 'limited';
+const { VirtuCamSettings } = NativeModules;
 
-export type PermissionState = {
-  camera: PermissionStatus;
-  mediaLibrary: PermissionStatus;
-  allFilesAccess: PermissionStatus;
-  overlayPermission: PermissionStatus;
+export type PermissionStatus = 'granted' | 'denied' | 'pending' | 'checking';
+
+export type PermissionCheckResult = {
+  status: PermissionStatus;
+  detail: string;
+  canRequest: boolean;
 };
 
-// --- State management for permissions that require leaving the app ---
+export type AllPermissionsState = {
+  rootAccess: PermissionCheckResult;
+  lsposedModule: PermissionCheckResult;
+  allFilesAccess: PermissionCheckResult;
+  cameraPermission: PermissionCheckResult;
+  overlayPermission: PermissionCheckResult;
+};
 
-let AppStateListener: ((state: string) => void) | null = null;
-let permissionPromiseResolve: ((status: PermissionStatus) => void) | null = null;
-
-// Listen for the app to become active again
-function setupAppStateListener(key: string) {
-  if (AppStateListener) {
-    AppState.removeEventListener('change', AppStateListener);
-  }
-  AppStateListener = async (nextAppState) => {
-    if (nextAppState === 'active') {
-      // Once the app is active, we assume the user has made their choice.
-      // We can't *truly* know if they granted it, so we'll check a flag we set.
-      const userConfirmed = await AsyncStorage.getItem(key);
-      if (permissionPromiseResolve) {
-        permissionPromiseResolve(userConfirmed === 'true' ? 'granted' : 'denied');
-      }
-      if (AppStateListener) {
-        AppState.removeEventListener('change', AppStateListener);
-        AppStateListener = null;
-      }
-      permissionPromiseResolve = null;
+/**
+ * Check root access by actually executing su command
+ */
+export async function checkRootAccess(): Promise<PermissionCheckResult> {
+  try {
+    if (!VirtuCamSettings) {
+      return {
+        status: 'denied',
+        detail: 'Native module not available',
+        canRequest: false,
+      };
     }
-  };
-  AppState.addEventListener('change', AppStateListener);
+
+    const result = await VirtuCamSettings.checkRootAccess();
+    
+    if (result.granted) {
+      return {
+        status: 'granted',
+        detail: 'Root access confirmed',
+        canRequest: false,
+      };
+    } else {
+      return {
+        status: 'denied',
+        detail: result.error || 'Root not available',
+        canRequest: false,
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'denied',
+      detail: 'Root check failed',
+      canRequest: false,
+    };
+  }
 }
 
-export async function checkAllPermissions(): Promise<PermissionState> {
-  const [camera, mediaLibrary, allFiles, overlay] = await Promise.all([
-    checkCameraPermission(),
-    checkMediaLibraryPermission(),
-    checkAllFilesAccess(),
-    checkOverlayPermission(),
-  ]);
+/**
+ * Check if LSPosed module is active
+ */
+export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
+  try {
+    if (!VirtuCamSettings) {
+      return {
+        status: 'denied',
+        detail: 'Native module not available',
+        canRequest: false,
+      };
+    }
 
-  return {
-    camera,
-    mediaLibrary,
-    allFilesAccess: allFiles,
-    overlayPermission: overlay,
-  };
+    const result = await VirtuCamSettings.checkXposedStatus();
+    
+    if (result.moduleActive) {
+      return {
+        status: 'granted',
+        detail: 'Module active in LSPosed',
+        canRequest: false,
+      };
+    } else if (result.lsposedInstalled) {
+      return {
+        status: 'denied',
+        detail: 'Activate module in LSPosed Manager and reboot',
+        canRequest: true,
+      };
+    } else {
+      return {
+        status: 'denied',
+        detail: 'LSPosed not installed',
+        canRequest: false,
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'denied',
+      detail: 'LSPosed check failed',
+      canRequest: false,
+    };
+  }
 }
 
-async function checkCameraPermission(): Promise<PermissionStatus> {
+/**
+ * Check MANAGE_EXTERNAL_STORAGE permission (All Files Access)
+ */
+export async function checkAllFilesAccess(): Promise<PermissionCheckResult> {
+  try {
+    if (Platform.OS !== 'android') {
+      return {
+        status: 'granted',
+        detail: 'Not required on this platform',
+        canRequest: false,
+      };
+    }
+
+    if (!VirtuCamSettings) {
+      return {
+        status: 'denied',
+        detail: 'Native module not available',
+        canRequest: false,
+      };
+    }
+
+    const granted = await VirtuCamSettings.checkAllFilesAccess();
+    
+    if (granted) {
+      return {
+        status: 'granted',
+        detail: 'All files access granted',
+        canRequest: false,
+      };
+    } else {
+      return {
+        status: 'denied',
+        detail: 'Grant in system settings',
+        canRequest: true,
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'denied',
+      detail: 'Permission check failed',
+      canRequest: true,
+    };
+  }
+}
+
+/**
+ * Check camera permission
+ */
+export async function checkCameraPermission(): Promise<PermissionCheckResult> {
   try {
     const { status } = await ImagePicker.getCameraPermissionsAsync();
-    return mapExpoStatus(status);
-  } catch {
-    return 'undetermined';
+    
+    if (status === 'granted') {
+      return {
+        status: 'granted',
+        detail: 'Camera access granted',
+        canRequest: false,
+      };
+    } else if (status === 'denied') {
+      return {
+        status: 'denied',
+        detail: 'Camera access denied',
+        canRequest: true,
+      };
+    } else {
+      return {
+        status: 'pending',
+        detail: 'Camera permission required',
+        canRequest: true,
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'denied',
+      detail: 'Permission check failed',
+      canRequest: true,
+    };
   }
 }
 
-async function checkMediaLibraryPermission(): Promise<PermissionStatus> {
+/**
+ * Check overlay permission (SYSTEM_ALERT_WINDOW)
+ */
+export async function checkOverlayPermission(): Promise<PermissionCheckResult> {
   try {
-    const { status } = await MediaLibrary.getPermissionsAsync();
-    return mapExpoStatus(status);
-  } catch {
-    return 'undetermined';
+    if (Platform.OS !== 'android') {
+      return {
+        status: 'granted',
+        detail: 'Not required on this platform',
+        canRequest: false,
+      };
+    }
+
+    // Android doesn't provide a direct API to check this
+    // We'll use a heuristic: try to check via Settings.canDrawOverlays if available
+    // For now, we'll assume it needs to be granted manually
+    return {
+      status: 'pending',
+      detail: 'Overlay permission required',
+      canRequest: true,
+    };
+  } catch (error) {
+    return {
+      status: 'pending',
+      detail: 'Permission check failed',
+      canRequest: true,
+    };
   }
 }
 
-async function checkAllFilesAccess(): Promise<PermissionStatus> {
-  if (Platform.OS !== 'android') return 'unavailable';
-  // MANAGE_EXTERNAL_STORAGE can't be directly checked in Expo/React Native.
-  // We can only open settings and ask the user to grant it.
-  // The actual verification must be based on user confirmation or by attempting a file operation.
-  // For this wizard, we will rely on a confirmation step from the user.
-  const storedStatus = await AsyncStorage.getItem(STORAGE_KEYS.ALL_FILES_ACCESS_STATUS);
-  return storedStatus === 'granted' ? 'granted' : 'undetermined';
+/**
+ * Check all permissions at once
+ */
+export async function checkAllPermissions(): Promise<AllPermissionsState> {
+  const [rootAccess, lsposedModule, allFilesAccess, cameraPermission, overlayPermission] =
+    await Promise.all([
+      checkRootAccess(),
+      checkLSPosedModule(),
+      checkAllFilesAccess(),
+      checkCameraPermission(),
+      checkOverlayPermission(),
+    ]);
+
+  return {
+    rootAccess,
+    lsposedModule,
+    allFilesAccess,
+    cameraPermission,
+    overlayPermission,
+  };
 }
 
-async function checkOverlayPermission(): Promise<PermissionStatus> {
-  if (Platform.OS !== 'android') return 'unavailable';
-  // SYSTEM_ALERT_WINDOW permission status also can't be directly checked.
-  // We follow the same pattern as All Files Access.
-  const storedStatus = await AsyncStorage.getItem(STORAGE_KEYS.OVERLAY_PERMISSION_STATUS);
-  return storedStatus === 'granted' ? 'granted' : 'undetermined';
-}
-
-function mapExpoStatus(status: string): PermissionStatus {
-  switch (status) {
-    case 'granted':
-      return 'granted';
-    case 'denied':
-      return 'denied';
-    case 'undetermined':
-      return 'undetermined';
-    default:
-      return 'undetermined';
-  }
-}
-
+/**
+ * Request camera permission
+ */
 export async function requestCameraPermission(): Promise<PermissionStatus> {
   try {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    return mapExpoStatus(status);
-  } catch {
+    return status === 'granted' ? 'granted' : 'denied';
+  } catch (error) {
     return 'denied';
   }
 }
 
-export async function requestMediaLibraryPermission(): Promise<PermissionStatus> {
+/**
+ * Request all files access permission
+ */
+export async function requestAllFilesAccess(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+
   try {
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    return mapExpoStatus(status);
+    await IntentLauncher.startActivityAsync(
+      IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION
+    );
   } catch {
-    return 'denied';
+    try {
+      await IntentLauncher.startActivityAsync(
+        IntentLauncher.ActivityAction.APPLICATION_SETTINGS
+      );
+    } catch {
+      await Linking.openSettings();
+    }
   }
 }
 
-export async function requestAllFilesAccess(): Promise<PermissionStatus> {
-  if (Platform.OS !== 'android') return 'unavailable';
+/**
+ * Request overlay permission
+ */
+export async function requestOverlayPermission(): Promise<void> {
+  if (Platform.OS !== 'android') return;
 
-  return new Promise(async (resolve) => {
-    permissionPromiseResolve = resolve;
-    setupAppStateListener(STORAGE_KEYS.ALL_FILES_ACCESS_STATUS);
-
-    try {
-      await IntentLauncher.startActivityAsync(
-        IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION
-      );
-    } catch {
-      try {
-        await IntentLauncher.startActivityAsync(
-          IntentLauncher.ActivityAction.APPLICATION_SETTINGS
-        );
-      } catch {
-        await Linking.openSettings();
-      }
-    }
-  });
+  try {
+    await IntentLauncher.startActivityAsync(
+      IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION
+    );
+  } catch {
+    await Linking.openSettings();
+  }
 }
 
+/**
+ * Open LSPosed Manager
+ */
+export async function openLSPosedManager(): Promise<void> {
+  if (Platform.OS !== 'android') return;
 
-export async function requestOverlayPermission(): Promise<PermissionStatus> {
-  if (Platform.OS !== 'android') return 'unavailable';
-
-  return new Promise(async (resolve) => {
-    permissionPromiseResolve = resolve;
-    setupAppStateListener(STORAGE_KEYS.OVERLAY_PERMISSION_STATUS);
-
+  try {
+    // Try to open LSPosed Manager via package name
+    await Linking.openURL('package:org.lsposed.manager');
+  } catch {
+    // Fallback to settings
     try {
-      await IntentLauncher.startActivityAsync(
-        IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION
-      );
+      await Linking.openSettings();
     } catch {
-      try {
-        await Linking.openSettings();
-      } catch {
-        // Silent
-      }
+      // Silent fail
     }
-  });
+  }
 }
 
-
+/**
+ * Open app settings
+ */
 export async function openAppSettings(): Promise<void> {
   try {
     if (Platform.OS === 'android') {
       await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
         {
-          data: `package:${Platform.select({ android: 'host.exp.exponent', default: '' })}`,
+          data: 'package:com.briefplantrain.virtucam',
         }
       );
     } else {
@@ -188,22 +320,15 @@ export async function openAppSettings(): Promise<void> {
   }
 }
 
-export function getPermissionDisplayInfo(status: PermissionStatus): {
-  label: string;
-  color: string;
-  icon: string;
-} {
-  switch (status) {
-    case 'granted':
-      return { label: 'GRANTED', color: '#00D4FF', icon: 'checkmark-circle' };
-    case 'denied':
-      return { label: 'DENIED', color: '#FF3B30', icon: 'close-circle' };
-    case 'limited':
-      return { label: 'LIMITED', color: '#FFB800', icon: 'alert-circle' };
-    case 'unavailable':
-      return { label: 'UNAVAILABLE', color: '#5A5A6E', icon: 'remove-circle-outline' };
-    case 'undetermined':
-    default:
-      return { label: 'REQUIRED', color: '#FFB800', icon: 'alert-circle' };
-  }
+/**
+ * Check if all required permissions are granted
+ */
+export function areAllPermissionsGranted(state: AllPermissionsState): boolean {
+  return (
+    state.rootAccess.status === 'granted' &&
+    state.lsposedModule.status === 'granted' &&
+    state.allFilesAccess.status === 'granted' &&
+    state.cameraPermission.status === 'granted' &&
+    state.overlayPermission.status === 'granted'
+  );
 }
