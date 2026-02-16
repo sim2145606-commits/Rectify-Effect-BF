@@ -46,17 +46,14 @@ const PREVIEW_HEIGHT = SCREEN_WIDTH * 0.6;
 
 export default function StudioScreen() {
   const insets = useSafeAreaInsets();
-  const { lightImpact, mediumImpact, heavyImpact, success } = useHaptics();
+  const { lightImpact, heavyImpact, success } = useHaptics();
 
   // Media state
   const [selectedMedia, setSelectedMedia] = useStorage<string | null>(
     STORAGE_KEYS.SELECTED_MEDIA,
     null
   );
-  const [recentFiles, setRecentFiles] = useStorage<MediaItem[]>(
-    STORAGE_KEYS.RECENT_FILES,
-    []
-  );
+  const [recentFiles, setRecentFiles] = useStorage<MediaItem[]>(STORAGE_KEYS.RECENT_FILES, []);
   const [selectedType, setSelectedType] = useState<'image' | 'video' | null>(null);
   const [loading, setLoading] = useState(false);
   const [resolvedPath, setResolvedPath] = useState<ResolvedPath | null>(null);
@@ -71,7 +68,7 @@ export default function StudioScreen() {
 
   useEffect(() => {
     if (selectedMedia && recentFiles.length > 0) {
-      const found = recentFiles.find((f) => f.uri === selectedMedia);
+      const found = recentFiles.find(f => f.uri === selectedMedia);
       if (found) {
         setSelectedType(found.type);
       }
@@ -79,7 +76,7 @@ export default function StudioScreen() {
     // Resolve path whenever media changes
     if (selectedMedia) {
       resolveMediaPath(selectedMedia)
-        .then((resolved) => {
+        .then(resolved => {
           setResolvedPath(resolved);
           // Update bridge config with resolved absolute path
           writeBridgeConfig({ mediaSourcePath: resolved.absolutePath }).catch(() => {});
@@ -93,7 +90,7 @@ export default function StudioScreen() {
   const addToRecent = useCallback(
     (item: MediaItem) => {
       setRecentFiles((prev: MediaItem[]) => {
-        const filtered = prev.filter((f) => f.uri !== item.uri);
+        const filtered = prev.filter(f => f.uri !== item.uri);
         return [item, ...filtered].slice(0, 20);
       });
     },
@@ -176,10 +173,13 @@ export default function StudioScreen() {
     setSelectedType(null);
   }, [lightImpact, setSelectedMedia]);
 
-  const handleScaleModeChange = useCallback((mode: ScaleMode) => {
-    setScaleMode(mode);
-    writeBridgeConfig({ scaleMode: mode }).catch(() => {});
-  }, [setScaleMode]);
+  const handleScaleModeChange = useCallback(
+    (mode: ScaleMode) => {
+      setScaleMode(mode);
+      writeBridgeConfig({ scaleMode: mode }).catch(() => {});
+    },
+    [setScaleMode]
+  );
 
   const handleMirrorToggle = useCallback(() => {
     setMirrored((prev: boolean) => {
@@ -193,11 +193,14 @@ export default function StudioScreen() {
     setFlippedVertical((prev: boolean) => !prev);
   }, [setFlippedVertical]);
 
-  const handleOffsetChange = useCallback((x: number, y: number) => {
-    setOffsetX(x);
-    setOffsetY(y);
-    writeBridgeConfig({ offsetX: x, offsetY: y }).catch(() => {});
-  }, [setOffsetX, setOffsetY]);
+  const handleOffsetChange = useCallback(
+    (x: number, y: number) => {
+      setOffsetX(x);
+      setOffsetY(y);
+      writeBridgeConfig({ offsetX: x, offsetY: y }).catch(() => {});
+    },
+    [setOffsetX, setOffsetY]
+  );
 
   const handleResetAll = useCallback(() => {
     heavyImpact();
@@ -214,7 +217,15 @@ export default function StudioScreen() {
       offsetX: 0,
       offsetY: 0,
     }).catch(() => {});
-  }, [heavyImpact, setRotation, setMirrored, setFlippedVertical, setScaleMode, setOffsetX, setOffsetY]);
+  }, [
+    heavyImpact,
+    setRotation,
+    setMirrored,
+    setFlippedVertical,
+    setScaleMode,
+    setOffsetX,
+    setOffsetY,
+  ]);
 
   const renderRecentItem = ({ item }: { item: MediaItem }) => (
     <RecentFileCard
@@ -227,10 +238,7 @@ export default function StudioScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + Spacing.md },
-      ]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.md }]}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
@@ -238,12 +246,14 @@ export default function StudioScreen() {
         <View style={styles.headerRow}>
           <View>
             <View style={styles.titleRow}>
-              <MaterialCommunityIcons name="monitor-cellphone" size={22} color={Colors.electricBlue} />
+              <MaterialCommunityIcons
+                name="monitor-cellphone"
+                size={22}
+                color={Colors.electricBlue}
+              />
               <Text style={styles.screenTitle}>Studio</Text>
             </View>
-            <Text style={styles.screenSubtitle}>
-              Media selection & transformation controls
-            </Text>
+            <Text style={styles.screenSubtitle}>Media selection & transformation controls</Text>
           </View>
           <Pressable style={styles.resetAllButton} onPress={handleResetAll}>
             <MaterialCommunityIcons name="restore" size={14} color={Colors.textSecondary} />
@@ -265,11 +275,7 @@ export default function StudioScreen() {
               color={selectedMedia ? Colors.success : Colors.warning}
             />
             <View style={styles.statusDivider} />
-            <StatusChip
-              label="Scale"
-              value={scaleMode.toUpperCase()}
-              color={Colors.cyan}
-            />
+            <StatusChip label="Scale" value={scaleMode.toUpperCase()} color={Colors.cyan} />
             <View style={styles.statusDivider} />
             <StatusChip
               label="Offset"
@@ -319,9 +325,7 @@ export default function StudioScreen() {
                 <Ionicons name="eye-off-outline" size={32} color={Colors.textTertiary} />
               </View>
               <Text style={styles.emptyTitle}>No Media Selected</Text>
-              <Text style={styles.emptySubtitle}>
-                Pick an image or video below to preview
-              </Text>
+              <Text style={styles.emptySubtitle}>Pick an image or video below to preview</Text>
             </View>
           )}
         </View>
@@ -357,7 +361,7 @@ export default function StudioScreen() {
             <FlatList
               data={recentFiles}
               renderItem={renderRecentItem}
-              keyExtractor={(item) => item.uri + item.timestamp}
+              keyExtractor={item => item.uri + item.timestamp}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.recentList}
@@ -377,13 +381,16 @@ export default function StudioScreen() {
             </View>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>MIME</Text>
-              <Text style={styles.detailValue}>
-                {resolvedPath?.mimeType || 'Unknown'}
-              </Text>
+              <Text style={styles.detailValue}>{resolvedPath?.mimeType || 'Unknown'}</Text>
             </View>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Hook Status</Text>
-              <Text style={[styles.detailValue, { color: resolvedPath?.isAccessible ? Colors.electricBlue : Colors.warningAmber }]}>
+              <Text
+                style={[
+                  styles.detailValue,
+                  { color: resolvedPath?.isAccessible ? Colors.electricBlue : Colors.warningAmber },
+                ]}
+              >
                 {resolvedPath?.isAccessible ? 'Accessible' : 'Inaccessible'}
               </Text>
             </View>
@@ -431,11 +438,7 @@ export default function StudioScreen() {
       />
 
       {/* Position Control */}
-      <PositionControl
-        offsetX={offsetX}
-        offsetY={offsetY}
-        onOffsetChange={handleOffsetChange}
-      />
+      <PositionControl offsetX={offsetX} offsetY={offsetY} onOffsetChange={handleOffsetChange} />
 
       {/* Footer spacer */}
       <View style={{ height: 60 }} />
@@ -514,10 +517,7 @@ function RecentFileCard({
   return (
     <Pressable
       onPress={onPress}
-      style={[
-        styles.recentCard,
-        isSelected && styles.recentCardSelected,
-      ]}
+      style={[styles.recentCard, isSelected && styles.recentCardSelected]}
     >
       <Image
         source={{ uri: item.uri }}
@@ -535,9 +535,7 @@ function RecentFileCard({
             size={10}
             color={Colors.textTertiary}
           />
-          <Text style={styles.recentType}>
-            {item.type === 'video' ? 'VID' : 'IMG'}
-          </Text>
+          <Text style={styles.recentType}>{item.type === 'video' ? 'VID' : 'IMG'}</Text>
         </View>
       </View>
       {isSelected && (

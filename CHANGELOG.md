@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Prettier configuration for consistent code formatting
 - Pre-commit hooks with husky and lint-staged
 - Comprehensive project documentation:
@@ -26,15 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - .editorconfig for consistent editor settings
 
 ### Changed
+
 - Updated .gitignore to exclude JVM crash logs
 - Enhanced GitHub Actions workflow with linting and type checking
 
 ### Fixed
-- Removed accidentally committed error log files (hs_err_*.log, replay_*.log)
+
+- Removed accidentally committed error log files (hs*err*\_.log, replay\_\_.log)
 
 ## [1.0.0] - 2026-02-16
 
 ### Added
+
 - Initial release of VirtuCam
 - System-wide virtual camera injection for Android
 - LSPosed/Xposed framework integration

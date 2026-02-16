@@ -49,7 +49,7 @@ export default function OnboardingScreen() {
 
   // Re-check permissions when app becomes active (user returns from settings)
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
       if (appState.match(/inactive|background/) && nextAppState === 'active') {
         checkPerms();
       }
@@ -104,16 +104,11 @@ export default function OnboardingScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>VirtuCam Setup</Text>
-          <Text style={styles.subtitle}>
-            All permissions must be granted to proceed
-          </Text>
+          <Text style={styles.subtitle}>All permissions must be granted to proceed</Text>
         </View>
 
         {/* Permission Checklist */}
@@ -133,9 +128,7 @@ export default function OnboardingScreen() {
             status={permissions.lsposedModule.status}
             icon="extension-puzzle"
             onPress={permissions.lsposedModule.canRequest ? handleOpenLSPosed : undefined}
-            buttonLabel={
-              permissions.lsposedModule.canRequest ? 'Open LSPosed Manager' : undefined
-            }
+            buttonLabel={permissions.lsposedModule.canRequest ? 'Open LSPosed Manager' : undefined}
           />
 
           <PermissionItem
@@ -167,19 +160,13 @@ export default function OnboardingScreen() {
         </View>
 
         {/* Refresh Button */}
-        <TouchableOpacity
-          onPress={checkPerms}
-          style={styles.refreshButton}
-          disabled={isChecking}
-        >
+        <TouchableOpacity onPress={checkPerms} style={styles.refreshButton} disabled={isChecking}>
           {isChecking ? (
             <ActivityIndicator size="small" color={Colors.electricBlue} />
           ) : (
             <Ionicons name="refresh" size={20} color={Colors.electricBlue} />
           )}
-          <Text style={styles.refreshText}>
-            {isChecking ? 'Checking...' : 'Refresh Status'}
-          </Text>
+          <Text style={styles.refreshText}>{isChecking ? 'Checking...' : 'Refresh Status'}</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -190,14 +177,10 @@ export default function OnboardingScreen() {
           style={[styles.proceedButton, !allGranted && styles.proceedButtonDisabled]}
           disabled={!allGranted}
         >
-          <Text
-            style={[styles.proceedText, !allGranted && styles.proceedTextDisabled]}
-          >
+          <Text style={[styles.proceedText, !allGranted && styles.proceedTextDisabled]}>
             {allGranted ? 'Proceed to App' : 'Grant All Permissions to Continue'}
           </Text>
-          {allGranted && (
-            <Ionicons name="arrow-forward" size={20} color={Colors.textPrimary} />
-          )}
+          {allGranted && <Ionicons name="arrow-forward" size={20} color={Colors.textPrimary} />}
         </TouchableOpacity>
       </View>
     </View>

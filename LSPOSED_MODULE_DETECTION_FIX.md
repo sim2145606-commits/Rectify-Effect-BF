@@ -1,10 +1,13 @@
 # LSPosed Module Detection Fix
 
 ## Problem
+
 The Setup Wizard was incorrectly showing "Activate module in LSPosed Manager and reboot" even after the module was activated and the device was rebooted.
 
 ## Root Cause
+
 The module detection logic in `VirtuCamSettingsModule.kt` was checking for the `XposedBridge` class using:
+
 ```kotlin
 Class.forName("de.robv.android.xposed.XposedBridge")
 ```
@@ -14,14 +17,17 @@ Class.forName("de.robv.android.xposed.XposedBridge")
 When LSPosed activates a module, it only loads the module into the **target apps** (apps in the scope), not into the module's own app. Therefore, when VirtuCam checks for `XposedBridge`, it will never find it because VirtuCam itself is not being hooked.
 
 ## Solution
+
 Implemented a multi-method detection system:
 
 ### 1. Marker File Method (Primary)
+
 - **CameraHook.java**: Creates/updates a marker file at `/data/local/tmp/virtucam_module_active` when the module is loaded by LSPosed
 - **VirtuCamSettingsModule.kt**: Checks if this marker file exists and was modified within the last 5 minutes
 - This provides real-time confirmation that the module is actively running
 
 ### 2. LSPosed Configuration Check (Secondary)
+
 - Searches LSPosed's configuration files for the VirtuCam package name
 - Checks multiple LSPosed installation paths:
   - `/data/adb/lspd/config`
@@ -29,6 +35,7 @@ Implemented a multi-method detection system:
   - `/data/adb/modules/riru_lsposed/config`
 
 ### 3. Module Configuration Check (Fallback)
+
 - Verifies that `xposed_init` file exists in the APK
 - If LSPosed is installed and the module is properly configured, assumes it's active
 - This is the most lenient check to avoid false negatives
@@ -36,10 +43,12 @@ Implemented a multi-method detection system:
 ## Changes Made
 
 ### File: `android/app/src/main/java/com/briefplantrain/virtucam/CameraHook.java`
+
 - Added `createModuleActiveMarker()` method
 - Called in `handleLoadPackage()` to create/update marker file when module loads
 
 ### File: `android/app/src/main/java/com/briefplantrain/virtucam/VirtuCamSettingsModule.kt`
+
 - Enhanced `checkXposedStatus()` method with three detection methods
 - Prioritizes marker file check for real-time detection
 - Falls back to configuration checks if marker file is not found
@@ -60,7 +69,9 @@ Implemented a multi-method detection system:
    - Provides accurate real-time status of module activation
 
 ## Testing
+
 After rebuilding and installing the app:
+
 1. Activate the module in LSPosed Manager
 2. Add recommended scope (or any target app)
 3. Reboot device
@@ -69,6 +80,7 @@ After rebuilding and installing the app:
 6. Check Setup Wizard - module status should now show "OK"
 
 ## Benefits
+
 - **Accurate Detection**: Uses multiple methods to ensure reliable detection
 - **Real-time Status**: Marker file provides immediate confirmation when module is active
 - **No False Negatives**: Fallback methods prevent incorrect "not activated" messages

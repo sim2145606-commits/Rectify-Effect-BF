@@ -7,6 +7,7 @@ Thank you for your interest in contributing to VirtuCam! This document provides 
 ### Prerequisites
 
 Before contributing, ensure you have:
+
 - Node.js 18.x or higher
 - npm or yarn package manager
 - Android development environment (for testing)
@@ -15,12 +16,14 @@ Before contributing, ensure you have:
 ### Development Setup
 
 1. **Fork and clone the repository**
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/virtucam.git
    cd virtucam
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
@@ -42,6 +45,7 @@ Before contributing, ensure you have:
 ### Git Workflow
 
 1. Create a new branch for your feature/fix:
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -49,6 +53,7 @@ Before contributing, ensure you have:
 2. Make your changes following the code standards
 
 3. Commit your changes with clear, descriptive messages:
+
    ```bash
    git commit -m "feat: add new feature description"
    ```
@@ -58,6 +63,7 @@ Before contributing, ensure you have:
 ### Commit Message Convention
 
 We follow conventional commits:
+
 - `feat:` - New feature
 - `fix:` - Bug fix
 - `docs:` - Documentation changes
@@ -88,6 +94,7 @@ We follow conventional commits:
 ## 🐛 Bug Reports
 
 When filing a bug report, include:
+
 - Clear description of the issue
 - Steps to reproduce
 - Expected vs actual behavior
@@ -97,6 +104,7 @@ When filing a bug report, include:
 ## 💡 Feature Requests
 
 For feature requests:
+
 - Explain the use case and benefits
 - Consider if it aligns with project goals
 - Be open to discussion and feedback

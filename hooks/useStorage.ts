@@ -7,7 +7,7 @@ export function useStorage<T>(key: string, defaultValue: T) {
 
   useEffect(() => {
     AsyncStorage.getItem(key)
-      .then((stored) => {
+      .then(stored => {
         if (stored !== null) {
           try {
             setValue(JSON.parse(stored));
@@ -24,11 +24,9 @@ export function useStorage<T>(key: string, defaultValue: T) {
 
   const updateValue = useCallback(
     (newValue: T | ((prev: T) => T)) => {
-      setValue((prev) => {
+      setValue(prev => {
         const resolved =
-          typeof newValue === 'function'
-            ? (newValue as (prev: T) => T)(prev)
-            : newValue;
+          typeof newValue === 'function' ? (newValue as (prev: T) => T)(prev) : newValue;
         AsyncStorage.setItem(key, JSON.stringify(resolved)).catch(() => {});
         return resolved;
       });

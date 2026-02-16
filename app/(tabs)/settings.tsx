@@ -167,16 +167,58 @@ const APP_COMPATIBILITY: Record<string, { compatibility: number; notes: string[]
 const DEFAULT_APPS: TargetApp[] = [
   { id: '1', name: 'WhatsApp', packageName: 'com.whatsapp', enabled: true, icon: 'whatsapp' },
   { id: '2', name: 'Telegram', packageName: 'org.telegram.messenger', enabled: true, icon: 'send' },
-  { id: '3', name: 'Instagram', packageName: 'com.instagram.android', enabled: false, icon: 'instagram' },
-  { id: '4', name: 'Snapchat', packageName: 'com.snapchat.android', enabled: false, icon: 'snapchat' },
-  { id: '5', name: 'Google Meet', packageName: 'com.google.android.apps.meetings', enabled: true, icon: 'google' },
+  {
+    id: '3',
+    name: 'Instagram',
+    packageName: 'com.instagram.android',
+    enabled: false,
+    icon: 'instagram',
+  },
+  {
+    id: '4',
+    name: 'Snapchat',
+    packageName: 'com.snapchat.android',
+    enabled: false,
+    icon: 'snapchat',
+  },
+  {
+    id: '5',
+    name: 'Google Meet',
+    packageName: 'com.google.android.apps.meetings',
+    enabled: true,
+    icon: 'google',
+  },
   { id: '6', name: 'Zoom', packageName: 'us.zoom.videomeetings', enabled: true, icon: 'video' },
   { id: '7', name: 'Skype', packageName: 'com.skype.raider', enabled: false, icon: 'skype' },
   { id: '8', name: 'Discord', packageName: 'com.discord', enabled: false, icon: 'message-text' },
-  { id: '9', name: 'Signal', packageName: 'org.thoughtcrime.securesms', enabled: false, icon: 'chat' },
-  { id: '10', name: 'Facebook', packageName: 'com.facebook.katana', enabled: false, icon: 'facebook' },
-  { id: '11', name: 'TikTok', packageName: 'com.zhiliaoapp.musically', enabled: false, icon: 'music-note' },
-  { id: '12', name: 'Teams', packageName: 'com.microsoft.teams', enabled: true, icon: 'microsoft-teams' },
+  {
+    id: '9',
+    name: 'Signal',
+    packageName: 'org.thoughtcrime.securesms',
+    enabled: false,
+    icon: 'chat',
+  },
+  {
+    id: '10',
+    name: 'Facebook',
+    packageName: 'com.facebook.katana',
+    enabled: false,
+    icon: 'facebook',
+  },
+  {
+    id: '11',
+    name: 'TikTok',
+    packageName: 'com.zhiliaoapp.musically',
+    enabled: false,
+    icon: 'music-note',
+  },
+  {
+    id: '12',
+    name: 'Teams',
+    packageName: 'com.microsoft.teams',
+    enabled: true,
+    icon: 'microsoft-teams',
+  },
 ];
 
 export default function SettingsScreen() {
@@ -184,10 +226,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { lightImpact, mediumImpact, success, warning, heavyImpact } = useHaptics();
 
-  const [targetMode, setTargetMode] = useStorage<TargetMode>(
-    STORAGE_KEYS.TARGET_MODE,
-    'whitelist'
-  );
+  const [targetMode, setTargetMode] = useStorage<TargetMode>(STORAGE_KEYS.TARGET_MODE, 'whitelist');
   const [targetApps, setTargetApps] = useStorage<TargetApp[]>(
     STORAGE_KEYS.TARGET_APPS,
     DEFAULT_APPS
@@ -213,20 +252,14 @@ export default function SettingsScreen() {
     if (!searchQuery.trim()) return targetApps;
     const query = searchQuery.toLowerCase();
     return targetApps.filter(
-      (app) =>
-        app.name.toLowerCase().includes(query) ||
-        app.packageName.toLowerCase().includes(query)
+      app => app.name.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query)
     );
   }, [targetApps, searchQuery]);
 
-  const enabledCount = useMemo(
-    () => targetApps.filter((a) => a.enabled).length,
-    [targetApps]
-  );
+  const enabledCount = useMemo(() => targetApps.filter(a => a.enabled).length, [targetApps]);
 
   const cloudVerifiedCount = useMemo(
-    () =>
-      targetApps.filter((a) => cloudVerifiedApps.includes(a.packageName)).length,
+    () => targetApps.filter(a => cloudVerifiedApps.includes(a.packageName)).length,
     [targetApps, cloudVerifiedApps]
   );
 
@@ -234,9 +267,7 @@ export default function SettingsScreen() {
     (id: string) => {
       lightImpact();
       setTargetApps((prev: TargetApp[]) =>
-        prev.map((app) =>
-          app.id === id ? { ...app, enabled: !app.enabled } : app
-        )
+        prev.map(app => (app.id === id ? { ...app, enabled: !app.enabled } : app))
       );
     },
     [lightImpact, setTargetApps]
@@ -245,9 +276,7 @@ export default function SettingsScreen() {
   const toggleAllApps = useCallback(
     (enabled: boolean) => {
       mediumImpact();
-      setTargetApps((prev: TargetApp[]) =>
-        prev.map((app) => ({ ...app, enabled }))
-      );
+      setTargetApps((prev: TargetApp[]) => prev.map(app => ({ ...app, enabled })));
     },
     [mediumImpact, setTargetApps]
   );
@@ -281,9 +310,7 @@ export default function SettingsScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: () => {
-            setTargetApps((prev: TargetApp[]) =>
-              prev.filter((app) => app.id !== id)
-            );
+            setTargetApps((prev: TargetApp[]) => prev.filter(app => app.id !== id));
           },
         },
       ]);
@@ -301,9 +328,9 @@ export default function SettingsScreen() {
         const enabledPackages = targetApps.filter(a => a.enabled).map(a => a.packageName);
         await writeBridgeConfig({
           targetMode,
-          targetPackages: enabledPackages
+          targetPackages: enabledPackages,
         });
-        
+
         const result = await launchTargetApp(app.packageName, app.name);
         if (result.success) {
           success();
@@ -332,7 +359,10 @@ export default function SettingsScreen() {
             await requestAllFilesAccess();
             break;
           case 'root':
-            Alert.alert('Root Access', 'Root must be granted via Magisk or KernelSU. Check the system setup wizard for guidance.');
+            Alert.alert(
+              'Root Access',
+              'Root must be granted via Magisk or KernelSU. Check the system setup wizard for guidance.'
+            );
             break;
           case 'overlay':
             await requestOverlayPermission();
@@ -357,7 +387,7 @@ export default function SettingsScreen() {
       const enabledPackages = targetApps.filter(a => a.enabled).map(a => a.packageName);
       writeBridgeConfig({
         targetMode: mode,
-        targetPackages: enabledPackages
+        targetPackages: enabledPackages,
       }).catch(() => {});
     },
     [mediumImpact, setTargetMode, targetApps]
@@ -383,10 +413,10 @@ export default function SettingsScreen() {
           onPress: async () => {
             setIsResetting(true);
             heavyImpact();
-            
+
             try {
               const result = await resetToDefaults();
-              
+
               if (result.success && result.verification) {
                 if (result.verification.valuesVerified) {
                   success();
@@ -408,14 +438,14 @@ export default function SettingsScreen() {
                   warning();
                   Alert.alert(
                     'Reset Completed with Warnings',
-                    'Settings were reset but verification detected some inconsistencies. Please check your settings and restart the app.',
+                    'Settings were reset but verification detected some inconsistencies. Please check your settings and restart the app.'
                   );
                 }
               } else {
                 warning();
                 Alert.alert(
                   'Reset Failed',
-                  result.error || 'Failed to reset settings. Please try again.',
+                  result.error || 'Failed to reset settings. Please try again.'
                 );
               }
             } catch (error: any) {
@@ -434,10 +464,7 @@ export default function SettingsScreen() {
     <>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top + Spacing.lg },
-        ]}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
@@ -457,10 +484,7 @@ export default function SettingsScreen() {
           <View style={styles.modeSelector}>
             <Pressable
               onPress={() => switchTargetMode('whitelist')}
-              style={[
-                styles.modeButton,
-                targetMode === 'whitelist' && styles.modeButtonActive,
-              ]}
+              style={[styles.modeButton, targetMode === 'whitelist' && styles.modeButtonActive]}
             >
               <Ionicons
                 name="checkmark-circle"
@@ -469,24 +493,16 @@ export default function SettingsScreen() {
               />
               <View style={styles.modeTextContent}>
                 <Text
-                  style={[
-                    styles.modeLabel,
-                    targetMode === 'whitelist' && styles.modeLabelActive,
-                  ]}
+                  style={[styles.modeLabel, targetMode === 'whitelist' && styles.modeLabelActive]}
                 >
                   Whitelist
                 </Text>
-                <Text style={styles.modeDesc}>
-                  Only enabled apps get virtual feed
-                </Text>
+                <Text style={styles.modeDesc}>Only enabled apps get virtual feed</Text>
               </View>
             </Pressable>
             <Pressable
               onPress={() => switchTargetMode('blacklist')}
-              style={[
-                styles.modeButton,
-                targetMode === 'blacklist' && styles.modeButtonActive,
-              ]}
+              style={[styles.modeButton, targetMode === 'blacklist' && styles.modeButtonActive]}
             >
               <Ionicons
                 name="close-circle"
@@ -495,16 +511,11 @@ export default function SettingsScreen() {
               />
               <View style={styles.modeTextContent}>
                 <Text
-                  style={[
-                    styles.modeLabel,
-                    targetMode === 'blacklist' && { color: Colors.danger },
-                  ]}
+                  style={[styles.modeLabel, targetMode === 'blacklist' && { color: Colors.danger }]}
                 >
                   Blacklist
                 </Text>
-                <Text style={styles.modeDesc}>
-                  Enabled apps are excluded from feed
-                </Text>
+                <Text style={styles.modeDesc}>Enabled apps are excluded from feed</Text>
               </View>
             </Pressable>
           </View>
@@ -520,9 +531,7 @@ export default function SettingsScreen() {
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: Colors.success }]}>
-                  {enabledCount}
-                </Text>
+                <Text style={[styles.statValue, { color: Colors.success }]}>{enabledCount}</Text>
                 <Text style={styles.statLabel}>Active</Text>
               </View>
               <View style={styles.statDivider} />
@@ -569,17 +578,11 @@ export default function SettingsScreen() {
 
           {/* Bulk Actions */}
           <View style={styles.bulkActions}>
-            <Pressable
-              onPress={() => toggleAllApps(true)}
-              style={styles.bulkButton}
-            >
+            <Pressable onPress={() => toggleAllApps(true)} style={styles.bulkButton}>
               <Ionicons name="checkmark-done" size={14} color={Colors.accent} />
               <Text style={styles.bulkButtonText}>Enable All</Text>
             </Pressable>
-            <Pressable
-              onPress={() => toggleAllApps(false)}
-              style={styles.bulkButton}
-            >
+            <Pressable onPress={() => toggleAllApps(false)} style={styles.bulkButton}>
               <Ionicons name="remove-circle-outline" size={14} color={Colors.textTertiary} />
               <Text style={styles.bulkButtonText}>Disable All</Text>
             </Pressable>
@@ -588,9 +591,7 @@ export default function SettingsScreen() {
               style={[styles.bulkButton, styles.addButton]}
             >
               <Ionicons name="add" size={14} color={Colors.accent} />
-              <Text style={[styles.bulkButtonText, { color: Colors.accent }]}>
-                Add App
-              </Text>
+              <Text style={[styles.bulkButtonText, { color: Colors.accent }]}>Add App</Text>
             </Pressable>
           </View>
         </Animated.View>
@@ -646,7 +647,7 @@ export default function SettingsScreen() {
 
         {/* App List */}
         <Animated.View entering={FadeInDown.delay(400).duration(500)}>
-          {filteredApps.map((app) => (
+          {filteredApps.map(app => (
             <Animated.View key={app.id} layout={Layout.springify()}>
               <AppTargetRow
                 app={app}
@@ -665,9 +666,7 @@ export default function SettingsScreen() {
           {filteredApps.length === 0 && (
             <Card style={styles.emptyCard}>
               <Ionicons name="search-outline" size={24} color={Colors.textTertiary} />
-              <Text style={styles.emptyText}>
-                No apps match your search
-              </Text>
+              <Text style={styles.emptyText}>No apps match your search</Text>
             </Card>
           )}
         </Animated.View>
@@ -735,7 +734,12 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>Framework</Text>
-              <Text style={[styles.aboutValue, { color: getStatusColor(systemStatus.xposedFramework.status) }]}>
+              <Text
+                style={[
+                  styles.aboutValue,
+                  { color: getStatusColor(systemStatus.xposedFramework.status) },
+                ]}
+              >
                 {systemStatus.xposedFramework.detail}
               </Text>
             </View>
@@ -753,7 +757,9 @@ export default function SettingsScreen() {
             >
               <View style={styles.logsButtonContent}>
                 <Ionicons name="document-text" size={16} color={Colors.electricBlue} />
-                <Text style={[styles.aboutLabel, { color: Colors.electricBlue }]}>Diagnostic Logs</Text>
+                <Text style={[styles.aboutLabel, { color: Colors.electricBlue }]}>
+                  Diagnostic Logs
+                </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={Colors.electricBlue} />
             </Pressable>
@@ -771,7 +777,8 @@ export default function SettingsScreen() {
               <View style={styles.resetInfo}>
                 <Text style={styles.resetTitle}>Reset to Default Settings</Text>
                 <Text style={styles.resetDesc}>
-                  Restore all settings to their default values. Your permissions, onboarding status, and system logs will be preserved.
+                  Restore all settings to their default values. Your permissions, onboarding status,
+                  and system logs will be preserved.
                 </Text>
               </View>
               <GlowButton
@@ -828,10 +835,10 @@ function AppDetailModal({
     compatPct >= 95
       ? Colors.success
       : compatPct >= 90
-      ? Colors.electricBlue
-      : compatPct >= 80
-      ? Colors.warning
-      : Colors.danger;
+        ? Colors.electricBlue
+        : compatPct >= 80
+          ? Colors.warning
+          : Colors.danger;
 
   // Animated compatibility ring
   const ringProgress = useSharedValue(0);
@@ -849,12 +856,7 @@ function AppDetailModal({
   if (!app) return null;
 
   return (
-    <Modal
-      visible={!!app}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={!!app} transparent animationType="slide" onRequestClose={onClose}>
       <View style={modalStyles.overlay}>
         <Pressable style={modalStyles.backdrop} onPress={onClose} />
         <View style={modalStyles.sheet}>
@@ -864,11 +866,7 @@ function AppDetailModal({
           {/* Header */}
           <View style={modalStyles.header}>
             <View style={modalStyles.appIconLarge}>
-              <MaterialCommunityIcons
-                name={app.icon}
-                size={32}
-                color={Colors.accent}
-              />
+              <MaterialCommunityIcons name={app.icon} size={32} color={Colors.accent} />
             </View>
             <View style={modalStyles.headerText}>
               <View style={modalStyles.nameRow}>
@@ -891,9 +889,7 @@ function AppDetailModal({
           <View style={modalStyles.compatSection}>
             <View style={modalStyles.compatRing}>
               <View style={[modalStyles.compatCircle, { borderColor: compatColor + '30' }]}>
-                <Text style={[modalStyles.compatPct, { color: compatColor }]}>
-                  {compatPct}%
-                </Text>
+                <Text style={[modalStyles.compatPct, { color: compatColor }]}>{compatPct}%</Text>
                 <Text style={modalStyles.compatLabel}>Compatible</Text>
               </View>
             </View>
@@ -908,13 +904,23 @@ function AppDetailModal({
               </View>
               <View style={modalStyles.compatRow}>
                 <Text style={modalStyles.compatInfoLabel}>Status</Text>
-                <Text style={[modalStyles.compatInfoValue, { color: app.enabled ? Colors.success : Colors.textTertiary }]}>
+                <Text
+                  style={[
+                    modalStyles.compatInfoValue,
+                    { color: app.enabled ? Colors.success : Colors.textTertiary },
+                  ]}
+                >
                   {app.enabled ? 'Active' : 'Inactive'}
                 </Text>
               </View>
               <View style={[modalStyles.compatRow, { borderBottomWidth: 0 }]}>
                 <Text style={modalStyles.compatInfoLabel}>Cloud Status</Text>
-                <Text style={[modalStyles.compatInfoValue, { color: isCloudVerified ? Colors.electricBlue : Colors.textTertiary }]}>
+                <Text
+                  style={[
+                    modalStyles.compatInfoValue,
+                    { color: isCloudVerified ? Colors.electricBlue : Colors.textTertiary },
+                  ]}
+                >
                   {isCloudVerified ? 'Verified' : 'Unverified'}
                 </Text>
               </View>
@@ -988,8 +994,8 @@ function AppTargetRow({
         ? Colors.success
         : Colors.textTertiary
       : app.enabled
-      ? Colors.danger
-      : Colors.success;
+        ? Colors.danger
+        : Colors.success;
 
   return (
     <Animated.View style={animStyle}>
@@ -1005,8 +1011,7 @@ function AppTargetRow({
         style={[
           styles.appRow,
           app.enabled && {
-            borderColor:
-              targetMode === 'whitelist' ? Colors.accent + '30' : Colors.danger + '30',
+            borderColor: targetMode === 'whitelist' ? Colors.accent + '30' : Colors.danger + '30',
           },
         ]}
       >
@@ -1033,11 +1038,7 @@ function AppTargetRow({
               </View>
             )}
             {app.enabled && (
-              <Pressable
-                onPress={onLaunch}
-                disabled={isLaunching}
-                style={styles.launchButton}
-              >
+              <Pressable onPress={onLaunch} disabled={isLaunching} style={styles.launchButton}>
                 {isLaunching ? (
                   <ActivityIndicator size={10} color={Colors.electricBlue} />
                 ) : (
@@ -1059,21 +1060,13 @@ function AppTargetRow({
           </View>
         </View>
         <View style={styles.appStatus}>
-          <View
-            style={[
-              styles.statusDot,
-              { backgroundColor: statusColor },
-            ]}
-          />
+          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
           <Switch
             value={app.enabled}
             onValueChange={onToggle}
             trackColor={{
               false: Colors.surfaceLighter,
-              true:
-                targetMode === 'whitelist'
-                  ? Colors.accent + '80'
-                  : Colors.danger + '80',
+              true: targetMode === 'whitelist' ? Colors.accent + '80' : Colors.danger + '80',
             }}
             thumbColor={
               app.enabled
@@ -1084,9 +1077,7 @@ function AppTargetRow({
             }
             ios_backgroundColor={Colors.surfaceLighter}
             style={
-              Platform.OS === 'web'
-                ? { height: 22, width: 40 }
-                : { transform: [{ scale: 0.85 }] }
+              Platform.OS === 'web' ? { height: 22, width: 40 } : { transform: [{ scale: 0.85 }] }
             }
           />
         </View>
@@ -1120,36 +1111,16 @@ function PermissionRow({
         !last && { borderBottomWidth: 1, borderBottomColor: Colors.border },
       ]}
     >
-      <View
-        style={[
-          styles.permissionIcon,
-          { backgroundColor: statusColor + '20' },
-        ]}
-      >
-        <Ionicons
-          name={icon}
-          size={18}
-          color={statusColor}
-        />
+      <View style={[styles.permissionIcon, { backgroundColor: statusColor + '20' }]}>
+        <Ionicons name={icon} size={18} color={statusColor} />
       </View>
       <View style={styles.permissionInfo}>
         <Text style={styles.permissionLabel}>{label}</Text>
         <Text style={styles.permissionDesc}>{description}</Text>
       </View>
-      <View
-        style={[
-          styles.permissionBadge,
-          { backgroundColor: statusColor + '20' },
-        ]}
-      >
-        <Ionicons
-          name={granted ? 'checkmark' : 'alert'}
-          size={12}
-          color={statusColor}
-        />
-        <Text
-          style={[styles.permissionBadgeText, { color: statusColor }]}
-        >
+      <View style={[styles.permissionBadge, { backgroundColor: statusColor + '20' }]}>
+        <Ionicons name={granted ? 'checkmark' : 'alert'} size={12} color={statusColor} />
+        <Text style={[styles.permissionBadgeText, { color: statusColor }]}>
           {granted ? 'OK' : 'GRANT'}
         </Text>
       </View>

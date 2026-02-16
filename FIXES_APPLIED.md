@@ -1,21 +1,26 @@
 # VirtuCam - Critical Fixes Applied
 
 ## Overview
+
 This document summarizes the architectural fixes applied to transform VirtuCam from a non-functional prototype into a working Xposed module for virtual camera injection.
 
 ## Issues Identified
 
 ### 1. **LSPosed Not Recognizing Module**
+
 **Problem**: Missing `xposedminversion` meta-data in AndroidManifest.xml
 **Solution**: Added the required meta-data tag with value "93"
 
 ### 2. **Broken IPC Bridge**
+
 **Problem**: ConfigBridge.ts was writing to JSON files that Xposed hooks couldn't access due to Android sandboxing
 **Solution**: Created native module `VirtuCamSettingsModule.kt` that writes to SharedPreferences with `MODE_WORLD_READABLE`
 
 ### 3. **Non-Functional Camera Hook**
+
 **Problem**: CameraHook.java only logged events, never injected frames
 **Solution**: Complete rewrite with:
+
 - XSharedPreferences reading for cross-process config access
 - Target app filtering (whitelist/blacklist)
 - Camera2 API hooks (ImageReader frame injection)
@@ -25,8 +30,10 @@ This document summarizes the architectural fixes applied to transform VirtuCam f
 - Frame transformations (rotation, mirroring)
 
 ### 4. **Massive UI Bloat**
+
 **Problem**: 60KB engine.tsx with fake animations, unnecessary services
-**Solution**: 
+**Solution**:
+
 - Removed: SystemVerification.ts, CompatibilityEngine.ts, AICacheService.ts, AppLauncher.ts
 - Removed: LogPanel, GlowButton, PulseIndicator, ReadinessGauge, StatusRing, SuccessAnimation
 - Removed: cloud.tsx, integrity.tsx, onboarding.tsx
@@ -35,6 +42,7 @@ This document summarizes the architectural fixes applied to transform VirtuCam f
 ## Files Modified
 
 ### Android Native Layer
+
 1. **android/app/src/main/AndroidManifest.xml**
    - Added `xposedminversion` meta-data
    - Fixed intent scheme from "fastshot" to "virtucam"
@@ -57,6 +65,7 @@ This document summarizes the architectural fixes applied to transform VirtuCam f
    - Media decoding and YUV conversion
 
 ### React Native Layer
+
 6. **services/ConfigBridge.ts** (REWRITTEN)
    - Now uses native module instead of FileSystem
    - Proper TypeScript types
@@ -72,6 +81,7 @@ This document summarizes the architectural fixes applied to transform VirtuCam f
      - Setup instructions
 
 ### Files Deleted
+
 - services/SystemVerification.ts
 - services/CompatibilityEngine.ts
 - services/AICacheService.ts
@@ -89,6 +99,7 @@ This document summarizes the architectural fixes applied to transform VirtuCam f
 ## How It Works Now
 
 ### Architecture
+
 ```
 React Native GUI (VirtuCam App)
     ↓ (writes via native module)
@@ -102,6 +113,7 @@ Xposed Hook (CameraHook.java)
 ```
 
 ### Configuration Flow
+
 1. User selects video/image in VirtuCam app
 2. User enables virtual camera
 3. Native module writes to SharedPreferences
@@ -110,6 +122,7 @@ Xposed Hook (CameraHook.java)
 6. Hook intercepts camera frames and replaces with media
 
 ### Target App Selection
+
 Currently configured via LSPosed Manager scope selection. Future enhancement could add in-app target selection.
 
 ## Testing Checklist

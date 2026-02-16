@@ -17,12 +17,7 @@ function TabIcon({
   focused: boolean;
 }) {
   return (
-    <View
-      style={[
-        styles.iconWrapper,
-        focused && styles.iconWrapperActive,
-      ]}
-    >
+    <View style={[styles.iconWrapper, focused && styles.iconWrapperActive]}>
       {library === 'ionicons' ? (
         <Ionicons name={name as keyof typeof Ionicons.glyphMap} size={20} color={color} />
       ) : (
@@ -71,12 +66,7 @@ export default function TabLayout() {
         options={{
           title: 'Command',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon
-              name="shield-checkmark"
-              library="ionicons"
-              color={color}
-              focused={focused}
-            />
+            <TabIcon name="shield-checkmark" library="ionicons" color={color} focused={focused} />
           ),
         }}
       />
@@ -85,12 +75,7 @@ export default function TabLayout() {
         options={{
           title: 'Studio',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon
-              name="monitor-cellphone"
-              library="material"
-              color={color}
-              focused={focused}
-            />
+            <TabIcon name="monitor-cellphone" library="material" color={color} focused={focused} />
           ),
         }}
       />
@@ -99,12 +84,7 @@ export default function TabLayout() {
         options={{
           title: 'Presets',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon
-              name="layers"
-              library="ionicons"
-              color={color}
-              focused={focused}
-            />
+            <TabIcon name="layers" library="ionicons" color={color} focused={focused} />
           ),
         }}
       />
@@ -113,12 +93,7 @@ export default function TabLayout() {
         options={{
           title: 'Settings',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon
-              name="settings"
-              library="ionicons"
-              color={color}
-              focused={focused}
-            />
+            <TabIcon name="settings" library="ionicons" color={color} focused={focused} />
           ),
         }}
       />

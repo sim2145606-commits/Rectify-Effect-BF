@@ -1,13 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Platform,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -27,8 +19,14 @@ import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constan
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
-import { getStatusColor, getStatusIcon, getSystemInfo, type SystemCheckStatus, type SystemInfo } from '@/services/SystemVerification';
-import { syncAllSettings, getBridgeStatus, getConfigPath } from '@/services/ConfigBridge';
+import {
+  getStatusColor,
+  getStatusIcon,
+  getSystemInfo,
+  type SystemCheckStatus,
+  type SystemInfo,
+} from '@/services/SystemVerification';
+import { syncAllSettings, getBridgeStatus } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
@@ -106,9 +104,7 @@ export default function Dashboard() {
 
   const masterGlowStyle = useAnimatedStyle(() => ({
     shadowOpacity: masterGlow.value * 0.6,
-    borderColor: hookEnabled
-      ? `rgba(0, 212, 255, ${masterGlow.value * 0.5})`
-      : Colors.border,
+    borderColor: hookEnabled ? `rgba(0, 212, 255, ${masterGlow.value * 0.5})` : Colors.border,
   }));
 
   const masterButtonStyle = useAnimatedStyle(() => ({
@@ -146,7 +142,7 @@ export default function Dashboard() {
     setBridgePath(bridgeSt.path);
     setBridgeReadable(bridgeSt.readable);
     setLastSyncTime(new Date().toLocaleTimeString());
-    
+
     // Refresh system info
     setLoadingSystemInfo(true);
     const info = await getSystemInfo();
@@ -154,18 +150,12 @@ export default function Dashboard() {
     setLoadingSystemInfo(false);
   }, [mediumImpact, refreshSystemStatus]);
 
-  const activeTargets = [
-    frontCamera && 'Front',
-    backCamera && 'Back',
-  ].filter(Boolean);
+  const activeTargets = [frontCamera && 'Front', backCamera && 'Back'].filter(Boolean);
 
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + Spacing.lg },
-      ]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
@@ -183,9 +173,24 @@ export default function Dashboard() {
                 <Ionicons name="refresh" size={18} color={Colors.electricBlue} />
               )}
             </Pressable>
-            <View style={[styles.versionBadge, allSystemsReady ? styles.versionBadgeReady : styles.versionBadgeWarn]}>
-              <View style={[styles.versionDot, { backgroundColor: allSystemsReady ? Colors.electricBlue : Colors.warningAmber }]} />
-              <Text style={[styles.versionText, { color: allSystemsReady ? Colors.electricBlue : Colors.warningAmber }]}>
+            <View
+              style={[
+                styles.versionBadge,
+                allSystemsReady ? styles.versionBadgeReady : styles.versionBadgeWarn,
+              ]}
+            >
+              <View
+                style={[
+                  styles.versionDot,
+                  { backgroundColor: allSystemsReady ? Colors.electricBlue : Colors.warningAmber },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.versionText,
+                  { color: allSystemsReady ? Colors.electricBlue : Colors.warningAmber },
+                ]}
+              >
                 {allSystemsReady ? 'READY' : 'SETUP'}
               </Text>
             </View>
@@ -196,11 +201,7 @@ export default function Dashboard() {
       {/* Master Control */}
       <Animated.View entering={FadeInDown.delay(200).duration(500)}>
         <Animated.View
-          style={[
-            styles.masterCard,
-            masterGlowStyle,
-            hookEnabled && styles.masterCardActive,
-          ]}
+          style={[styles.masterCard, masterGlowStyle, hookEnabled && styles.masterCardActive]}
         >
           <View style={styles.masterHeader}>
             <View style={styles.masterStatus}>
@@ -209,7 +210,9 @@ export default function Dashboard() {
                 color={hookEnabled ? Colors.electricBlue : Colors.inactive}
                 size={12}
               />
-              <Text style={[styles.masterStatusText, hookEnabled && { color: Colors.electricBlue }]}>
+              <Text
+                style={[styles.masterStatusText, hookEnabled && { color: Colors.electricBlue }]}
+              >
                 {hookEnabled ? 'HOOK ACTIVE' : 'HOOK INACTIVE'}
               </Text>
             </View>
@@ -246,7 +249,8 @@ export default function Dashboard() {
                 </View>
                 <View style={styles.liveFeedInfo}>
                   <Text style={styles.liveFeedInfoText}>
-                    {activeTargets.join(' + ')} CAM • {aiEnhancement ? `AI: ${aiEnhancement}` : 'RAW'}
+                    {activeTargets.join(' + ')} CAM •{' '}
+                    {aiEnhancement ? `AI: ${aiEnhancement}` : 'RAW'}
                   </Text>
                 </View>
               </View>
@@ -275,10 +279,7 @@ export default function Dashboard() {
                 color={hookEnabled ? Colors.electricBlue : Colors.textSecondary}
               />
               <Text
-                style={[
-                  styles.masterButtonLabel,
-                  hookEnabled && styles.masterButtonLabelActive,
-                ]}
+                style={[styles.masterButtonLabel, hookEnabled && styles.masterButtonLabelActive]}
               >
                 {hookEnabled ? 'DISABLE HOOK' : 'ENABLE HOOK'}
               </Text>
@@ -295,7 +296,9 @@ export default function Dashboard() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, selectedMedia ? { color: Colors.success } : undefined]}>
+              <Text
+                style={[styles.statValue, selectedMedia ? { color: Colors.success } : undefined]}
+              >
                 {selectedMedia ? 'Ready' : 'No Media'}
               </Text>
               <Text style={styles.statLabel}>Source Status</Text>
@@ -358,9 +361,7 @@ export default function Dashboard() {
             sublabel="Override selfie / front-facing camera"
             value={frontCamera}
             onValueChange={setFrontCamera}
-            icon={
-              <Ionicons name="camera-reverse-outline" size={18} color={Colors.accent} />
-            }
+            icon={<Ionicons name="camera-reverse-outline" size={18} color={Colors.accent} />}
             accentColor={Colors.accent}
           />
           <SystemToggle
@@ -368,9 +369,7 @@ export default function Dashboard() {
             sublabel="Override rear / main camera"
             value={backCamera}
             onValueChange={setBackCamera}
-            icon={
-              <Ionicons name="camera-outline" size={18} color={Colors.accentLight} />
-            }
+            icon={<Ionicons name="camera-outline" size={18} color={Colors.accentLight} />}
             accentColor={Colors.accentLight}
           />
         </View>
@@ -386,8 +385,18 @@ export default function Dashboard() {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Bridge Status</Text>
             <View style={styles.infoValueRow}>
-              <View style={[styles.miniDot, { backgroundColor: bridgeReadable ? Colors.success : Colors.danger }]} />
-              <Text style={[styles.infoValue, { color: bridgeReadable ? Colors.success : Colors.danger }]}>
+              <View
+                style={[
+                  styles.miniDot,
+                  { backgroundColor: bridgeReadable ? Colors.success : Colors.danger },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.infoValue,
+                  { color: bridgeReadable ? Colors.success : Colors.danger },
+                ]}
+              >
                 {bridgeReadable ? 'Readable' : 'Not Readable'}
               </Text>
             </View>
@@ -421,7 +430,9 @@ export default function Dashboard() {
             <>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Device</Text>
-                <Text style={styles.infoValue}>{systemInfo.manufacturer} {systemInfo.model}</Text>
+                <Text style={styles.infoValue}>
+                  {systemInfo.manufacturer} {systemInfo.model}
+                </Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Brand</Text>
@@ -433,7 +444,9 @@ export default function Dashboard() {
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Android Version</Text>
-                <Text style={styles.infoValue}>{systemInfo.androidVersion} (SDK {systemInfo.sdkLevel})</Text>
+                <Text style={styles.infoValue}>
+                  {systemInfo.androidVersion} (SDK {systemInfo.sdkLevel})
+                </Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Build Number</Text>
@@ -524,11 +537,7 @@ function SystemCheckCard({
         <View style={[styles.checkIconCircle, { backgroundColor: color + '15' }]}>
           <Ionicons name={icon} size={16} color={color} />
         </View>
-        <Ionicons
-          name={statusIcon as keyof typeof Ionicons.glyphMap}
-          size={16}
-          color={color}
-        />
+        <Ionicons name={statusIcon as keyof typeof Ionicons.glyphMap} size={16} color={color} />
       </View>
       <Text style={styles.checkLabel}>{label}</Text>
       <Text style={[styles.checkDetail, { color }]}>{detail}</Text>

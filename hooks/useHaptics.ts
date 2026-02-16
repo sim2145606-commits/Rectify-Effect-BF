@@ -23,17 +23,13 @@ export function useHaptics() {
 
   const success = useCallback(() => {
     if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(
-        Haptics.NotificationFeedbackType.Success
-      ).catch(() => {});
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
   }, []);
 
   const warning = useCallback(() => {
     if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(
-        Haptics.NotificationFeedbackType.Warning
-      ).catch(() => {});
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     }
   }, []);
 

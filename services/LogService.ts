@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { getSystemInfo } from './SystemVerification';
 
@@ -36,16 +36,16 @@ class LogService {
       source,
       details,
     };
-    
+
     this.logs.push(entry);
-    
+
     // Keep only last MAX_LOGS entries
     if (this.logs.length > MAX_LOGS) {
       this.logs = this.logs.slice(-MAX_LOGS);
     }
-    
+
     this.listeners.forEach(listener => listener(entry));
-    
+
     // Also log to console for debugging
     const consoleMsg = `[${level.toUpperCase()}]${source ? ` [${source}]` : ''} ${message}`;
     switch (level) {
@@ -82,7 +82,7 @@ class LogService {
   debug(message: string, source?: string, details?: any) {
     this.log(message, 'debug', source, details);
   }
-  
+
   clear() {
     this.logs = [];
   }
@@ -100,23 +100,23 @@ class LogService {
    */
   async formatLogsAsText(): Promise<string> {
     const lines: string[] = [];
-    
+
     // Header
     lines.push('='.repeat(60));
     lines.push('VirtuCam Diagnostic Log');
     lines.push('='.repeat(60));
     lines.push('');
-    
+
     // Timestamp
     lines.push(`Generated: ${new Date().toISOString()}`);
     lines.push(`Local Time: ${new Date().toLocaleString()}`);
     lines.push('');
-    
+
     // System Information
     lines.push('-'.repeat(60));
     lines.push('SYSTEM INFORMATION');
     lines.push('-'.repeat(60));
-    
+
     try {
       const systemInfo = await getSystemInfo();
       if (systemInfo) {
@@ -136,9 +136,9 @@ class LogService {
     } catch (error) {
       lines.push('Failed to retrieve system information');
     }
-    
+
     lines.push('');
-    
+
     // App Information
     lines.push('-'.repeat(60));
     lines.push('APP INFORMATION');
@@ -146,13 +146,13 @@ class LogService {
     lines.push(`Platform: ${Platform.OS} ${Platform.Version}`);
     lines.push(`Total Logs: ${this.logs.length}`);
     lines.push('');
-    
+
     // Logs
     lines.push('-'.repeat(60));
     lines.push('APPLICATION LOGS');
     lines.push('-'.repeat(60));
     lines.push('');
-    
+
     if (this.logs.length === 0) {
       lines.push('No logs available');
     } else {
@@ -161,30 +161,31 @@ class LogService {
         const timeStr = date.toLocaleTimeString();
         const levelStr = entry.level.toUpperCase().padEnd(7);
         const sourceStr = entry.source ? `[${entry.source}]` : '';
-        
+
         lines.push(`[${index + 1}] ${timeStr} ${levelStr} ${sourceStr}`);
         lines.push(`    ${entry.message}`);
-        
+
         if (entry.details) {
           try {
-            const detailsStr = typeof entry.details === 'string'
-              ? entry.details
-              : JSON.stringify(entry.details, null, 2);
+            const detailsStr =
+              typeof entry.details === 'string'
+                ? entry.details
+                : JSON.stringify(entry.details, null, 2);
             lines.push(`    Details: ${detailsStr}`);
           } catch {
             lines.push(`    Details: [Unable to serialize]`);
           }
         }
-        
+
         lines.push('');
       });
     }
-    
+
     // Footer
     lines.push('='.repeat(60));
     lines.push('End of Log');
     lines.push('='.repeat(60));
-    
+
     return lines.join('\n');
   }
 
@@ -197,20 +198,20 @@ class LogService {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const fileName = `virtucam_log_${timestamp}.txt`;
       const filePath = `${FileSystem.documentDirectory}${fileName}`;
-      
+
       await FileSystem.writeAsStringAsync(filePath, logText, {
         encoding: 'utf8',
       });
-      
+
       this.success(`Logs exported to ${fileName}`, 'LogService');
-      
-      if (share && await Sharing.isAvailableAsync()) {
+
+      if (share && (await Sharing.isAvailableAsync())) {
         await Sharing.shareAsync(filePath, {
           mimeType: 'text/plain',
           dialogTitle: 'Share VirtuCam Logs',
         });
       }
-      
+
       return filePath;
     } catch (error: any) {
       this.error(`Failed to export logs: ${error.message}`, 'LogService', error);

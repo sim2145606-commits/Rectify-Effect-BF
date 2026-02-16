@@ -9,14 +9,16 @@ The refresh button in the Setup Wizard (onboarding screen) **already performs co
 When you tap the refresh button, it calls [`checkAllPermissions()`](services/PermissionManager.ts:232) which performs **parallel checks** of all 5 critical permissions:
 
 ### 1. **Root Access** (High System Level)
+
 - **Method**: [`checkRootAccess()`](services/PermissionManager.ts:27)
 - **How it works**: Executes `su -c id` command via native module
 - **Verification**: Checks if command returns exit code 0 and output contains "uid=0"
 - **Real-time**: Yes, executes actual root command each time
 
 ### 2. **LSPosed Module** (High System Level)
+
 - **Method**: [`checkLSPosedModule()`](services/PermissionManager.ts:64)
-- **How it works**: 
+- **How it works**:
   - Checks for marker file at `/data/local/tmp/virtucam_module_active`
   - Searches LSPosed configuration files
   - Verifies module is properly packaged
@@ -24,18 +26,21 @@ When you tap the refresh button, it calls [`checkAllPermissions()`](services/Per
 - **NEW**: Now uses the improved detection system we just implemented
 
 ### 3. **All Files Access** (System Level)
+
 - **Method**: [`checkAllFilesAccess()`](services/PermissionManager.ts:107)
 - **How it works**: Calls native `Environment.isExternalStorageManager()`
 - **Verification**: Direct Android API check
 - **Real-time**: Yes, queries system permission state
 
 ### 4. **Camera Permission** (App Level)
+
 - **Method**: [`checkCameraPermission()`](services/PermissionManager.ts:152)
 - **How it works**: Uses Expo's `ImagePicker.getCameraPermissionsAsync()`
 - **Verification**: Queries Android permission system
 - **Real-time**: Yes, checks current permission status
 
 ### 5. **Overlay Permission** (System Level)
+
 - **Method**: [`checkOverlayPermission()`](services/PermissionManager.ts:187)
 - **How it works**: Calls native `Settings.canDrawOverlays()`
 - **Verification**: Direct Android API check
@@ -63,6 +68,7 @@ Located in [`app/onboarding.tsx`](app/onboarding.tsx:170-183):
 ```
 
 ### Features:
+
 - **Visual Feedback**: Shows spinner while checking
 - **Disabled State**: Prevents multiple simultaneous checks
 - **Parallel Execution**: All 5 checks run simultaneously using `Promise.all()`
@@ -105,6 +111,7 @@ The code is designed to be device-agnostic and uses:
    - Checks multiple installation paths
 
 ### Tested Compatibility:
+
 - ✅ Android 11+ (Primary target)
 - ✅ Android 6-10 (Fallback handling)
 - ✅ Different manufacturers (Samsung, Xiaomi, OnePlus, etc.)
@@ -114,6 +121,7 @@ The code is designed to be device-agnostic and uses:
 ## Technical Details
 
 ### Permission Check Flow:
+
 ```
 User taps Refresh
     ↓
@@ -133,6 +141,7 @@ setIsChecking(false) - Hide spinner
 ```
 
 ### Performance:
+
 - **Parallel Execution**: All checks run simultaneously
 - **Native Speed**: Most checks use native Android APIs
 - **Cached Results**: No unnecessary re-checks
@@ -150,7 +159,7 @@ setIsChecking(false) - Hide spinner
    - "Open Settings" button
    - "Open LSPosed Manager" button
 
-3. **Real-time Updates**: 
+3. **Real-time Updates**:
    - Automatic refresh when returning from settings
    - Manual refresh button always available
    - Visual feedback during checks

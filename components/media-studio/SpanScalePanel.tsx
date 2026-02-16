@@ -21,10 +21,20 @@ type Props = {
   onFlipToggle: () => void;
 };
 
-const SCALE_MODES: { mode: ScaleMode; label: string; description: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }[] = [
+const SCALE_MODES: {
+  mode: ScaleMode;
+  label: string;
+  description: string;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+}[] = [
   { mode: 'fit', label: 'FIT', description: 'Letterbox', icon: 'fit-to-screen-outline' },
   { mode: 'fill', label: 'FILL', description: 'Crop to frame', icon: 'arrow-expand-all' },
-  { mode: 'stretch', label: 'STRETCH', description: 'Distort to fit', icon: 'stretch-to-page-outline' },
+  {
+    mode: 'stretch',
+    label: 'STRETCH',
+    description: 'Distort to fit',
+    icon: 'stretch-to-page-outline',
+  },
 ];
 
 export default function SpanScalePanel({
@@ -111,13 +121,14 @@ function ScaleModeCard({
   return (
     <Animated.View style={[styles.scaleModeWrapper, animStyle]}>
       <Pressable
-        onPressIn={() => { scale.value = withSpring(0.95); }}
-        onPressOut={() => { scale.value = withSpring(1); }}
+        onPressIn={() => {
+          scale.value = withSpring(0.95);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1);
+        }}
         onPress={onPress}
-        style={[
-          styles.scaleModeCard,
-          isActive && styles.scaleModeCardActive,
-        ]}
+        style={[styles.scaleModeCard, isActive && styles.scaleModeCardActive]}
       >
         <View style={[styles.scaleModeIconCircle, isActive && styles.scaleModeIconCircleActive]}>
           <MaterialCommunityIcons
@@ -154,8 +165,12 @@ function AxisToggle({
   return (
     <Animated.View style={[styles.toggleWrapper, animStyle]}>
       <Pressable
-        onPressIn={() => { scale.value = withSpring(0.95); }}
-        onPressOut={() => { scale.value = withSpring(1); }}
+        onPressIn={() => {
+          scale.value = withSpring(0.95);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1);
+        }}
         onPress={onPress}
         style={[styles.toggleButton, active && styles.toggleButtonActive]}
       >
@@ -164,9 +179,7 @@ function AxisToggle({
           size={22}
           color={active ? Colors.electricBlue : Colors.textTertiary}
         />
-        <Text style={[styles.toggleLabel, active && styles.toggleLabelActive]}>
-          {label}
-        </Text>
+        <Text style={[styles.toggleLabel, active && styles.toggleLabelActive]}>{label}</Text>
         <View style={[styles.toggleIndicator, active && styles.toggleIndicatorActive]} />
       </Pressable>
     </Animated.View>

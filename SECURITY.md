@@ -50,11 +50,13 @@ Since VirtuCam requires root access and system-level hooks:
 ## Known Security Considerations
 
 VirtuCam is designed for:
+
 - **Educational purposes**
 - **Development and testing**
 - **Research environments**
 
 It is NOT intended for:
+
 - Production environments
 - Privacy-sensitive applications
 - Circumventing security measures
@@ -84,6 +86,7 @@ npm audit fix
 ## Contact
 
 For security concerns, please contact the project maintainers through:
+
 - GitHub Security Advisories (preferred)
 - Repository maintainer contacts listed in GitHub
 
