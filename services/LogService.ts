@@ -1,6 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system/build/legacy/FileSystem';
-import { EncodingType } from 'expo-file-system/build/legacy/FileSystem.types';
+import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getSystemInfo } from './SystemVerification';
 
@@ -200,7 +199,7 @@ class LogService {
       const filePath = `${FileSystem.documentDirectory}${fileName}`;
       
       await FileSystem.writeAsStringAsync(filePath, logText, {
-        encoding: EncodingType.UTF8,
+        encoding: 'utf8',
       });
       
       this.success(`Logs exported to ${fileName}`, 'LogService');
