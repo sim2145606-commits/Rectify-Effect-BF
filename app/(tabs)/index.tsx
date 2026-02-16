@@ -119,6 +119,8 @@ export default function Dashboard() {
     top: `${scanLineY.value * 100}%` as `${number}%`,
   }));
 
+  const allSystemsReady = systemStatus.overallReady;
+
   const handleMasterToggle = useCallback(async () => {
     // Verify prerequisites before enabling
     if (!hookEnabled && !allSystemsReady) {
@@ -156,8 +158,6 @@ export default function Dashboard() {
     frontCamera && 'Front',
     backCamera && 'Back',
   ].filter(Boolean);
-
-  const allSystemsReady = systemStatus.overallReady;
 
   return (
     <ScrollView

@@ -30,15 +30,13 @@ import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
 import { launchTargetApp } from '@/services/AppLauncher';
-import { writeTargetList } from '@/services/ConfigBridge';
+import { writeBridgeConfig } from '@/services/ConfigBridge';
 import {
   requestCameraPermission,
-  requestMediaLibraryPermission,
   requestAllFilesAccess,
   requestOverlayPermission,
 } from '@/services/PermissionManager';
 import { getStatusColor } from '@/services/SystemVerification';
-import { getSyncStatus } from '@/services/PresetService';
 import { resetToDefaults } from '@/services/ResetService';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
@@ -182,7 +180,7 @@ const DEFAULT_APPS: TargetApp[] = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { lightImpact, mediumImpact, success, warning } = useHaptics();
+  const { lightImpact, mediumImpact, success, warning, heavyImpact } = useHaptics();
 
   const [targetMode, setTargetMode] = useStorage<TargetMode>(
     STORAGE_KEYS.TARGET_MODE,
@@ -203,15 +201,10 @@ export default function SettingsScreen() {
   const [selectedApp, setSelectedApp] = useState<TargetApp | null>(null);
   const [isResetting, setIsResetting] = useState(false);
 
-  // Load cloud verified apps
+  // Load cloud verified apps - removed as we're using local presets now
   useEffect(() => {
-    getSyncStatus()
-      .then((status) => {
-        setCloudVerifiedApps(status.cloudVerifiedApps);
-      })
-      .catch(() => {
-        // Silent - just means no cloud verification data
-      });
+    // No cloud sync needed for local presets
+    setCloudVerifiedApps([]);
   }, []);
 
   const filteredApps = useMemo(() => {
@@ -302,7 +295,13 @@ export default function SettingsScreen() {
       mediumImpact();
 
       try {
-        await writeTargetList(targetMode, targetApps);
+        // Write target list to bridge config
+        const enabledPackages = targetApps.filter(a => a.enabled).map(a => a.packageName);
+        await writeBridgeConfig({
+          targetMode,
+          targetPackages: enabledPackages
+        });
+        
         const result = await launchTargetApp(app.packageName, app.name);
         if (result.success) {
           success();
@@ -328,7 +327,7 @@ export default function SettingsScreen() {
             await requestCameraPermission();
             break;
           case 'storage':
-            await requestMediaLibraryPermission();
+            await requestAllFilesAccess();
             break;
           case 'root':
             Alert.alert('Root Access', 'Root must be granted via Magisk or KernelSU. Check the system setup wizard for guidance.');
@@ -352,7 +351,12 @@ export default function SettingsScreen() {
     (mode: TargetMode) => {
       mediumImpact();
       setTargetMode(mode);
-      writeTargetList(mode, targetApps).catch(() => {});
+      // Write to bridge config
+      const enabledPackages = targetApps.filter(a => a.enabled).map(a => a.packageName);
+      writeBridgeConfig({
+        targetMode: mode,
+        targetPackages: enabledPackages
+      }).catch(() => {});
     },
     [mediumImpact, setTargetMode, targetApps]
   );
@@ -677,14 +681,14 @@ export default function SettingsScreen() {
               icon="camera-outline"
               label="Camera Access"
               description="Required to intercept camera feed"
-              granted={systemStatus.cameraService.status === 'passed'}
+              granted={systemStatus.storagePermission.status === 'ok'}
               onRequest={() => handleRequestPermission('camera')}
             />
             <PermissionRow
               icon="folder-outline"
               label="Storage Access"
               description="Required to read media files"
-              granted={systemStatus.storagePermission.status === 'passed'}
+              granted={systemStatus.storagePermission.status === 'ok'}
               onRequest={() => handleRequestPermission('storage')}
             />
             <PermissionRow
@@ -698,14 +702,14 @@ export default function SettingsScreen() {
               icon="key-outline"
               label="Root / Xposed Access"
               description="Required for camera hook injection"
-              granted={systemStatus.rootAccess.status === 'passed'}
+              granted={systemStatus.rootAccess.status === 'ok'}
               onRequest={() => handleRequestPermission('root')}
             />
             <PermissionRow
               icon="layers-outline"
               label="Overlay Permission"
               description="Display over other apps for status"
-              granted={systemStatus.overlayPermission.status === 'passed'}
+              granted={systemStatus.moduleActive.status === 'ok'}
               onRequest={() => handleRequestPermission('overlay')}
               last
             />
@@ -760,7 +764,7 @@ export default function SettingsScreen() {
               </View>
               <GlowButton
                 label={isResetting ? 'Resetting...' : 'Reset All'}
-                variant="danger"
+                variant="secondary"
                 size="medium"
                 onPress={handleResetToDefaults}
                 disabled={isResetting}

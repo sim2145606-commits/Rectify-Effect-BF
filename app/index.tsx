@@ -30,7 +30,7 @@ export default function Index() {
   }
 
   if (!onboardingComplete) {
-    return <Redirect href="/onboarding" />;
+    return <Redirect href={"/onboarding" as any} />;
   }
 
   return <Redirect href="/(tabs)" />;
