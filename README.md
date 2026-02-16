@@ -1,50 +1,83 @@
-# Welcome to your Fastshot app
+# VirtuCam
 
-This is an [Expo](https://expo.dev) project created with [Fastshot](https://fastshot.ai), an AI-powered mobile development platform that helps you build React Native apps faster.
+VirtuCam is a professional, system-wide virtual camera engine for Android. Inspired by OBS Studio’s "Virtual Camera" feature, this tool allows you to hook into the Android Camera API and replace physical camera feeds with custom media sources.
 
-## Running locally:
+By leveraging the **LSPosed (Xposed)** framework and **Root** access, VirtuCam injects media at the system level, ensuring compatibility with a wide range of applications.
 
-1. Install dependencies
+---
 
-   ```bash
-   npm install
-   ```
+## 🚀 Key Features
 
-2. Start the app
+* **System-Wide Injection**: Replace real camera input with images or video files across the entire OS.
+* **Media Studio**: A dedicated suite for controlling playback, position, rotation, and scaling.
+* **AI Enhancement Suite**: Integrated tools for real-time media adjustments.
+* **Low Latency Engine**: Optimized for performance to ensure smooth injection without lag.
+* **Modern HUD**: An elegant interface built with React Native for managing hooks and system status.
 
-   ```bash
-   npx expo start
-   ```
+---
 
-## Need help?
+## 🛠 Prerequisites
 
-Have questions or want to iterate on your app? Head back to [Fastshot](https://fastshot.ai) to continue chatting with our AI agents. They can help you:
+To use VirtuCam, your device must meet the following requirements:
 
-- Add new features and screens
-- Debug issues and fix bugs
-- Refactor and improve your code
-- Integrate APIs and third-party libraries
+1.  **Root Access**: Required for system-level process interaction.
+2.  **LSPosed Framework**: Must be installed and functional.
+3.  **Module Activation**: VirtuCam must be enabled as a module within LSPosed, with target apps selected in the scope.
 
-## Learn more
+---
 
-To learn more about developing your project, check out these resources:
+## 📦 Installation & Setup
 
-### Fastshot Resources
-- [Fastshot Platform](https://fastshot.ai): Build and iterate on your mobile apps with AI assistance
-- [Fastshot Documentation](https://fastshot.ai/docs): Learn how to make the most of AI-powered development
-- [Fastshot Community](https://fastshot.ai/community): Connect with other developers building with Fastshot
+### For Users
+1.  Install the VirtuCam APK on your rooted device.
+2.  Open **LSPosed Manager**.
+3.  Enable the **VirtuCam** module and select your target applications.
+4.  Reboot the target application to apply the hooks.
 
-### Expo Resources
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### For Developers (Local Build)
+This project is built using [Expo](https://expo.dev).
 
-## Join the community
+1.  **Install dependencies**
+    ```bash
+    npm install
+    ```
 
-Join our community of developers building the future of mobile development with AI:
+2.  **Start the development server**
+    ```bash
+    npx expo start
+    ```
 
-- **[Fastshot Discord](https://fastshot.ai/discord)**: Get help, share your projects, and connect with other Fastshot users
-- **[Fastshot on GitHub](https://github.com/fastshot-ai)**: Contribute to our open source tools and integrations
+3.  **Build the Android project**
+    ```bash
+    npx expo run:android
+    ```
 
-You can also join the broader Expo community:
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+---
+
+## ⚖️ Disclaimer & Legal Information
+
+**For Educational Purposes Only.**
+
+VirtuCam is developed strictly for educational research, debugging, and development testing. It is intended to demonstrate the capabilities of the Android Camera API and the Xposed framework.
+
+* **No Illegal Use**: This software is not intended for, and must not be used for, any illegal activities, including but not limited to bypassing security measures, fraud, or identity theft.
+* **User Responsibility**: The user assumes all responsibility for how they utilize this application. The developer shall not be held liable for any misuse, damage to hardware, or legal consequences resulting from the use of this software.
+* **No Warranty**: This software is provided "as-is," without warranty of any kind, express or implied.
+
+---
+
+## 🛠 Tech Stack
+
+* **Framework**: [React Native](https://reactnative.dev/) / [Expo](https://expo.dev/)
+* **Injection Engine**: [LSPosed](https://github.com/LSPosed/LSPosed) / Xposed API
+* **Languages**: Kotlin, Java, TypeScript
+* **UI Components**: Lucid-inspired design with Reanimated animations
+
+---
+
+## 🤝 Support
+
+If you encounter issues or wish to contribute:
+
+* **Issues**: Report bugs via the GitHub Issues tab.
+* **Discord**: Join the Expo community at [chat.expo.dev](https://chat.expo.dev).
