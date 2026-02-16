@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.Environment
+import android.provider.Settings
 import com.facebook.react.bridge.*
 import java.io.BufferedReader
 import java.io.File
@@ -262,7 +263,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         try {
             val result = Arguments.createMap()
             
-            // Check if running in Xposed environment
+            // Check if running in Xposed environment by checking for XposedBridge class
             val isXposedActive = try {
                 Class.forName("de.robv.android.xposed.XposedBridge")
                 true
@@ -272,13 +273,38 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             result.putBoolean("xposedActive", isXposedActive)
             
-            // Check for LSPosed
-            val lsposedExists = File("/data/adb/lspd").exists() || 
-                               File("/data/adb/modules/zygisk_lsposed").exists()
+            // Check for LSPosed installation via multiple methods
+            var lsposedExists = false
+            
+            // Method 1: Check for LSPosed directories
+            if (File("/data/adb/lspd").exists() ||
+                File("/data/adb/modules/zygisk_lsposed").exists() ||
+                File("/data/adb/modules/riru_lsposed").exists()) {
+                lsposedExists = true
+            }
+            
+            // Method 2: Check for LSPosed Manager package
+            if (!lsposedExists) {
+                try {
+                    reactApplicationContext.packageManager.getPackageInfo("org.lsposed.manager", 0)
+                    lsposedExists = true
+                } catch (e: Exception) {
+                    // LSPosed Manager not installed
+                }
+            }
+            
+            // Method 3: Check via root command
+            if (!lsposedExists) {
+                val lsposedCheck = executeRootCommand("ls /data/adb/lspd 2>/dev/null || ls /data/adb/modules/*lsposed* 2>/dev/null")
+                if (lsposedCheck.isNotEmpty() && !lsposedCheck.contains("No such file")) {
+                    lsposedExists = true
+                }
+            }
+            
             result.putBoolean("lsposedInstalled", lsposedExists)
             
-            // Module activation can only be truly verified by the Xposed framework itself
-            // This is a best-effort check
+            // Module is active if we're running in Xposed environment
+            // The Xposed framework loads our module, making XposedBridge available
             result.putBoolean("moduleActive", isXposedActive)
             
             promise.resolve(result)
@@ -302,6 +328,24 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 Environment.isExternalStorageManager()
             } else {
                 // On older Android versions, this permission doesn't exist
+                true
+            }
+            promise.resolve(granted)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    /**
+     * Check if overlay permission (SYSTEM_ALERT_WINDOW) is granted
+     */
+    @ReactMethod
+    fun checkOverlayPermission(promise: Promise) {
+        try {
+            val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Settings.canDrawOverlays(reactApplicationContext)
+            } else {
+                // On older Android versions, this permission is granted by default
                 true
             }
             promise.resolve(granted)
@@ -340,6 +384,21 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private fun executeCommand(command: String): String {
         return try {
             val process = Runtime.getRuntime().exec(command)
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val output = reader.readText()
+            process.waitFor()
+            output
+        } catch (e: Exception) {
+            ""
+        }
+    }
+    
+    /**
+     * Execute a root command and return output
+     */
+    private fun executeRootCommand(command: String): String {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val output = reader.readText()
             process.waitFor()

@@ -194,14 +194,29 @@ export async function checkOverlayPermission(): Promise<PermissionCheckResult> {
       };
     }
 
-    // Android doesn't provide a direct API to check this
-    // We'll use a heuristic: try to check via Settings.canDrawOverlays if available
-    // For now, we'll assume it needs to be granted manually
-    return {
-      status: 'pending',
-      detail: 'Overlay permission required',
-      canRequest: true,
-    };
+    if (!VirtuCamSettings) {
+      return {
+        status: 'denied',
+        detail: 'Native module not available',
+        canRequest: false,
+      };
+    }
+
+    const granted = await VirtuCamSettings.checkOverlayPermission();
+    
+    if (granted) {
+      return {
+        status: 'granted',
+        detail: 'Overlay permission granted',
+        canRequest: false,
+      };
+    } else {
+      return {
+        status: 'pending',
+        detail: 'Overlay permission required',
+        canRequest: true,
+      };
+    }
   } catch (error) {
     return {
       status: 'pending',
@@ -252,16 +267,32 @@ export async function requestAllFilesAccess(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   try {
+    // Try to open the specific All Files Access settings page for this app
     await IntentLauncher.startActivityAsync(
-      IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION
+      IntentLauncher.ActivityAction.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+      {
+        data: 'package:com.briefplantrain.virtucam',
+      }
     );
   } catch {
     try {
+      // Fallback: Open general All Files Access settings
       await IntentLauncher.startActivityAsync(
-        IntentLauncher.ActivityAction.APPLICATION_SETTINGS
+        IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION
       );
     } catch {
-      await Linking.openSettings();
+      try {
+        // Fallback: Open app settings
+        await IntentLauncher.startActivityAsync(
+          IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
+          {
+            data: 'package:com.briefplantrain.virtucam',
+          }
+        );
+      } catch {
+        // Final fallback
+        await Linking.openSettings();
+      }
     }
   }
 }
@@ -273,11 +304,25 @@ export async function requestOverlayPermission(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   try {
+    // Open overlay permission settings for this specific app
     await IntentLauncher.startActivityAsync(
-      IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION
+      IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION,
+      {
+        data: 'package:com.briefplantrain.virtucam',
+      }
     );
   } catch {
-    await Linking.openSettings();
+    try {
+      // Fallback: Open app settings
+      await IntentLauncher.startActivityAsync(
+        IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
+        {
+          data: 'package:com.briefplantrain.virtucam',
+        }
+      );
+    } catch {
+      await Linking.openSettings();
+    }
   }
 }
 
