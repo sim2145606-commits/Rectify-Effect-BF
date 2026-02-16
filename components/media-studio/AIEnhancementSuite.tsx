@@ -13,7 +13,7 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useImageTransform, useImageAnalysis } from '@fastshot/ai';
+import { useImageTransform, useImageAnalysis } from '@/hooks/useAI';
 import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
@@ -192,7 +192,7 @@ export default function AIEnhancementSuite({
           </Animated.View>
         )}
       </View>
-      <Text style={styles.subtitle}>Powered by Newell AI Image Transformation</Text>
+      <Text style={styles.subtitle}>AI-powered image enhancement (placeholder implementation)</Text>
 
       {/* AI Optimize Card */}
       <AIFeatureCard

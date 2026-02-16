@@ -20,7 +20,6 @@ import HUDViewfinder from '@/components/media-studio/HUDViewfinder';
 import RotationDial from '@/components/media-studio/RotationDial';
 import SpanScalePanel from '@/components/media-studio/SpanScalePanel';
 import PositionControl from '@/components/media-studio/PositionControl';
-import AIEnhancementSuite from '@/components/media-studio/AIEnhancementSuite';
 import PlaybackControls from '@/components/media-studio/PlaybackControls';
 import EngineOverlay from '@/components/media-studio/EngineOverlay';
 
@@ -39,12 +38,6 @@ export default function MediaStudio() {
   const [offsetX, setOffsetX] = useStorage(STORAGE_KEYS.OFFSET_X, 0);
   const [offsetY, setOffsetY] = useStorage(STORAGE_KEYS.OFFSET_Y, 0);
 
-  // AI state
-  const [aiOptimize, setAiOptimize] = useStorage(STORAGE_KEYS.AI_OPTIMIZE, false);
-  const [aiSubjectLock, setAiSubjectLock] = useStorage(STORAGE_KEYS.AI_SUBJECT_LOCK, false);
-  const [enhancedUri, setEnhancedUri] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-
   // Playback state
   const [loopEnabled, setLoopEnabled] = useStorage(STORAGE_KEYS.LOOP_ENABLED, true);
   const [loopStart, setLoopStart] = useStorage(STORAGE_KEYS.LOOP_START, 0);
@@ -52,9 +45,6 @@ export default function MediaStudio() {
 
   // Engine state
   const [engineActive, setEngineActive] = useStorage(STORAGE_KEYS.ENGINE_ACTIVE, false);
-
-  // Display URI
-  const displayUri = enhancedUri || selectedMedia;
 
   // Handlers
   const handleRotationChange = useCallback((angle: number) => {
@@ -172,12 +162,6 @@ export default function MediaStudio() {
             />
             <View style={styles.statusDivider} />
             <StatusChip
-              label="AI"
-              value={aiOptimize || aiSubjectLock ? 'ON' : 'OFF'}
-              color={aiOptimize || aiSubjectLock ? Colors.electricBlue : Colors.inactive}
-            />
-            <View style={styles.statusDivider} />
-            <StatusChip
               label="Loop"
               value={loopEnabled ? 'ON' : 'OFF'}
               color={loopEnabled ? Colors.cyan : Colors.inactive}
@@ -194,16 +178,16 @@ export default function MediaStudio() {
 
       {/* Live Viewfinder */}
       <HUDViewfinder
-        mediaUri={displayUri}
+        mediaUri={selectedMedia}
         rotation={rotation}
         mirrored={mirrored}
         flippedVertical={flippedVertical}
         scaleMode={scaleMode}
         offsetX={offsetX}
         offsetY={offsetY}
-        aiOptimize={aiOptimize}
-        aiSubjectLock={aiSubjectLock}
-        aiLoading={aiLoading}
+        aiOptimize={false}
+        aiSubjectLock={false}
+        aiLoading={false}
         engineActive={engineActive}
       />
 
@@ -228,22 +212,6 @@ export default function MediaStudio() {
         offsetX={offsetX}
         offsetY={offsetY}
         onOffsetChange={handleOffsetChange}
-      />
-
-      {/* AI Enhancement Suite */}
-      <AIEnhancementSuite
-        selectedMedia={selectedMedia}
-        aiOptimize={aiOptimize}
-        aiSubjectLock={aiSubjectLock}
-        onAiOptimizeChange={(val) => {
-          setAiOptimize(val);
-          setAiLoading(false);
-        }}
-        onAiSubjectLockChange={(val) => {
-          setAiSubjectLock(val);
-          setAiLoading(false);
-        }}
-        onEnhancedUriChange={setEnhancedUri}
       />
 
       {/* Playback Engine */}
