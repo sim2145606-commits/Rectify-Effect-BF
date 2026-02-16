@@ -16,6 +16,7 @@ import android.media.ImageWriter;
 import android.media.MediaMetadataRetriever;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -91,6 +92,10 @@ public class CameraHook implements IXposedHookLoadPackage {
     private long lastConfigReload = 0;
     private static final long CONFIG_RELOAD_INTERVAL = 3000;
 
+    // FIX 6: Frame processing thread
+    private HandlerThread frameProcessThread;
+    private Handler frameProcessHandler;
+
     // Track original ImageReader listeners for wrapping
     private final Map<ImageReader, Object> originalListeners = new ConcurrentHashMap<>();
     
@@ -101,6 +106,16 @@ public class CameraHook implements IXposedHookLoadPackage {
     
     // FIX 2: Track surface types (ImageReader vs SurfaceTexture)
     private final Map<Surface, String> surfaceTypeTracker = new ConcurrentHashMap<>();
+    
+    // FIX 7: Track which camera devices should be hooked
+    private final Map<Object, Boolean> cameraDeviceHookStatus = new ConcurrentHashMap<>();
+    
+    // FIX 9: Track surface dimensions
+    private final Map<Surface, int[]> surfaceDimensionTracker = new ConcurrentHashMap<>();
+    private final Map<SurfaceTexture, int[]> surfaceTextureDimensions = new ConcurrentHashMap<>();
+    
+    // FIX 10: Track mappings per camera device for cleanup
+    private final Map<Object, List<SurfaceMapping>> deviceToMappings = new ConcurrentHashMap<>();
     
     // Helper class to track surface replacements
     private static class SurfaceMapping {
@@ -248,6 +263,18 @@ public class CameraHook implements IXposedHookLoadPackage {
         return enabled && mediaSourcePath != null;
     }
 
+    /**
+     * FIX 6: Get frame processing handler (off main thread)
+     */
+    private synchronized Handler getFrameProcessHandler() {
+        if (frameProcessThread == null || !frameProcessThread.isAlive()) {
+            frameProcessThread = new HandlerThread("VirtuCamFrameProcess");
+            frameProcessThread.start();
+            frameProcessHandler = new Handler(frameProcessThread.getLooper());
+        }
+        return frameProcessHandler;
+    }
+
     // =========================================================================
     // Camera2 API Hooks
     // =========================================================================
@@ -266,12 +293,29 @@ public class CameraHook implements IXposedHookLoadPackage {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             reloadPreferencesIfNeeded();
-                            String cameraId = (String) param.args[0];
+                            final String cameraId = (String) param.args[0];
+                            final Object cameraManager = param.thisObject;
                             log("Camera2 openCamera - ID: " + cameraId);
                             
-                            // Check if this camera should be hooked based on cameraTarget preference
-                            if (!shouldHookCamera(param.thisObject, cameraId, lpparam.classLoader)) {
-                                log("Skipping camera ID " + cameraId + " (doesn't match target: " + cameraTarget + ")");
+                            // FIX 7: Hook the StateCallback's onOpened to track which devices to hook
+                            Object stateCallback = param.args[1];
+                            if (stateCallback != null) {
+                                try {
+                                    Class<?> callbackClass = stateCallback.getClass();
+                                    XposedHelpers.findAndHookMethod(callbackClass, "onOpened",
+                                            "android.hardware.camera2.CameraDevice",
+                                            new XC_MethodHook() {
+                                                @Override
+                                                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                                                    Object cameraDevice = param.args[0];
+                                                    boolean shouldHook = shouldHookCamera(cameraManager, cameraId, lpparam.classLoader);
+                                                    cameraDeviceHookStatus.put(cameraDevice, shouldHook);
+                                                    log("Camera device opened: " + cameraId + ", shouldHook=" + shouldHook);
+                                                }
+                                            });
+                                } catch (Exception e) {
+                                    log("Failed to hook StateCallback.onOpened: " + e.getMessage());
+                                }
                             }
                         }
                     }
@@ -333,7 +377,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                     }
             );
 
-            // FIX 2: Hook ImageReader.getSurface() to track ImageReader surfaces
+            // FIX 2 & 9: Hook ImageReader.getSurface() to track ImageReader surfaces and dimensions
             XposedHelpers.findAndHookMethod(
                     "android.media.ImageReader",
                     lpparam.classLoader,
@@ -346,7 +390,9 @@ public class CameraHook implements IXposedHookLoadPackage {
                                 ImageReader reader = (ImageReader) param.thisObject;
                                 int format = reader.getImageFormat();
                                 surfaceTypeTracker.put(s, "ImageReader:" + format);
-                                log("Tracked ImageReader surface: format=" + format);
+                                // FIX 9: Also store dimensions
+                                surfaceDimensionTracker.put(s, new int[]{reader.getWidth(), reader.getHeight()});
+                                log("Tracked ImageReader surface: format=" + format + ", " + reader.getWidth() + "x" + reader.getHeight());
                             }
                         }
                     }
@@ -995,6 +1041,20 @@ public class CameraHook implements IXposedHookLoadPackage {
     // Strategy 1: Hook CameraCaptureSession Surface Replacement
     // =========================================================================
 
+    /**
+     * FIX 10: Cleanup existing mappings for rapid camera reopen
+     */
+    private void cleanupExistingMappings(Object cameraDevice) {
+        List<SurfaceMapping> existing = deviceToMappings.remove(cameraDevice);
+        if (existing != null) {
+            for (SurfaceMapping mapping : existing) {
+                mapping.cleanup();
+                surfaceMappings.remove(mapping.replacementSurface);
+            }
+            log("Cleaned up " + existing.size() + " existing mappings for camera reopen");
+        }
+    }
+
     private void hookCameraCaptureSession(final LoadPackageParam lpparam) {
         try {
             // Hook createCaptureSession(List<Surface>, StateCallback, Handler)
@@ -1009,6 +1069,17 @@ public class CameraHook implements IXposedHookLoadPackage {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                             if (!isActive()) return;
+                            
+                            // FIX 7: Check if this camera device should be hooked
+                            Object cameraDevice = param.thisObject;
+                            Boolean shouldHook = cameraDeviceHookStatus.get(cameraDevice);
+                            if (shouldHook != null && !shouldHook) {
+                                log("Skipping session hook - camera not targeted");
+                                return;
+                            }
+                            
+                            // FIX 10: Cleanup any existing mappings for this camera device
+                            cleanupExistingMappings(cameraDevice);
                             
                             reloadPreferencesIfNeeded();
                             log("Hooking createCaptureSession with Surface list");
@@ -1079,6 +1150,9 @@ public class CameraHook implements IXposedHookLoadPackage {
                             // Replace the surface list
                             param.args[0] = replacementSurfaces;
                             
+                            // FIX 10: Store mappings for this camera device
+                            deviceToMappings.put(cameraDevice, new ArrayList<>(sessionMappings));
+                            
                             // FIX 1: Hook the StateCallback instance methods instead of wrapping
                             Object originalCallback = param.args[1];
                             hookStateCallbackInstance(originalCallback, lpparam.classLoader, sessionMappings);
@@ -1100,6 +1174,17 @@ public class CameraHook implements IXposedHookLoadPackage {
                                 @Override
                                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                                     if (!isActive()) return;
+                                    
+                                    // FIX 7: Check if this camera device should be hooked
+                                    Object cameraDevice = param.thisObject;
+                                    Boolean shouldHook = cameraDeviceHookStatus.get(cameraDevice);
+                                    if (shouldHook != null && !shouldHook) {
+                                        log("Skipping session hook - camera not targeted");
+                                        return;
+                                    }
+                                    
+                                    // FIX 10: Cleanup any existing mappings for this camera device
+                                    cleanupExistingMappings(cameraDevice);
                                     
                                     reloadPreferencesIfNeeded();
                                     log("Hooking createCaptureSessionByOutputConfigurations");
@@ -1172,6 +1257,9 @@ public class CameraHook implements IXposedHookLoadPackage {
                                     
                                     param.args[0] = replacementConfigs;
                                     
+                                    // FIX 10: Store mappings for this camera device
+                                    deviceToMappings.put(cameraDevice, new ArrayList<>(sessionMappings));
+                                    
                                     // FIX 1: Hook the StateCallback instance methods instead of wrapping
                                     Object originalCallback = param.args[1];
                                     hookStateCallbackInstance(originalCallback, lpparam.classLoader, sessionMappings);
@@ -1195,6 +1283,17 @@ public class CameraHook implements IXposedHookLoadPackage {
                                 @Override
                                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                                     if (!isActive()) return;
+                                    
+                                    // FIX 7: Check if this camera device should be hooked
+                                    Object cameraDevice = param.thisObject;
+                                    Boolean shouldHook = cameraDeviceHookStatus.get(cameraDevice);
+                                    if (shouldHook != null && !shouldHook) {
+                                        log("Skipping session hook - camera not targeted");
+                                        return;
+                                    }
+                                    
+                                    // FIX 10: Cleanup any existing mappings for this camera device
+                                    cleanupExistingMappings(cameraDevice);
                                     
                                     reloadPreferencesIfNeeded();
                                     log("Hooking createCaptureSession with SessionConfiguration");
@@ -1278,6 +1377,9 @@ public class CameraHook implements IXposedHookLoadPackage {
                                     // Get the state callback
                                     Object originalCallback = XposedHelpers.callMethod(sessionConfig, "getStateCallback");
                                     
+                                    // FIX 10: Store mappings for this camera device
+                                    deviceToMappings.put(cameraDevice, new ArrayList<>(sessionMappings));
+                                    
                                     // FIX 1: Hook the callback's methods for cleanup (don't wrap it)
                                     hookStateCallbackInstance(originalCallback, lpparam.classLoader, sessionMappings);
                                     
@@ -1305,6 +1407,71 @@ public class CameraHook implements IXposedHookLoadPackage {
                 }
             }
             
+            // FIX 8: Hook implementation classes as fallbacks
+            // Try to hook CameraDeviceImpl for better compatibility
+            try {
+                XposedHelpers.findAndHookMethod(
+                        "android.hardware.camera2.impl.CameraDeviceImpl",
+                        lpparam.classLoader,
+                        "createCaptureSession",
+                        List.class,
+                        "android.hardware.camera2.CameraCaptureSession$StateCallback",
+                        Handler.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                // Same logic as abstract class hook - will be called if abstract hook doesn't fire
+                                log("CameraDeviceImpl.createCaptureSession called (fallback)");
+                            }
+                        }
+                );
+                log("Also hooked CameraDeviceImpl.createCaptureSession");
+            } catch (Exception e) {
+                log("CameraDeviceImpl.createCaptureSession hook not available (this is OK): " + e.getMessage());
+            }
+            
+            if (Build.VERSION.SDK_INT >= 24) {
+                try {
+                    XposedHelpers.findAndHookMethod(
+                            "android.hardware.camera2.impl.CameraDeviceImpl",
+                            lpparam.classLoader,
+                            "createCaptureSessionByOutputConfigurations",
+                            List.class,
+                            "android.hardware.camera2.CameraCaptureSession$StateCallback",
+                            Handler.class,
+                            new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    log("CameraDeviceImpl.createCaptureSessionByOutputConfigurations called (fallback)");
+                                }
+                            }
+                    );
+                    log("Also hooked CameraDeviceImpl.createCaptureSessionByOutputConfigurations");
+                } catch (Exception e) {
+                    log("CameraDeviceImpl.createCaptureSessionByOutputConfigurations hook not available (this is OK): " + e.getMessage());
+                }
+            }
+            
+            if (Build.VERSION.SDK_INT >= 28) {
+                try {
+                    XposedHelpers.findAndHookMethod(
+                            "android.hardware.camera2.impl.CameraDeviceImpl",
+                            lpparam.classLoader,
+                            "createCaptureSession",
+                            "android.hardware.camera2.params.SessionConfiguration",
+                            new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    log("CameraDeviceImpl.createCaptureSession(SessionConfiguration) called (fallback)");
+                                }
+                            }
+                    );
+                    log("Also hooked CameraDeviceImpl.createCaptureSession(SessionConfiguration)");
+                } catch (Exception e) {
+                    log("CameraDeviceImpl.createCaptureSession(SessionConfiguration) hook not available (this is OK): " + e.getMessage());
+                }
+            }
+            
             log("CameraCaptureSession hooks installed");
         } catch (Exception e) {
             log("Failed to hook CameraCaptureSession: " + e.getMessage());
@@ -1312,12 +1479,18 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Get surface dimensions using reflection
+     * FIX 9: Get surface dimensions using tracker first, then reflection fallback
      */
     private int[] getSurfaceDimensions(Surface surface) {
+        // Check tracker first
+        int[] tracked = surfaceDimensionTracker.get(surface);
+        if (tracked != null && tracked[0] > 0 && tracked[1] > 0) {
+            return tracked;
+        }
+        
+        // Reflection fallback
         int[] dims = new int[]{0, 0};
         try {
-            // Try to get dimensions via reflection
             Field widthField = null;
             Field heightField = null;
             
@@ -1340,6 +1513,11 @@ public class CameraHook implements IXposedHookLoadPackage {
             }
         } catch (Exception e) {
             log("Failed to get surface dimensions: " + e.getMessage());
+        }
+        
+        // Default fallback
+        if (dims[0] <= 0 || dims[1] <= 0) {
+            return new int[]{1920, 1080};
         }
         return dims;
     }
@@ -1370,7 +1548,7 @@ public class CameraHook implements IXposedHookLoadPackage {
                     }
                 }
             }
-        }, new Handler(Looper.getMainLooper()));
+        }, getFrameProcessHandler()); // FIX 6: Use background thread instead of main looper
     }
 
     /**
@@ -1586,6 +1764,25 @@ public class CameraHook implements IXposedHookLoadPackage {
                     }
             );
             
+            // FIX 9: Hook SurfaceTexture.setDefaultBufferSize to track dimensions
+            XposedHelpers.findAndHookMethod(
+                    "android.graphics.SurfaceTexture",
+                    lpparam.classLoader,
+                    "setDefaultBufferSize",
+                    int.class,
+                    int.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            SurfaceTexture texture = (SurfaceTexture) param.thisObject;
+                            int w = (int) param.args[0];
+                            int h = (int) param.args[1];
+                            surfaceTextureDimensions.put(texture, new int[]{w, h});
+                            log("SurfaceTexture.setDefaultBufferSize: " + w + "x" + h);
+                        }
+                    }
+            );
+            
             // Hook Surface constructor with SurfaceTexture
             XposedHelpers.findAndHookConstructor(
                     "android.view.Surface",
@@ -1601,6 +1798,13 @@ public class CameraHook implements IXposedHookLoadPackage {
                             surfaceToTextureMap.put(surface, texture);
                             // FIX 2: Track SurfaceTexture surfaces
                             surfaceTypeTracker.put(surface, "SurfaceTexture");
+                            // FIX 9: Track dimensions from SurfaceTexture
+                            try {
+                                int[] tracked = surfaceTextureDimensions.get(texture);
+                                if (tracked != null) {
+                                    surfaceDimensionTracker.put(surface, tracked);
+                                }
+                            } catch (Exception ignored) {}
                             log("Surface created from SurfaceTexture");
                         }
                     }
@@ -1678,6 +1882,49 @@ public class CameraHook implements IXposedHookLoadPackage {
                         }
                     }
             );
+            
+            // FIX 8: Hook CameraCaptureSessionImpl as fallback
+            try {
+                XposedHelpers.findAndHookMethod(
+                        "android.hardware.camera2.impl.CameraCaptureSessionImpl",
+                        lpparam.classLoader,
+                        "setRepeatingRequest",
+                        "android.hardware.camera2.CaptureRequest",
+                        "android.hardware.camera2.CameraCaptureSession$CaptureCallback",
+                        Handler.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                if (!isActive()) return;
+                                reloadPreferencesIfNeeded();
+                            }
+                        }
+                );
+                log("Also hooked CameraCaptureSessionImpl.setRepeatingRequest");
+            } catch (Exception e) {
+                log("CameraCaptureSessionImpl.setRepeatingRequest hook not available (this is OK): " + e.getMessage());
+            }
+            
+            try {
+                XposedHelpers.findAndHookMethod(
+                        "android.hardware.camera2.impl.CameraCaptureSessionImpl",
+                        lpparam.classLoader,
+                        "capture",
+                        "android.hardware.camera2.CaptureRequest",
+                        "android.hardware.camera2.CameraCaptureSession$CaptureCallback",
+                        Handler.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                if (!isActive()) return;
+                                reloadPreferencesIfNeeded();
+                            }
+                        }
+                );
+                log("Also hooked CameraCaptureSessionImpl.capture");
+            } catch (Exception e) {
+                log("CameraCaptureSessionImpl.capture hook not available (this is OK): " + e.getMessage());
+            }
             
             log("CaptureRequest builder hooks installed");
         } catch (Exception e) {
