@@ -64,7 +64,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 val packageList = mutableListOf<String>()
                 if (packages != null) {
                     for (i in 0 until packages.size()) {
-                        packageList.add(packages.getString(i))
+                        packages.getString(i)?.let { packageList.add(it) }
                     }
                 }
                 editor.putString("targetPackages", packageList.joinToString(","))
