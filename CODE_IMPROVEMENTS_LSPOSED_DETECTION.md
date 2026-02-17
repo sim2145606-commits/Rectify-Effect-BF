@@ -9,6 +9,7 @@ This document details the improvements made to the LSPosed module detection syst
 ## 1. Documentation Improvements ✅
 
 ### Before
+
 ```markdown
 # LSPosed Module Detection Fix
 
@@ -18,6 +19,7 @@ The Setup Wizard was incorrectly showing "Activate module in LSPosed Manager and
 ```
 
 ### After
+
 - ✅ Added **Table of Contents** for easy navigation
 - ✅ Added **Mermaid sequence diagram** for visual flow understanding
 - ✅ Added **Troubleshooting section** with practical solutions
@@ -30,6 +32,7 @@ The Setup Wizard was incorrectly showing "Activate module in LSPosed Manager and
 - ✅ Added version tracking and last updated date
 
 **Benefits:**
+
 - Easier onboarding for new developers
 - Faster troubleshooting
 - Better understanding of system architecture
@@ -42,11 +45,13 @@ The Setup Wizard was incorrectly showing "Activate module in LSPosed Manager and
 ### A. CameraHook.java - Marker File Creation
 
 #### Before (Implicit behavior)
+
 ```java
 // No dedicated method, marker creation was inline or missing
 ```
 
 #### After (Explicit, documented method)
+
 ```java
 /**
  * Create a marker file to indicate the module is active and loaded by LSPosed.
@@ -68,6 +73,7 @@ private void createModuleActiveMarker() {
 ```
 
 **Improvements:**
+
 - ✅ Dedicated method with single responsibility
 - ✅ Comprehensive JavaDoc documentation
 - ✅ Clear intent through method naming
@@ -79,6 +85,7 @@ private void createModuleActiveMarker() {
 ### B. VirtuCamSettingsModule.kt - Detection Logic
 
 #### Before (Single method, unreliable)
+
 ```kotlin
 val isXposedActive = try {
     Class.forName("de.robv.android.xposed.XposedBridge")
@@ -89,32 +96,34 @@ val isXposedActive = try {
 ```
 
 **Problems:**
+
 - ❌ Only works in hooked processes
 - ❌ Always returns false in module app
 - ❌ No fallback mechanism
 - ❌ Poor user experience
 
 #### After (Multi-tier detection system)
+
 ```kotlin
 @ReactMethod
 fun checkXposedStatus(promise: Promise) {
     try {
         val result = Arguments.createMap()
         var moduleActive = false
-        
+
         // Tier 1: Marker file check (most reliable)
         moduleActive = checkMarkerFile()
-        
+
         // Tier 2: LSPosed configuration check
         if (!moduleActive && lsposedExists) {
             moduleActive = checkLSPosedConfig()
         }
-        
+
         // Tier 3: Module packaging check
         if (!moduleActive && lsposedExists) {
             moduleActive = checkModulePackaging()
         }
-        
+
         result.putBoolean("moduleActive", moduleActive)
         promise.resolve(result)
     } catch (e: Exception) {
@@ -125,11 +134,11 @@ fun checkXposedStatus(promise: Promise) {
 private fun checkMarkerFile(): Boolean {
     val markerFile = File("/data/local/tmp/virtucam_module_active")
     if (!markerFile.exists()) return false
-    
+
     val lastModified = markerFile.lastModified()
     val currentTime = System.currentTimeMillis()
     val fiveMinutes = 5 * 60 * 1000
-    
+
     return (currentTime - lastModified) < fiveMinutes
 }
 
@@ -146,7 +155,7 @@ private fun checkLSPosedConfig(): Boolean {
 private fun checkModulePackaging(): Boolean {
     val xposedInitFile = File(reactApplicationContext.applicationInfo.sourceDir)
     if (!xposedInitFile.exists()) return false
-    
+
     val apkPath = xposedInitFile.absolutePath
     val checkXposedInit = executeCommand("unzip -l '$apkPath' | grep xposed_init")
     return checkXposedInit.contains("xposed_init")
@@ -161,6 +170,7 @@ private fun handleError(promise: Promise, e: Exception) {
 ```
 
 **Improvements:**
+
 - ✅ **Separation of Concerns:** Each detection method in its own function
 - ✅ **Readability:** Clear method names describe intent
 - ✅ **Maintainability:** Easy to add/remove detection methods
@@ -175,6 +185,7 @@ private fun handleError(promise: Promise, e: Exception) {
 ### A. Marker File Strategy
 
 **Why It's Fast:**
+
 ```kotlin
 // Fast file existence check - O(1) operation
 val markerFile = File("/data/local/tmp/virtucam_module_active")
@@ -187,6 +198,7 @@ return (currentTime - lastModified) < FIVE_MINUTES
 ```
 
 **Performance Metrics:**
+
 - File existence check: **< 1ms**
 - Timestamp comparison: **< 0.1ms**
 - Total detection time: **< 2ms** (primary path)
@@ -209,6 +221,7 @@ if (!moduleActive && lsposedExists) {
 ```
 
 **Benefits:**
+
 - ✅ Most common case (marker file exists) completes in < 2ms
 - ✅ Expensive operations (root commands) only run as fallback
 - ✅ Short-circuit evaluation prevents unnecessary work
@@ -217,6 +230,7 @@ if (!moduleActive && lsposedExists) {
 ### C. Constant Extraction
 
 #### Before
+
 ```kotlin
 if (currentTime - lastModified < 5 * 60 * 1000) {
     moduleActive = true
@@ -224,6 +238,7 @@ if (currentTime - lastModified < 5 * 60 * 1000) {
 ```
 
 #### After
+
 ```kotlin
 companion object {
     private const val MARKER_VALIDITY_MS = 5 * 60 * 1000L  // 5 minutes
@@ -236,6 +251,7 @@ if (currentTime - lastModified < MARKER_VALIDITY_MS) {
 ```
 
 **Benefits:**
+
 - ✅ No runtime calculation
 - ✅ Easy to adjust timeout
 - ✅ Self-documenting code
@@ -278,6 +294,7 @@ class ModuleDetector(private val strategies: List<DetectionStrategy>) {
 ```
 
 **Benefits:**
+
 - ✅ Open/Closed Principle: Easy to add new detection methods
 - ✅ Single Responsibility: Each strategy handles one detection method
 - ✅ Testability: Mock individual strategies
@@ -297,14 +314,14 @@ class XposedStatusResult private constructor(
         private var lsposedInstalled: Boolean = false
         private var moduleActive: Boolean = false
         private var error: String? = null
-        
+
         fun setXposedActive(active: Boolean) = apply { this.xposedActive = active }
         fun setLSPosedInstalled(installed: Boolean) = apply { this.lsposedInstalled = installed }
         fun setModuleActive(active: Boolean) = apply { this.moduleActive = active }
         fun setError(error: String?) = apply { this.error = error }
-        
+
         fun build() = XposedStatusResult(xposedActive, lsposedInstalled, moduleActive, error)
-        
+
         fun toWritableMap(): WritableMap {
             val map = Arguments.createMap()
             map.putBoolean("xposedActive", xposedActive)
@@ -318,6 +335,7 @@ class XposedStatusResult private constructor(
 ```
 
 **Benefits:**
+
 - ✅ Immutable result objects
 - ✅ Fluent API
 - ✅ Type safety
@@ -342,6 +360,7 @@ private fun executeCommand(command: String): String {
 ```
 
 **Improvements:**
+
 - ✅ Automatic resource cleanup with `use`
 - ✅ No resource leaks
 - ✅ Exception-safe
@@ -382,6 +401,7 @@ private fun createErrorResult(errorMessage: String): WritableMap {
 ```
 
 **Benefits:**
+
 - ✅ Specific exception handling
 - ✅ Never crashes the app
 - ✅ Always returns valid result
@@ -410,36 +430,37 @@ val isRoot = reader.readText()
 ```kotlin
 private fun checkMarkerFile(): Boolean {
     val markerFile = File(MARKER_FILE_PATH)
-    
+
     // Edge case 1: File doesn't exist
     if (!markerFile.exists()) return false
-    
+
     // Edge case 2: File exists but can't be read
     if (!markerFile.canRead()) {
         log("Marker file exists but is not readable")
         return false
     }
-    
+
     // Edge case 3: Invalid timestamp (0 or negative)
     val lastModified = markerFile.lastModified()
     if (lastModified <= 0) {
         log("Marker file has invalid timestamp")
         return false
     }
-    
+
     // Edge case 4: Future timestamp (clock skew)
     val currentTime = System.currentTimeMillis()
     if (lastModified > currentTime) {
         log("Marker file has future timestamp - possible clock skew")
         return false
     }
-    
+
     // Normal case: Check freshness
     return (currentTime - lastModified) < MARKER_VALIDITY_MS
 }
 ```
 
 **Edge Cases Covered:**
+
 - ✅ File doesn't exist
 - ✅ File not readable (permissions)
 - ✅ Invalid timestamps
@@ -454,42 +475,42 @@ private fun checkMarkerFile(): Boolean {
 
 ```kotlin
 class VirtuCamSettingsModuleTest {
-    
+
     @Test
     fun `checkMarkerFile returns true when marker is fresh`() {
         // Arrange
         val markerFile = createTempMarkerFile()
         markerFile.setLastModified(System.currentTimeMillis())
-        
+
         // Act
         val result = checkMarkerFile()
-        
+
         // Assert
         assertTrue(result)
     }
-    
+
     @Test
     fun `checkMarkerFile returns false when marker is stale`() {
         // Arrange
         val markerFile = createTempMarkerFile()
         val sixMinutesAgo = System.currentTimeMillis() - (6 * 60 * 1000)
         markerFile.setLastModified(sixMinutesAgo)
-        
+
         // Act
         val result = checkMarkerFile()
-        
+
         // Assert
         assertFalse(result)
     }
-    
+
     @Test
     fun `checkMarkerFile returns false when marker doesn't exist`() {
         // Arrange
         deleteTempMarkerFile()
-        
+
         // Act
         val result = checkMarkerFile()
-        
+
         // Assert
         assertFalse(result)
     }
@@ -501,17 +522,17 @@ class VirtuCamSettingsModuleTest {
 ```kotlin
 @RunWith(AndroidJUnit4::class)
 class ModuleDetectionIntegrationTest {
-    
+
     @Test
     fun `module detection works end-to-end`() {
         // Arrange
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val module = VirtuCamSettingsModule(ReactApplicationContext(context))
-        
+
         // Act
         val promise = TestPromise()
         module.checkXposedStatus(promise)
-        
+
         // Assert
         val result = promise.getResult()
         assertNotNull(result)
@@ -524,7 +545,7 @@ class ModuleDetectionIntegrationTest {
 
 ```kotlin
 class ModuleDetectorTest {
-    
+
     @Test
     fun `detector tries all strategies until one succeeds`() {
         // Arrange
@@ -540,12 +561,12 @@ class ModuleDetectorTest {
             on { detect() } doReturn false
             on { priority() } doReturn 3
         }
-        
+
         val detector = ModuleDetector(listOf(strategy1, strategy2, strategy3))
-        
+
         // Act
         val result = detector.isModuleActive()
-        
+
         // Assert
         assertTrue(result)
         verify(strategy1).detect()
@@ -562,6 +583,7 @@ class ModuleDetectorTest {
 ### A. Command Injection Prevention
 
 #### Before (Vulnerable)
+
 ```kotlin
 val command = "grep -r '$packageName' /data/adb/lspd/config"
 executeRootCommand(command)
@@ -570,15 +592,16 @@ executeRootCommand(command)
 **Vulnerability:** If `packageName` contains shell metacharacters, command injection is possible.
 
 #### After (Safe)
+
 ```kotlin
 private fun executeRootCommand(command: String): String {
     return try {
         // Sanitize input
         val sanitizedCommand = command.replace("'", "\\'")
-        
+
         // Use array form to prevent shell interpretation
         val process = Runtime.getRuntime().exec(arrayOf("su", "-c", sanitizedCommand))
-        
+
         process.inputStream.bufferedReader().use { reader ->
             reader.readText().also {
                 process.waitFor()
@@ -591,6 +614,7 @@ private fun executeRootCommand(command: String): String {
 ```
 
 **Improvements:**
+
 - ✅ Input sanitization
 - ✅ Array-based exec (no shell interpretation)
 - ✅ Prevents command injection
@@ -602,19 +626,19 @@ private fun executeRootCommand(command: String): String {
 private fun createModuleActiveMarker() {
     try {
         val markerFile = File(MARKER_FILE_PATH)
-        
+
         // Ensure parent directory exists and is writable
         val parentDir = markerFile.parentFile
         if (parentDir != null && !parentDir.exists()) {
             log("Parent directory doesn't exist: ${parentDir.absolutePath}")
             return
         }
-        
+
         if (parentDir != null && !parentDir.canWrite()) {
             log("Parent directory not writable: ${parentDir.absolutePath}")
             return
         }
-        
+
         // Create file with proper permissions
         if (!markerFile.exists()) {
             markerFile.createNewFile()
@@ -622,7 +646,7 @@ private fun createModuleActiveMarker() {
             markerFile.setReadable(true, false)
             markerFile.setWritable(true, true)
         }
-        
+
         markerFile.setLastModified(System.currentTimeMillis())
         log("Module active marker created/updated")
     } catch (e: SecurityException) {
@@ -634,6 +658,7 @@ private fun createModuleActiveMarker() {
 ```
 
 **Security Features:**
+
 - ✅ Permission validation before operations
 - ✅ Explicit permission setting
 - ✅ Specific exception handling
@@ -645,20 +670,21 @@ private fun createModuleActiveMarker() {
 
 ### Before vs After Comparison
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| **Cyclomatic Complexity** | 8 | 3 | ⬇️ 62% |
-| **Lines of Code** | 45 | 120 | ⬆️ (Better structure) |
-| **Test Coverage** | 0% | 85% | ⬆️ 85% |
-| **Documentation** | 10% | 95% | ⬆️ 85% |
-| **Error Handling** | Basic | Comprehensive | ⬆️ 100% |
-| **Performance (avg)** | 50ms | 2ms | ⬇️ 96% |
-| **False Negatives** | 30% | < 1% | ⬇️ 97% |
-| **Maintainability Index** | 45 | 82 | ⬆️ 82% |
+| Metric                    | Before | After         | Improvement           |
+| ------------------------- | ------ | ------------- | --------------------- |
+| **Cyclomatic Complexity** | 8      | 3             | ⬇️ 62%                |
+| **Lines of Code**         | 45     | 120           | ⬆️ (Better structure) |
+| **Test Coverage**         | 0%     | 85%           | ⬆️ 85%                |
+| **Documentation**         | 10%    | 95%           | ⬆️ 85%                |
+| **Error Handling**        | Basic  | Comprehensive | ⬆️ 100%               |
+| **Performance (avg)**     | 50ms   | 2ms           | ⬇️ 96%                |
+| **False Negatives**       | 30%    | < 1%          | ⬇️ 97%                |
+| **Maintainability Index** | 45     | 82            | ⬆️ 82%                |
 
 ### Code Quality Improvements
 
 ✅ **SOLID Principles Applied:**
+
 - Single Responsibility Principle
 - Open/Closed Principle
 - Liskov Substitution Principle
@@ -666,6 +692,7 @@ private fun createModuleActiveMarker() {
 - Dependency Inversion Principle
 
 ✅ **Clean Code Practices:**
+
 - Meaningful names
 - Small functions
 - No code duplication
@@ -673,6 +700,7 @@ private fun createModuleActiveMarker() {
 - Clear intent
 
 ✅ **Kotlin Best Practices:**
+
 - Null safety
 - Extension functions
 - Data classes
@@ -688,20 +716,20 @@ private fun createModuleActiveMarker() {
 ```kotlin
 object ModuleLogger {
     private const val TAG = "VirtuCam"
-    
+
     enum class LogLevel { DEBUG, INFO, WARN, ERROR }
-    
+
     fun log(level: LogLevel, message: String, throwable: Throwable? = null) {
         val timestamp = System.currentTimeMillis()
         val formattedMessage = "[$timestamp] [${level.name}] $message"
-        
+
         when (level) {
             LogLevel.DEBUG -> Log.d(TAG, formattedMessage, throwable)
             LogLevel.INFO -> Log.i(TAG, formattedMessage, throwable)
             LogLevel.WARN -> Log.w(TAG, formattedMessage, throwable)
             LogLevel.ERROR -> Log.e(TAG, formattedMessage, throwable)
         }
-        
+
         // Optional: Send to analytics/crash reporting
         if (level == LogLevel.ERROR && throwable != null) {
             // FirebaseCrashlytics.getInstance().recordException(throwable)
@@ -715,7 +743,7 @@ object ModuleLogger {
 ```kotlin
 class PerformanceMonitor {
     private val metrics = mutableMapOf<String, Long>()
-    
+
     inline fun <T> measure(operation: String, block: () -> T): T {
         val startTime = System.nanoTime()
         return try {
@@ -726,7 +754,7 @@ class PerformanceMonitor {
             ModuleLogger.log(LogLevel.DEBUG, "$operation took ${duration}ms")
         }
     }
-    
+
     fun getMetrics(): Map<String, Long> = metrics.toMap()
 }
 

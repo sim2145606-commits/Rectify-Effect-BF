@@ -1,6 +1,7 @@
 # LSPosed Module Detection Fix
 
 ## Table of Contents
+
 - [Problem](#problem)
 - [Root Cause](#root-cause)
 - [Solution](#solution)
@@ -84,6 +85,7 @@ private void createModuleActiveMarker() {
 ```
 
 **Improvements Made:**
+
 - ✅ Added comprehensive JavaDoc documentation
 - ✅ Proper exception handling with logging
 - ✅ Atomic file operations
@@ -99,10 +101,10 @@ public void handleLoadPackage(final LoadPackageParam lpparam) throws Throwable {
     if (lpparam.packageName.equals(PACKAGE_NAME)) {
         return;
     }
-    
+
     // Create marker file to indicate module is active
     createModuleActiveMarker();
-    
+
     // ... rest of initialization
 }
 ```
@@ -118,21 +120,21 @@ public void handleLoadPackage(final LoadPackageParam lpparam) throws Throwable {
 fun checkXposedStatus(promise: Promise) {
     try {
         val result = Arguments.createMap()
-        
+
         // Tier 1: Check for marker file (most reliable)
         var moduleActive = false
         val markerFile = File("/data/local/tmp/virtucam_module_active")
-        
+
         if (markerFile.exists()) {
             val lastModified = markerFile.lastModified()
             val currentTime = System.currentTimeMillis()
             val fiveMinutes = 5 * 60 * 1000
-            
+
             if (currentTime - lastModified < fiveMinutes) {
                 moduleActive = true
             }
         }
-        
+
         // Tier 2: Check LSPosed configuration files
         if (!moduleActive && lsposedExists) {
             val packageName = reactApplicationContext.packageName
@@ -141,12 +143,12 @@ fun checkXposedStatus(promise: Promise) {
                 "grep -r '$packageName' /data/adb/modules/zygisk_lsposed/config 2>/dev/null || " +
                 "grep -r '$packageName' /data/adb/modules/riru_lsposed/config 2>/dev/null"
             )
-            
+
             if (lsposedConfigCheck.isNotEmpty() && lsposedConfigCheck.contains(packageName)) {
                 moduleActive = true
             }
         }
-        
+
         // Tier 3: Fallback - check if module is properly packaged
         if (!moduleActive && lsposedExists) {
             val xposedInitFile = File(reactApplicationContext.applicationInfo.sourceDir)
@@ -158,7 +160,7 @@ fun checkXposedStatus(promise: Promise) {
                 }
             }
         }
-        
+
         result.putBoolean("moduleActive", moduleActive)
         promise.resolve(result)
     } catch (e: Exception) {
@@ -172,6 +174,7 @@ fun checkXposedStatus(promise: Promise) {
 ```
 
 **Improvements Made:**
+
 - ✅ Multi-tier fallback strategy
 - ✅ Time-based marker validation (5-minute window)
 - ✅ Comprehensive error handling
@@ -189,7 +192,7 @@ sequenceDiagram
     participant TargetApp
     participant CameraHook
     participant VirtuCam
-    
+
     User->>LSPosed: Activate VirtuCam module
     User->>LSPosed: Add target app to scope
     User->>User: Reboot device
@@ -226,6 +229,7 @@ sequenceDiagram
 ### Test Procedure
 
 1. **Initial Setup:**
+
    ```bash
    # Rebuild and install the app
    cd android
@@ -239,6 +243,7 @@ sequenceDiagram
    - Add recommended scope (or any target app like Camera, Instagram, etc.)
 
 3. **Reboot Device:**
+
    ```bash
    adb reboot
    ```
@@ -271,26 +276,31 @@ adb shell "su -c 'grep -r virtucam /data/adb/lspd/config'"
 ## Benefits
 
 ### 1. Accurate Detection ✅
+
 - Uses multiple independent methods to ensure reliable detection
 - Eliminates false negatives from single-point-of-failure approaches
 - Real-time status updates based on actual module activity
 
 ### 2. Real-time Status 🔄
+
 - Marker file provides immediate confirmation when module is active
 - 5-minute freshness window ensures status reflects current state
 - No need for manual refresh or app restart
 
 ### 3. No False Negatives 🎯
+
 - Fallback methods prevent incorrect "not activated" messages
 - Graceful degradation ensures best-effort detection
 - User-friendly experience even in edge cases
 
 ### 4. User-Friendly Experience 😊
+
 - Users no longer see confusing "activate module" messages after proper setup
 - Clear status indicators guide users through setup process
 - Reduces support requests and user frustration
 
 ### 5. Robust Error Handling 🛡️
+
 - Comprehensive exception handling prevents crashes
 - Graceful fallbacks ensure app remains functional
 - Detailed logging aids in troubleshooting
@@ -300,11 +310,13 @@ adb shell "su -c 'grep -r virtucam /data/adb/lspd/config'"
 ### Issue: Module shows as inactive after activation
 
 **Possible Causes:**
+
 1. Target app hasn't been launched yet
 2. Marker file wasn't created (permission issues)
 3. LSPosed not properly installed
 
 **Solutions:**
+
 ```bash
 # 1. Launch a target app to trigger module loading
 adb shell am start -n com.android.camera/.Camera
@@ -319,6 +331,7 @@ adb shell "su -c 'ls -la /data/adb/lspd'"
 ### Issue: Marker file not being created
 
 **Check Permissions:**
+
 ```bash
 # Check /data/local/tmp permissions
 adb shell "ls -ld /data/local/tmp"
@@ -331,6 +344,7 @@ adb shell "su -c 'chmod 771 /data/local/tmp'"
 ### Issue: Detection works but shows stale status
 
 **Clear and Refresh:**
+
 ```bash
 # Remove old marker file
 adb shell "su -c 'rm /data/local/tmp/virtucam_module_active'"
