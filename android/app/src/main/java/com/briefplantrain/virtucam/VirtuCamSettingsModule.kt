@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -602,7 +603,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
                     // Android 6-10: Check READ_EXTERNAL_STORAGE
                     val permission = android.Manifest.permission.READ_EXTERNAL_STORAGE
-                    android.content.ContextCompat.checkSelfPermission(
+                    ContextCompat.checkSelfPermission(
                         reactApplicationContext,
                         permission
                     ) == android.content.pm.PackageManager.PERMISSION_GRANTED
