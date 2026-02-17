@@ -307,19 +307,39 @@ export default function SettingsScreen() {
   const toggleApp = useCallback(
     (id: string) => {
       lightImpact();
-      setTargetApps((prev: TargetApp[]) =>
-        prev.map(app => (app.id === id ? { ...app, enabled: !app.enabled } : app))
-      );
+      setTargetApps((prev: TargetApp[]) => {
+        const updated = prev.map(app => (app.id === id ? { ...app, enabled: !app.enabled } : app));
+        // Write updated packages to bridge
+        const enabledPackages = updated
+          .filter((app: TargetApp) => app.enabled)
+          .map((app: TargetApp) => app.packageName);
+        writeBridgeConfig({
+          targetMode,
+          targetPackages: enabledPackages,
+        }).catch(() => {});
+        return updated;
+      });
     },
-    [lightImpact, setTargetApps]
+    [lightImpact, setTargetApps, targetMode]
   );
 
   const toggleAllApps = useCallback(
     (enabled: boolean) => {
       mediumImpact();
-      setTargetApps((prev: TargetApp[]) => prev.map(app => ({ ...app, enabled })));
+      setTargetApps((prev: TargetApp[]) => {
+        const updated = prev.map(app => ({ ...app, enabled }));
+        // Write updated packages to bridge
+        const enabledPackages = updated
+          .filter((app: TargetApp) => app.enabled)
+          .map((app: TargetApp) => app.packageName);
+        writeBridgeConfig({
+          targetMode,
+          targetPackages: enabledPackages,
+        }).catch(() => {});
+        return updated;
+      });
     },
-    [mediumImpact, setTargetApps]
+    [mediumImpact, setTargetApps, targetMode]
   );
 
   const addCustomApp = useCallback(() => {
@@ -335,12 +355,21 @@ export default function SettingsScreen() {
       enabled: true,
       icon: 'application',
     };
-    setTargetApps((prev: TargetApp[]) => [...prev, newApp]);
+    setTargetApps((prev: TargetApp[]) => {
+      const updated = [...prev, newApp];
+      // Sync to bridge
+      const enabledPackages = updated.filter(app => app.enabled).map(app => app.packageName);
+      writeBridgeConfig({
+        targetMode,
+        targetPackages: enabledPackages,
+      }).catch(() => {});
+      return updated;
+    });
     setNewAppName('');
     setNewAppPackage('');
     setShowAddApp(false);
     success();
-  }, [newAppName, newAppPackage, mediumImpact, setTargetApps, success]);
+  }, [newAppName, newAppPackage, mediumImpact, setTargetApps, targetMode, success]);
 
   const removeApp = useCallback(
     (id: string) => {
@@ -351,12 +380,23 @@ export default function SettingsScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: () => {
-            setTargetApps((prev: TargetApp[]) => prev.filter(app => app.id !== id));
+            setTargetApps((prev: TargetApp[]) => {
+              const updated = prev.filter(app => app.id !== id);
+              // Sync to bridge after removal
+              const enabledPackages = updated
+                .filter(app => app.enabled)
+                .map(app => app.packageName);
+              writeBridgeConfig({
+                targetMode,
+                targetPackages: enabledPackages,
+              }).catch(() => {});
+              return updated;
+            });
           },
         },
       ]);
     },
-    [lightImpact, setTargetApps]
+    [lightImpact, setTargetApps, targetMode]
   );
 
   const handleLaunchApp = useCallback(
