@@ -82,7 +82,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     } else if (result.lsposedInstalled) {
       return {
         status: 'denied',
-        detail: 'Activate module in LSPosed Manager and reboot',
+        detail: 'Enable module in LSPosed and add target apps to scope, then reboot',
         canRequest: true,
       };
     } else {
@@ -327,23 +327,69 @@ export async function requestOverlayPermission(): Promise<void> {
 }
 
 /**
- * Open LSPosed Manager
+ * Open LSPosed Manager or the appropriate root manager
  */
 export async function openLSPosedManager(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   try {
-    // Try to open LSPosed Manager via package name
-    await Linking.openURL('package:org.lsposed.manager');
-  } catch {
-    // Fallback to settings
+    if (!VirtuCamSettings) {
+      await Linking.openSettings();
+      return;
+    }
+
+    // Detect which manager to open
+    const managerInfo = await VirtuCamSettings.detectLSPosedManager();
+
+    if (managerInfo.packageName && !managerInfo.isParasitic) {
+      // Try to open standalone LSPosed Manager
+      try {
+        await Linking.openURL(`package:${managerInfo.packageName}`);
+        return;
+      } catch {
+        // Fall through to next attempt
+      }
+    }
+
+    if (managerInfo.packageName && managerInfo.isParasitic) {
+      // Open KernelSU or Magisk manager for parasitic LSPosed
+      try {
+        await Linking.openURL(`package:${managerInfo.packageName}`);
+        return;
+      } catch {
+        // Fall through to next attempt
+      }
+    }
+
+    // Fallback: Try common LSPosed Manager packages
+    const lsposedPackages = [
+      'org.lsposed.manager',
+      'io.github.lsposed.manager',
+      'me.weishu.kernelsu',
+      'com.topjohnwu.magisk',
+    ];
+
+    for (const pkg of lsposedPackages) {
+      try {
+        await Linking.openURL(`package:${pkg}`);
+        return;
+      } catch {
+        // Continue to next package
+      }
+    }
+
+    // Final fallback to app settings
+    await Linking.openSettings();
+  } catch (error) {
+    // Silent fail or open settings
     try {
       await Linking.openSettings();
     } catch {
-      // Silent fail
+      // Complete silent fail
     }
   }
 }
+
 
 /**
  * Open app settings

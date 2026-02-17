@@ -330,57 +330,85 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
             }
             
-            // Method 2: Check LSPosed scope configuration via root
+            // Method 2: Check LSPosed module configuration via root
+            // This is the most reliable method for detecting if module is enabled and has scopes
             if (!moduleActive && lsposedExists) {
                 val packageName = sanitizePackageName(reactApplicationContext.packageName)
                 val escapedPackageName = escapeShellArg(packageName)
                 
-                // Try to check if our module is in LSPosed's enabled modules list
-                // Check specific known files first for better performance
-                val lsposedConfigCheck = executeRootCommand(
-                    "grep -q $escapedPackageName /data/adb/lspd/config/modules.list 2>/dev/null && echo 'found' || " +
-                    "grep -q $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
-                    "grep -q $escapedPackageName /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
-                    "grep -r $escapedPackageName /data/adb/lspd/config 2>/dev/null | head -1"
-                )
+                // Check multiple LSPosed variant paths for module configuration
+                // Includes support for ReLSPosed and other forks
+                val moduleCheckScript = """
+                    # Check if module is enabled in LSPosed's modules list
+                    for path in \
+                        /data/adb/lspd/config/modules.list \
+                        /data/adb/modules/zygisk_lsposed/config/modules.list \
+                        /data/adb/modules/riru_lsposed/config/modules.list \
+                        /data/adb/modules/lsposed/config/modules.list \
+                        /data/adb/lspd/modules.list; do
+                        if [ -f "${'$'}path" ] && grep -q $escapedPackageName "${'$'}path" 2>/dev/null; then
+                            echo "module_enabled"
+                            # Also check if module has scopes assigned
+                            for scope_path in \
+                                /data/adb/lspd/config/scope/$escapedPackageName \
+                                /data/adb/modules/zygisk_lsposed/config/scope/$escapedPackageName \
+                                /data/adb/modules/riru_lsposed/config/scope/$escapedPackageName \
+                                /data/adb/modules/lsposed/config/scope/$escapedPackageName; do
+                                if [ -d "${'$'}scope_path" ] && [ -n "${'$'}(ls -A ${'$'}scope_path 2>/dev/null)" ]; then
+                                    echo "has_scopes"
+                                    exit 0
+                                fi
+                            done
+                            exit 0
+                        fi
+                    done
+                    echo "not_found"
+                """.trimIndent()
                 
-                if (lsposedConfigCheck.isNotEmpty() && (lsposedConfigCheck.contains("found") || lsposedConfigCheck.contains(packageName))) {
-                    moduleActive = true
-                    android.util.Log.d("VirtuCamSettings", "Module active via LSPosed config check")
+                val moduleCheckResult = executeRootCommand(moduleCheckScript)
+                
+                if (moduleCheckResult.contains("module_enabled")) {
+                    if (moduleCheckResult.contains("has_scopes")) {
+                        moduleActive = true
+                        android.util.Log.d("VirtuCamSettings", "Module active: Enabled with scopes configured")
+                    } else {
+                        // Module is enabled but no scopes - still consider it potentially active
+                        // as some LSPosed versions may store scopes differently
+                        moduleActive = true
+                        android.util.Log.d("VirtuCamSettings", "Module active: Enabled (scope check inconclusive)")
+                    }
                 }
             }
             
-            // Method 3: Check module database in LSPosed
-            // This is more reliable than just checking xposed_init existence
+            // Method 3: Fallback - Check if module has scope configuration files
+            // This catches cases where module list check failed but scopes exist
             if (!moduleActive && lsposedExists) {
                 val packageName = sanitizePackageName(reactApplicationContext.packageName)
                 val escapedPackageName = escapeShellArg(packageName)
                 
-                // Check if module is enabled in LSPosed's module list
-                // LSPosed stores module enable state in various locations
-                val moduleEnabledCheck = executeRootCommand(
-                    "[ -f /data/adb/lspd/config/modules.list ] && grep -q $escapedPackageName /data/adb/lspd/config/modules.list && echo 'enabled' || " +
-                    "[ -f /data/adb/modules/zygisk_lsposed/config/modules.list ] && grep -q $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list && echo 'enabled' || " +
-                    "echo 'not_found'"
-                )
+                val scopeCheckScript = """
+                    # Look for any scope configuration for this module
+                    for scope_base in \
+                        /data/adb/lspd/config/scope \
+                        /data/adb/modules/zygisk_lsposed/config/scope \
+                        /data/adb/modules/riru_lsposed/config/scope \
+                        /data/adb/modules/lsposed/config/scope; do
+                        if [ -d "${'$'}scope_base/$escapedPackageName" ]; then
+                            # Check if directory has any files (indicating configured scopes)
+                            if [ -n "${'$'}(ls -A ${'$'}scope_base/$escapedPackageName 2>/dev/null)" ]; then
+                                echo "scope_configured"
+                                exit 0
+                            fi
+                        fi
+                    done
+                    echo "no_scopes"
+                """.trimIndent()
                 
-                if (moduleEnabledCheck.trim() == "enabled") {
+                val scopeCheckResult = executeRootCommand(scopeCheckScript)
+                
+                if (scopeCheckResult.trim() == "scope_configured") {
                     moduleActive = true
-                    android.util.Log.d("VirtuCamSettings", "Module active via LSPosed module list check")
-                } else {
-                    // Final fallback: Check if xposed_init file exists (indicates module is properly configured)
-                    // Only use this if we couldn't confirm through other means
-                    val xposedInitFile = File(reactApplicationContext.applicationInfo.sourceDir)
-                    if (xposedInitFile.exists()) {
-                        val apkPath = escapeShellArg(xposedInitFile.absolutePath)
-                        val checkXposedInit = executeCommand("unzip -l $apkPath | grep xposed_init")
-                        if (checkXposedInit.contains("xposed_init")) {
-                            // Module is properly configured, assume it's active if LSPosed is installed
-                            // This is the weakest check, so only use as last resort
-                            moduleActive = true
-                            android.util.Log.d("VirtuCamSettings", "Module active via xposed_init file check (fallback)")
-                        }
-                    }
+                    android.util.Log.d("VirtuCamSettings", "Module active via scope configuration check")
                 }
             }
             
@@ -519,6 +547,130 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             promise.resolve(true)
         } catch (e: Exception) {
             promise.resolve(false)
+        }
+    }
+
+    /**
+     * Get detailed LSPosed diagnostic information for troubleshooting
+     */
+    @ReactMethod
+    fun getLSPosedDiagnostics(promise: Promise) {
+        try {
+            val result = Arguments.createMap()
+            val packageName = sanitizePackageName(reactApplicationContext.packageName)
+            val escapedPackageName = escapeShellArg(packageName)
+            
+            // Check which LSPosed variant is installed
+            val variantCheckScript = """
+                if [ -d /data/adb/lspd ]; then echo "standard"; fi
+                if [ -d /data/adb/modules/zygisk_lsposed ]; then echo "zygisk"; fi
+                if [ -d /data/adb/modules/riru_lsposed ]; then echo "riru"; fi
+                if [ -d /data/adb/modules/lsposed ]; then echo "generic"; fi
+            """.trimIndent()
+            val variants = executeRootCommand(variantCheckScript)
+            result.putString("lsposedVariants", variants.trim())
+            
+            // Check if module is in modules list
+            val moduleListCheck = executeRootCommand(
+                "grep $escapedPackageName /data/adb/lspd/config/modules.list 2>/dev/null || " +
+                "grep $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null || " +
+                "grep $escapedPackageName /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null || " +
+                "echo 'not_in_list'"
+            )
+            result.putString("moduleListStatus", moduleListCheck.trim())
+            
+            // Check scope configuration
+            val scopeCheck = executeRootCommand(
+                "ls -la /data/adb/lspd/config/scope/$escapedPackageName 2>/dev/null || " +
+                "ls -la /data/adb/modules/zygisk_lsposed/config/scope/$escapedPackageName 2>/dev/null || " +
+                "ls -la /data/adb/modules/riru_lsposed/config/scope/$escapedPackageName 2>/dev/null || " +
+                "echo 'no_scope_dir'"
+            )
+            result.putString("scopeConfiguration", scopeCheck.trim())
+            
+            // Check marker file
+            val markerFile = File("/data/local/tmp/virtucam_module_active")
+            if (markerFile.exists()) {
+                val age = (System.currentTimeMillis() - markerFile.lastModified()) / 1000
+                result.putString("markerFileAge", "${age}s ago")
+                result.putBoolean("markerFileExists", true)
+            } else {
+                result.putString("markerFileAge", "not found")
+                result.putBoolean("markerFileExists", false)
+            }
+            
+            // Check xposed_init in APK
+            val xposedInitCheck = executeCommand("unzip -l ${escapeShellArg(reactApplicationContext.applicationInfo.sourceDir)} | grep xposed_init")
+            result.putBoolean("hasXposedInit", xposedInitCheck.contains("xposed_init"))
+            
+            promise.resolve(result)
+        } catch (e: Exception) {
+            val result = Arguments.createMap()
+            result.putString("error", e.message)
+            promise.resolve(result)
+        }
+    }
+
+    /**
+     * Detect which manager app to use for LSPosed configuration
+     * Returns package name of the appropriate manager app
+     */
+    @ReactMethod
+    fun detectLSPosedManager(promise: Promise) {
+        try {
+            val result = Arguments.createMap()
+            val pm = reactApplicationContext.packageManager
+            
+            // List of possible LSPosed Manager package names
+            val lsposedPackages = listOf(
+                "org.lsposed.manager",
+                "io.github.lsposed.manager",
+                "org.lsposed.manager.parasitic"
+            )
+            
+            // Check for LSPosed Manager (standalone)
+            for (pkg in lsposedPackages) {
+                try {
+                    pm.getPackageInfo(pkg, 0)
+                    result.putString("managerType", "lsposed")
+                    result.putString("packageName", pkg)
+                    result.putBoolean("isParasitic", false)
+                    promise.resolve(result)
+                    return
+                } catch (e: Exception) {
+                    // Continue checking
+                }
+            }
+            
+            // Check for KernelSU (which may host parasitic LSPosed)
+            val kernelSUPackages = listOf(
+                "me.weishu.kernelsu",
+                "com.topjohnwu.magisk"  // Magisk can also host LSPosed
+            )
+            
+            for (pkg in kernelSUPackages) {
+                try {
+                    pm.getPackageInfo(pkg, 0)
+                    result.putString("managerType", if (pkg.contains("kernelsu")) "kernelsu" else "magisk")
+                    result.putString("packageName", pkg)
+                    result.putBoolean("isParasitic", true)
+                    promise.resolve(result)
+                    return
+                } catch (e: Exception) {
+                    // Continue checking
+                }
+            }
+            
+            // No manager found - LSPosed might be parasitic without a known host
+            result.putString("managerType", "unknown")
+            result.putString("packageName", null)
+            result.putBoolean("isParasitic", true)
+            promise.resolve(result)
+        } catch (e: Exception) {
+            val result = Arguments.createMap()
+            result.putString("managerType", "unknown")
+            result.putString("error", e.message)
+            promise.resolve(result)
         }
     }
 
