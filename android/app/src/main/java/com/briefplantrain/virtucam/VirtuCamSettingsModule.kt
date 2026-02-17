@@ -333,14 +333,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             // Method 2: Check LSPosed scope configuration via root
             if (!moduleActive && lsposedExists) {
                 val packageName = sanitizePackageName(reactApplicationContext.packageName)
+                val escapedPackageName = escapeShellArg(packageName)
                 
                 // Try to check if our module is in LSPosed's enabled modules list
                 // Check specific known files first for better performance
                 val lsposedConfigCheck = executeRootCommand(
-                    "grep -q '$packageName' /data/adb/lspd/config/modules.list 2>/dev/null && echo 'found' || " +
-                    "grep -q '$packageName' /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
-                    "grep -q '$packageName' /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
-                    "grep -r '$packageName' /data/adb/lspd/config 2>/dev/null | head -1"
+                    "grep -q $escapedPackageName /data/adb/lspd/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -q $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -q $escapedPackageName /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -r $escapedPackageName /data/adb/lspd/config 2>/dev/null | head -1"
                 )
                 
                 if (lsposedConfigCheck.isNotEmpty() && (lsposedConfigCheck.contains("found") || lsposedConfigCheck.contains(packageName))) {
@@ -353,12 +354,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             // This is more reliable than just checking xposed_init existence
             if (!moduleActive && lsposedExists) {
                 val packageName = sanitizePackageName(reactApplicationContext.packageName)
+                val escapedPackageName = escapeShellArg(packageName)
                 
                 // Check if module is enabled in LSPosed's module list
                 // LSPosed stores module enable state in various locations
                 val moduleEnabledCheck = executeRootCommand(
-                    "[ -f /data/adb/lspd/config/modules.list ] && grep -q '$packageName' /data/adb/lspd/config/modules.list && echo 'enabled' || " +
-                    "[ -f /data/adb/modules/zygisk_lsposed/config/modules.list ] && grep -q '$packageName' /data/adb/modules/zygisk_lsposed/config/modules.list && echo 'enabled' || " +
+                    "[ -f /data/adb/lspd/config/modules.list ] && grep -q $escapedPackageName /data/adb/lspd/config/modules.list && echo 'enabled' || " +
+                    "[ -f /data/adb/modules/zygisk_lsposed/config/modules.list ] && grep -q $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list && echo 'enabled' || " +
                     "echo 'not_found'"
                 )
                 
@@ -370,8 +372,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     // Only use this if we couldn't confirm through other means
                     val xposedInitFile = File(reactApplicationContext.applicationInfo.sourceDir)
                     if (xposedInitFile.exists()) {
-                        val apkPath = xposedInitFile.absolutePath
-                        val checkXposedInit = executeCommand("unzip -l '$apkPath' | grep xposed_init")
+                        val apkPath = escapeShellArg(xposedInitFile.absolutePath)
+                        val checkXposedInit = executeCommand("unzip -l $apkPath | grep xposed_init")
                         if (checkXposedInit.contains("xposed_init")) {
                             // Module is properly configured, assume it's active if LSPosed is installed
                             // This is the weakest check, so only use as last resort
@@ -558,5 +560,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         // Android package names can only contain [a-zA-Z0-9._]
         // Remove any potentially dangerous characters
         return packageName.replace(Regex("[^a-zA-Z0-9._]"), "")
+    }
+    
+    /**
+     * Escape string for safe use in shell commands
+     * Wraps the string in single quotes and escapes any embedded single quotes
+     */
+    private fun escapeShellArg(arg: String): String {
+        // Replace single quotes with '\'' (end quote, escaped quote, start quote)
+        return "'${arg.replace("'", "'\\''")}'"
     }
 }
