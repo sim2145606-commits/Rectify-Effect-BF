@@ -5,10 +5,12 @@ import { STORAGE_KEYS } from '@/constants/theme';
 const { VirtuCamSettings } = NativeModules;
 
 export type CameraTarget = 'front' | 'back' | 'both' | 'none';
+export type MediaSourceType = 'file' | 'stream';
 
 export type BridgeConfig = {
   enabled: boolean;
   mediaSourcePath: string | null;
+  mediaSourceType: MediaSourceType;
   cameraTarget: CameraTarget;
   mirrored: boolean;
   rotation: number;
@@ -34,6 +36,7 @@ export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<
     await VirtuCamSettings.writeConfig({
       enabled: config.enabled ?? false,
       mediaSourcePath: config.mediaSourcePath ?? null,
+      mediaSourceType: config.mediaSourceType ?? 'file',
       cameraTarget: config.cameraTarget ?? 'front',
       mirrored: config.mirrored ?? false,
       rotation: config.rotation ?? 0,
@@ -58,6 +61,7 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
   const defaultConfig: BridgeConfig = {
     enabled: false,
     mediaSourcePath: null,
+    mediaSourceType: 'file',
     cameraTarget: 'front',
     mirrored: false,
     rotation: 0,

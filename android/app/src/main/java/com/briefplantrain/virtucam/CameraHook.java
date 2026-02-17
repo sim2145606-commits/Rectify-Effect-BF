@@ -51,6 +51,8 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
+import com.briefplantrain.virtucam.hooks.*;
+
 /**
  * VirtuCam Xposed Hook Module — Patched Production Version
  *
@@ -101,6 +103,10 @@ public class CameraHook implements IXposedHookLoadPackage {
     private volatile float offsetY = 0.0f;
     private volatile String targetMode = "whitelist";
     private volatile Set<String> targetPackages = new HashSet<>();
+
+    // --- Streaming support ---
+    private volatile StreamingMediaSource streamingSource = null;
+    private volatile boolean isStreamingMode = false;
 
     // --- Frame cache ---
     private Bitmap cachedFrame = null;
@@ -219,6 +225,29 @@ public class CameraHook implements IXposedHookLoadPackage {
 
         log("Hooking package: " + lpparam.packageName + " (enabled=" + enabled + ")");
 
+        // Check for per-app specialized hook strategy
+        HookStrategyRegistry registry = HookStrategyRegistry.getInstance();
+        IHookStrategy specialStrategy = registry.getStrategy(lpparam.packageName);
+
+        if (specialStrategy != null) {
+            log("Using specialized strategy: " +
+                specialStrategy.getStrategyName() + " for " + lpparam.packageName);
+            HookConfig hookConfig = new HookConfig();
+            hookConfig.enabled = enabled;
+            hookConfig.mediaSourcePath = mediaSourcePath;
+            hookConfig.cameraTarget = cameraTarget;
+            hookConfig.mirrored = mirrored;
+            hookConfig.rotation = rotation;
+            hookConfig.scaleX = scaleX;
+            hookConfig.scaleY = scaleY;
+            hookConfig.offsetX = offsetX;
+            hookConfig.offsetY = offsetY;
+            hookConfig.scaleMode = "fit";
+            hookConfig.isStreamingMode = isStreamingMode;
+            specialStrategy.applyHooks(lpparam, hookConfig);
+        }
+
+        // Continue with generic hooks (these still apply for all apps)
         hookCamera2API(lpparam);
         hookCamera1API(lpparam);
         hookCameraCaptureSession(lpparam);
@@ -301,6 +330,17 @@ public class CameraHook implements IXposedHookLoadPackage {
                         stopVideoDecoder();
                     }
                     mediaSourcePath = newMediaPath;
+                    
+                    // Check if the media source is a streaming URL
+                    isStreamingMode = StreamingMediaSource.isStreamingUrl(mediaSourcePath);
+                    if (isStreamingMode) {
+                        if (streamingSource != null) {
+                            streamingSource.release();
+                        }
+                        streamingSource = new StreamingMediaSource(mediaSourcePath);
+                        log("Streaming mode enabled: " + mediaSourcePath);
+                    }
+                    
                     configLoaded = true;
                     log("Config loaded via XSharedPreferences");
                 }

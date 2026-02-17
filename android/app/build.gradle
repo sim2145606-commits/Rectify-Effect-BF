@@ -173,6 +173,12 @@ dependencies {
 
     compileOnly 'de.robv.android.xposed:api:82'
 
+    // ExoPlayer for RTMP/RTSP/HTTP streaming support in hook context
+    implementation 'androidx.media3:media3-exoplayer:1.5.1'
+    implementation 'androidx.media3:media3-exoplayer-rtsp:1.5.1'
+    implementation 'androidx.media3:media3-datasource-rtmp:1.5.1'
+    implementation 'androidx.media3:media3-datasource-okhttp:1.5.1'
+
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";
