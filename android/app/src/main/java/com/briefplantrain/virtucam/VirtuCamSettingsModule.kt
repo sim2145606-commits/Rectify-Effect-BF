@@ -663,7 +663,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // No manager found - LSPosed might be parasitic without a known host
             result.putString("managerType", "unknown")
-            result.putString("packageName", null)
+            result.putNull("packageName")
             result.putBoolean("isParasitic", true)
             promise.resolve(result)
         } catch (e: Exception) {
