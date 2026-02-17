@@ -48,6 +48,9 @@ export default function StudioScreen() {
   const insets = useSafeAreaInsets();
   const { lightImpact, heavyImpact, success } = useHaptics();
 
+  // Hook enabled state for floating overlay
+  const [hookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
+
   // Media state
   const [selectedMedia, setSelectedMedia] = useStorage<string | null>(
     STORAGE_KEYS.SELECTED_MEDIA,
@@ -203,22 +206,37 @@ export default function StudioScreen() {
   );
 
   const handleResetAll = useCallback(() => {
-    heavyImpact();
-    setRotation(0);
-    setMirrored(false);
-    setFlippedVertical(false);
-    setScaleMode('fit');
-    setOffsetX(0);
-    setOffsetY(0);
-    writeBridgeConfig({
-      rotation: 0,
-      mirrored: false,
-      scaleMode: 'fit',
-      offsetX: 0,
-      offsetY: 0,
-    }).catch(() => {});
+    Alert.alert(
+      'Reset All Settings',
+      'This will reset all media transformation settings to their defaults. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            heavyImpact();
+            setRotation(0);
+            setMirrored(false);
+            setFlippedVertical(false);
+            setScaleMode('fit');
+            setOffsetX(0);
+            setOffsetY(0);
+            writeBridgeConfig({
+              rotation: 0,
+              mirrored: false,
+              scaleMode: 'fit',
+              offsetX: 0,
+              offsetY: 0,
+            }).catch(() => {});
+            success();
+          },
+        },
+      ]
+    );
   }, [
     heavyImpact,
+    success,
     setRotation,
     setMirrored,
     setFlippedVertical,
@@ -303,6 +321,15 @@ export default function StudioScreen() {
                 contentFit="contain"
                 transition={300}
               />
+              {/* Video play indicator overlay */}
+              {selectedType === 'video' && (
+                <View style={styles.videoPlayOverlay}>
+                  <View style={styles.videoPlayButton}>
+                    <Ionicons name="play" size={32} color={Colors.textPrimary} />
+                  </View>
+                  <Text style={styles.videoPlayText}>Video will play in target apps</Text>
+                </View>
+              )}
               <View style={styles.previewOverlay}>
                 <View style={styles.previewBadge}>
                   <Ionicons
@@ -318,6 +345,13 @@ export default function StudioScreen() {
                   <Ionicons name="close-circle" size={20} color={Colors.textPrimary} />
                 </Pressable>
               </View>
+              {/* Floating OBS-style LIVE indicator when hook is enabled */}
+              {hookEnabled && (
+                <Animated.View entering={FadeIn.duration(300)} style={styles.liveIndicator}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.liveText}>LIVE</Text>
+                </Animated.View>
+              )}
             </View>
           ) : (
             <View style={styles.emptyPreview}>
@@ -849,5 +883,58 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: FontSize.sm,
     fontWeight: '600',
+  },
+  // Video play overlay styles
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+  },
+  videoPlayButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.textPrimary,
+  },
+  videoPlayText: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
+  // Live indicator styles (OBS-style)
+  liveIndicator: {
+    position: 'absolute',
+    bottom: Spacing.md,
+    left: Spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 59, 48, 0.9)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.textPrimary,
+  },
+  liveText: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
 });

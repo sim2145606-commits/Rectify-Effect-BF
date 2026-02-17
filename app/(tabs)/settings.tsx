@@ -242,21 +242,62 @@ export default function SettingsScreen() {
   const [selectedApp, setSelectedApp] = useState<TargetApp | null>(null);
   const [isResetting, setIsResetting] = useState(false);
 
+  // State for installed apps
+  const [installedPackages, setInstalledPackages] = useState<string[]>([]);
+
+  // Check which apps are installed on device
+  useEffect(() => {
+    const checkInstalledApps = async () => {
+      try {
+        const { VirtuCamSettings } = require('react-native').NativeModules;
+        if (VirtuCamSettings && VirtuCamSettings.getInstalledPackages) {
+          const packageNames = targetApps.map(app => app.packageName);
+          const installed = await VirtuCamSettings.getInstalledPackages(packageNames);
+          setInstalledPackages(installed || []);
+        }
+      } catch {
+        // If check fails, show all apps
+        setInstalledPackages(targetApps.map(app => app.packageName));
+      }
+    };
+    checkInstalledApps();
+  }, [targetApps]);
+
   // Load cloud verified apps - removed as we're using local presets now
   useEffect(() => {
     // No cloud sync needed for local presets
     setCloudVerifiedApps([]);
   }, []);
 
+  // Filter apps: only show installed apps, then apply search filter
   const filteredApps = useMemo(() => {
-    if (!searchQuery.trim()) return targetApps;
-    const query = searchQuery.toLowerCase();
-    return targetApps.filter(
-      app => app.name.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query)
-    );
-  }, [targetApps, searchQuery]);
+    // First filter to only installed apps (if we have the list)
+    let apps =
+      installedPackages.length > 0
+        ? targetApps.filter(app => installedPackages.includes(app.packageName))
+        : targetApps;
 
-  const enabledCount = useMemo(() => targetApps.filter(a => a.enabled).length, [targetApps]);
+    // Then apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      apps = apps.filter(
+        app =>
+          app.name.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query)
+      );
+    }
+    return apps;
+  }, [targetApps, searchQuery, installedPackages]);
+
+  // Count only installed and enabled apps
+  const installedApps = useMemo(
+    () =>
+      installedPackages.length > 0
+        ? targetApps.filter(app => installedPackages.includes(app.packageName))
+        : targetApps,
+    [targetApps, installedPackages]
+  );
+
+  const enabledCount = useMemo(() => installedApps.filter(a => a.enabled).length, [installedApps]);
 
   const cloudVerifiedCount = useMemo(
     () => targetApps.filter(a => cloudVerifiedApps.includes(a.packageName)).length,
@@ -696,7 +737,7 @@ export default function SettingsScreen() {
               icon="document-outline"
               label="All Files Access"
               description="MANAGE_EXTERNAL_STORAGE for injection"
-              granted={false}
+              granted={systemStatus.allFilesAccess.status === 'ok'}
               onRequest={() => handleRequestPermission('allfiles')}
             />
             <PermissionRow
@@ -747,10 +788,20 @@ export default function SettingsScreen() {
               <Text style={styles.aboutLabel}>Target SDK</Text>
               <Text style={styles.aboutValue}>Android 10 – 16</Text>
             </View>
-            <View style={styles.aboutRow}>
-              <Text style={styles.aboutLabel}>AI Engine</Text>
-              <Text style={styles.aboutValue}>Newell AI v1.0</Text>
+            <View style={[styles.aboutRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.aboutLabel}>Developer</Text>
+              <Text style={styles.aboutValue}>VirtuCam Team</Text>
             </View>
+          </Card>
+        </Animated.View>
+
+        {/* Diagnostic Logs Section */}
+        <Animated.View entering={FadeInDown.delay(650).duration(500)}>
+          <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
+            <Ionicons name="document-text-outline" size={18} color={Colors.electricBlue} />
+            <Text style={styles.sectionTitle}>Diagnostics</Text>
+          </View>
+          <Card>
             <Pressable
               onPress={() => router.push('/logs' as Href)}
               style={[styles.aboutRow, { borderBottomWidth: 0 }]}
@@ -758,7 +809,7 @@ export default function SettingsScreen() {
               <View style={styles.logsButtonContent}>
                 <Ionicons name="document-text" size={16} color={Colors.electricBlue} />
                 <Text style={[styles.aboutLabel, { color: Colors.electricBlue }]}>
-                  Diagnostic Logs
+                  View Diagnostic Logs
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={Colors.electricBlue} />

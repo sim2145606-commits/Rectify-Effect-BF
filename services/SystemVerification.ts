@@ -39,6 +39,7 @@ export type SystemVerificationState = {
   xposedFramework: SystemCheck;
   moduleActive: SystemCheck;
   storagePermission: SystemCheck;
+  allFilesAccess: SystemCheck;
 };
 
 const CACHE_KEY = STORAGE_KEYS.SYSTEM_STATUS;
@@ -63,6 +64,11 @@ export const INITIAL_SYSTEM_STATE: SystemVerificationState = {
   },
   storagePermission: {
     label: 'Storage Permission',
+    detail: 'Checking...',
+    status: 'loading',
+  },
+  allFilesAccess: {
+    label: 'All Files Access',
     detail: 'Checking...',
     status: 'loading',
   },
@@ -131,6 +137,11 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       detail: 'Checking permissions...',
       status: 'loading',
     },
+    allFilesAccess: {
+      label: 'All Files Access',
+      detail: 'Checking permissions...',
+      status: 'loading',
+    },
     overallReady: false,
     lastChecked: Date.now(),
   };
@@ -172,7 +183,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     if (VirtuCamSettings && VirtuCamSettings.checkXposedStatus) {
       try {
         const xposedResult = await VirtuCamSettings.checkXposedStatus();
-        
+
         // If module is active, framework MUST be active (module can't load without framework)
         if (xposedResult.moduleActive) {
           result.xposedFramework = {
@@ -236,19 +247,19 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     }
 
     // Check storage permission
-    if (VirtuCamSettings && VirtuCamSettings.checkAllFilesAccess) {
+    if (VirtuCamSettings && VirtuCamSettings.checkStoragePermission) {
       try {
-        const storageGranted = await VirtuCamSettings.checkAllFilesAccess();
+        const storageGranted = await VirtuCamSettings.checkStoragePermission();
         if (storageGranted) {
           result.storagePermission = {
             label: 'Storage Permission',
-            detail: 'All files access granted',
+            detail: 'Storage access granted',
             status: 'ok',
           };
         } else {
           result.storagePermission = {
             label: 'Storage Permission',
-            detail: 'Grant all files access',
+            detail: 'Grant storage access',
             status: 'error',
           };
         }
@@ -262,6 +273,38 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     } else {
       result.storagePermission = {
         label: 'Storage Permission',
+        detail: 'Native module unavailable',
+        status: 'error',
+      };
+    }
+
+    // Check All Files Access (MANAGE_EXTERNAL_STORAGE)
+    if (VirtuCamSettings && VirtuCamSettings.checkAllFilesAccess) {
+      try {
+        const allFilesGranted = await VirtuCamSettings.checkAllFilesAccess();
+        if (allFilesGranted) {
+          result.allFilesAccess = {
+            label: 'All Files Access',
+            detail: 'MANAGE_EXTERNAL_STORAGE granted',
+            status: 'ok',
+          };
+        } else {
+          result.allFilesAccess = {
+            label: 'All Files Access',
+            detail: 'Grant all files access',
+            status: 'warning',
+          };
+        }
+      } catch (error: any) {
+        result.allFilesAccess = {
+          label: 'All Files Access',
+          detail: 'Permission check failed',
+          status: 'error',
+        };
+      }
+    } else {
+      result.allFilesAccess = {
+        label: 'All Files Access',
         detail: 'Native module unavailable',
         status: 'error',
       };
