@@ -1,17 +1,4 @@
-# dependencies
-node_modules/
+# .prettierignore
 
-# Expo
-.expo/
-dist/
-web-build/
-
-# Native
-android/
-ios/
-
-# Build artifacts
-*.tsbuildinfo
-
-# Logs
-*.log
+# Ignore LSPOSED_MODULE_DETECTION_FIX.md
+docs/LSPOSED_MODULE_DETECTION_FIX.md

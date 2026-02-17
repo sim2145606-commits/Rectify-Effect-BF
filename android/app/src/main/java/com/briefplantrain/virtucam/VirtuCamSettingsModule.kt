@@ -9,12 +9,19 @@ import com.facebook.react.bridge.*
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 
 class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     private val prefs: SharedPreferences by lazy {
         reactContext.getSharedPreferences("virtucam_config", Context.MODE_WORLD_READABLE)
+    }
+    
+    companion object {
+        // Marker file timeout: Module remains active until device reboot
+        // (marker file is in /data/local/tmp which is cleared on reboot)
+        private val MARKER_FILE_TIMEOUT_MS = TimeUnit.HOURS.toMillis(24)
     }
 
     override fun getName(): String = "VirtuCamSettings"
@@ -311,49 +318,76 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Method 1: Check for marker file
             if (markerFile.exists()) {
-                // Check if marker is recent (within last 5 minutes)
+                // Check if marker is recent (within last 24 hours)
+                // Extended timeout: Module remains active until device reboot (marker file is in /data/local/tmp)
+                // This prevents false negatives when user hasn't opened a target app recently
                 val lastModified = markerFile.lastModified()
                 val currentTime = System.currentTimeMillis()
-                val fiveMinutes = 5 * 60 * 1000
                 
-                if (currentTime - lastModified < fiveMinutes) {
+                if (currentTime - lastModified < MARKER_FILE_TIMEOUT_MS) {
                     moduleActive = true
+                    android.util.Log.d("VirtuCamSettings", "Module active via marker file (age: ${(currentTime - lastModified) / 1000}s)")
                 }
             }
             
             // Method 2: Check LSPosed scope configuration via root
             if (!moduleActive && lsposedExists) {
-                val packageName = reactApplicationContext.packageName
+                val packageName = sanitizePackageName(reactApplicationContext.packageName)
+                val escapedPackageName = escapeShellArg(packageName)
                 
                 // Try to check if our module is in LSPosed's enabled modules list
+                // Check specific known files first for better performance
                 val lsposedConfigCheck = executeRootCommand(
-                    "grep -r '$packageName' /data/adb/lspd/config 2>/dev/null || " +
-                    "grep -r '$packageName' /data/adb/modules/zygisk_lsposed/config 2>/dev/null || " +
-                    "grep -r '$packageName' /data/adb/modules/riru_lsposed/config 2>/dev/null"
+                    "grep -q $escapedPackageName /data/adb/lspd/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -q $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -q $escapedPackageName /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -r $escapedPackageName /data/adb/lspd/config 2>/dev/null | head -1"
                 )
                 
-                if (lsposedConfigCheck.isNotEmpty() && lsposedConfigCheck.contains(packageName)) {
+                if (lsposedConfigCheck.isNotEmpty() && (lsposedConfigCheck.contains("found") || lsposedConfigCheck.contains(packageName))) {
                     moduleActive = true
+                    android.util.Log.d("VirtuCamSettings", "Module active via LSPosed config check")
                 }
             }
             
-            // Method 3: If LSPosed is installed, assume module is active
-            // This is a fallback since we can't reliably detect module activation
-            // from within the module app itself
+            // Method 3: Check module database in LSPosed
+            // This is more reliable than just checking xposed_init existence
             if (!moduleActive && lsposedExists) {
-                // Check if xposed_init file exists (indicates module is properly configured)
-                val xposedInitFile = File(reactApplicationContext.applicationInfo.sourceDir)
-                if (xposedInitFile.exists()) {
-                    val apkPath = xposedInitFile.absolutePath
-                    val checkXposedInit = executeCommand("unzip -l '$apkPath' | grep xposed_init")
-                    if (checkXposedInit.contains("xposed_init")) {
-                        // Module is properly configured, assume it's active if LSPosed is installed
-                        moduleActive = true
+                val packageName = sanitizePackageName(reactApplicationContext.packageName)
+                val escapedPackageName = escapeShellArg(packageName)
+                
+                // Check if module is enabled in LSPosed's module list
+                // LSPosed stores module enable state in various locations
+                val moduleEnabledCheck = executeRootCommand(
+                    "[ -f /data/adb/lspd/config/modules.list ] && grep -q $escapedPackageName /data/adb/lspd/config/modules.list && echo 'enabled' || " +
+                    "[ -f /data/adb/modules/zygisk_lsposed/config/modules.list ] && grep -q $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list && echo 'enabled' || " +
+                    "echo 'not_found'"
+                )
+                
+                if (moduleEnabledCheck.trim() == "enabled") {
+                    moduleActive = true
+                    android.util.Log.d("VirtuCamSettings", "Module active via LSPosed module list check")
+                } else {
+                    // Final fallback: Check if xposed_init file exists (indicates module is properly configured)
+                    // Only use this if we couldn't confirm through other means
+                    val xposedInitFile = File(reactApplicationContext.applicationInfo.sourceDir)
+                    if (xposedInitFile.exists()) {
+                        val apkPath = escapeShellArg(xposedInitFile.absolutePath)
+                        val checkXposedInit = executeCommand("unzip -l $apkPath | grep xposed_init")
+                        if (checkXposedInit.contains("xposed_init")) {
+                            // Module is properly configured, assume it's active if LSPosed is installed
+                            // This is the weakest check, so only use as last resort
+                            moduleActive = true
+                            android.util.Log.d("VirtuCamSettings", "Module active via xposed_init file check (fallback)")
+                        }
                     }
                 }
             }
             
             result.putBoolean("moduleActive", moduleActive)
+            
+            // Add debug info for troubleshooting
+            android.util.Log.d("VirtuCamSettings", "LSPosed detection results: xposedActive=$isXposedActive, lsposedInstalled=$lsposedExists, moduleActive=$moduleActive")
             
             promise.resolve(result)
         } catch (e: Exception) {
@@ -516,5 +550,24 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             ""
         }
+    }
+    
+    /**
+     * Sanitize package name for use in shell commands
+     * Package names should only contain alphanumeric characters, dots, and underscores
+     */
+    private fun sanitizePackageName(packageName: String): String {
+        // Android package names can only contain [a-zA-Z0-9._]
+        // Remove any potentially dangerous characters
+        return packageName.replace(Regex("[^a-zA-Z0-9._]"), "")
+    }
+    
+    /**
+     * Escape string for safe use in shell commands
+     * Wraps the string in single quotes and escapes any embedded single quotes
+     */
+    private fun escapeShellArg(arg: String): String {
+        // Replace single quotes with '\'' (end quote, escaped quote, start quote)
+        return "'${arg.replace("'", "'\\''")}'"
     }
 }
