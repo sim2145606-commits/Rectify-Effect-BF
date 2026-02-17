@@ -106,7 +106,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         try {
             val config = Arguments.createMap()
             config.putBoolean("enabled", prefs.getBoolean("enabled", false))
-            config.putString("mediaSourcePath", prefs.getString("mediaSourcePath", null))
+            
+            val mediaSourcePath = prefs.getString("mediaSourcePath", null)
+            if (mediaSourcePath != null) {
+                config.putString("mediaSourcePath", mediaSourcePath)
+            } else {
+                config.putNull("mediaSourcePath")
+            }
+            
             config.putString("cameraTarget", prefs.getString("cameraTarget", "front"))
             config.putBoolean("mirrored", prefs.getBoolean("mirrored", false))
             config.putInt("rotation", prefs.getInt("rotation", 0))
@@ -158,7 +165,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             val result = Arguments.createMap()
             result.putBoolean("granted", false)
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -203,7 +210,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             val result = Arguments.createMap()
             result.putString("solution", "Unknown")
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -423,7 +430,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("xposedActive", false)
             result.putBoolean("lsposedInstalled", false)
             result.putBoolean("moduleActive", false)
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -508,7 +515,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val result = Arguments.createMap()
             result.putString("logs", "")
             result.putBoolean("success", false)
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -532,7 +539,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val result = Arguments.createMap()
             result.putString("logs", "")
             result.putBoolean("success", false)
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -606,7 +613,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             promise.resolve(result)
         } catch (e: Exception) {
             val result = Arguments.createMap()
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -669,7 +676,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             val result = Arguments.createMap()
             result.putString("managerType", "unknown")
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -721,5 +728,17 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private fun escapeShellArg(arg: String): String {
         // Replace single quotes with '\'' (end quote, escaped quote, start quote)
         return "'${arg.replace("'", "'\\''")}'"
+    }
+    
+    /**
+     * Safely put error message in result map, handling null messages
+     */
+    private fun putErrorMessage(result: WritableMap, error: Exception) {
+        val message = error.message
+        if (message != null) {
+            result.putString("error", message)
+        } else {
+            result.putString("error", "Unknown error")
+        }
     }
 }
