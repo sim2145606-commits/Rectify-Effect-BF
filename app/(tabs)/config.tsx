@@ -18,6 +18,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Image } from 'expo-image';
+import { Video, ResizeMode } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -315,20 +316,23 @@ export default function StudioScreen() {
         <View style={styles.previewCard}>
           {selectedMedia ? (
             <View style={styles.previewContainer}>
-              <Image
-                source={{ uri: selectedMedia }}
-                style={styles.previewImage}
-                contentFit="contain"
-                transition={300}
-              />
-              {/* Video play indicator overlay */}
-              {selectedType === 'video' && (
-                <View style={styles.videoPlayOverlay}>
-                  <View style={styles.videoPlayButton}>
-                    <Ionicons name="play" size={32} color={Colors.textPrimary} />
-                  </View>
-                  <Text style={styles.videoPlayText}>Video will play in target apps</Text>
-                </View>
+              {selectedType === 'video' ? (
+                <Video
+                  source={{ uri: selectedMedia }}
+                  style={styles.previewVideo}
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay={false}
+                  isLooping
+                  useNativeControls
+                  isMuted={false}
+                />
+              ) : (
+                <Image
+                  source={{ uri: selectedMedia }}
+                  style={styles.previewImage}
+                  contentFit="contain"
+                  transition={300}
+                />
               )}
               <View style={styles.previewOverlay}>
                 <View style={styles.previewBadge}>
@@ -705,6 +709,11 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: '100%',
+  },
+  previewVideo: {
+    width: '100%',
+    height: '100%',
+    borderRadius: BorderRadius.md,
   },
   previewOverlay: {
     position: 'absolute',

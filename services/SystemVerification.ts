@@ -1,4 +1,4 @@
-import { NativeModules } from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, STORAGE_KEYS } from '@/constants/theme';
 
@@ -40,6 +40,8 @@ export type SystemVerificationState = {
   moduleActive: SystemCheck;
   storagePermission: SystemCheck;
   allFilesAccess: SystemCheck;
+  cameraPermission: SystemCheck;
+  overlayPermission: SystemCheck;
 };
 
 const CACHE_KEY = STORAGE_KEYS.SYSTEM_STATUS;
@@ -69,6 +71,16 @@ export const INITIAL_SYSTEM_STATE: SystemVerificationState = {
   },
   allFilesAccess: {
     label: 'All Files Access',
+    detail: 'Checking...',
+    status: 'loading',
+  },
+  cameraPermission: {
+    label: 'Camera Permission',
+    detail: 'Checking...',
+    status: 'loading',
+  },
+  overlayPermission: {
+    label: 'Overlay Permission',
     detail: 'Checking...',
     status: 'loading',
   },
@@ -139,6 +151,16 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     },
     allFilesAccess: {
       label: 'All Files Access',
+      detail: 'Checking permissions...',
+      status: 'loading',
+    },
+    cameraPermission: {
+      label: 'Camera Permission',
+      detail: 'Checking permissions...',
+      status: 'loading',
+    },
+    overlayPermission: {
+      label: 'Overlay Permission',
       detail: 'Checking permissions...',
       status: 'loading',
     },
@@ -246,10 +268,21 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       };
     }
 
-    // Check storage permission
+    // Check storage permission with fallback
     if (VirtuCamSettings && VirtuCamSettings.checkStoragePermission) {
       try {
-        const storageGranted = await VirtuCamSettings.checkStoragePermission();
+        let storageGranted = await VirtuCamSettings.checkStoragePermission();
+
+        // Fallback: if native module check fails, try RN's built-in check
+        if (!storageGranted && Platform.OS === 'android') {
+          try {
+            const rnCheck = await PermissionsAndroid.check(
+              PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
+            );
+            if (rnCheck) storageGranted = true;
+          } catch {}
+        }
+
         if (storageGranted) {
           result.storagePermission = {
             label: 'Storage Permission',
@@ -259,7 +292,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         } else {
           result.storagePermission = {
             label: 'Storage Permission',
-            detail: 'Grant storage access',
+            detail: 'Grant storage access in Settings',
             status: 'error',
           };
         }
@@ -271,11 +304,29 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         };
       }
     } else {
-      result.storagePermission = {
-        label: 'Storage Permission',
-        detail: 'Native module unavailable',
-        status: 'error',
-      };
+      // If checkStoragePermission is not available, use checkAllFilesAccess as fallback
+      if (VirtuCamSettings && VirtuCamSettings.checkAllFilesAccess) {
+        try {
+          const allFilesGranted = await VirtuCamSettings.checkAllFilesAccess();
+          result.storagePermission = {
+            label: 'Storage Permission',
+            detail: allFilesGranted ? 'All files access granted' : 'Grant storage access',
+            status: allFilesGranted ? 'ok' : 'error',
+          };
+        } catch {
+          result.storagePermission = {
+            label: 'Storage Permission',
+            detail: 'Check method unavailable',
+            status: 'error',
+          };
+        }
+      } else {
+        result.storagePermission = {
+          label: 'Storage Permission',
+          detail: 'Native module not loaded',
+          status: 'error',
+        };
+      }
     }
 
     // Check All Files Access (MANAGE_EXTERNAL_STORAGE)
@@ -307,6 +358,54 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         label: 'All Files Access',
         detail: 'Native module unavailable',
         status: 'error',
+      };
+    }
+
+    // Check camera permission
+    if (Platform.OS === 'android') {
+      try {
+        const cameraGranted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA);
+        result.cameraPermission = {
+          label: 'Camera Permission',
+          detail: cameraGranted ? 'Camera access granted' : 'Camera permission required',
+          status: cameraGranted ? 'ok' : 'error',
+        };
+      } catch (error: any) {
+        result.cameraPermission = {
+          label: 'Camera Permission',
+          detail: 'Check failed',
+          status: 'error',
+        };
+      }
+    } else {
+      result.cameraPermission = {
+        label: 'Camera Permission',
+        detail: 'N/A on this platform',
+        status: 'ok',
+      };
+    }
+
+    // Check overlay permission
+    if (VirtuCamSettings && VirtuCamSettings.checkOverlayPermission) {
+      try {
+        const overlayGranted = await VirtuCamSettings.checkOverlayPermission();
+        result.overlayPermission = {
+          label: 'Overlay Permission',
+          detail: overlayGranted ? 'Overlay access granted' : 'Overlay permission not granted',
+          status: overlayGranted ? 'ok' : 'warning', // Warning, not critical
+        };
+      } catch (error: any) {
+        result.overlayPermission = {
+          label: 'Overlay Permission',
+          detail: 'Check failed',
+          status: 'warning',
+        };
+      }
+    } else {
+      result.overlayPermission = {
+        label: 'Overlay Permission',
+        detail: 'Check method unavailable',
+        status: 'warning',
       };
     }
   } catch (error) {

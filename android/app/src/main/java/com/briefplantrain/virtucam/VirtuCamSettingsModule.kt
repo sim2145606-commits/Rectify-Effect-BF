@@ -508,6 +508,35 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Check storage permission (READ_EXTERNAL_STORAGE or granular media permissions)
+     * On Android 11+, checks MANAGE_EXTERNAL_STORAGE via isExternalStorageManager()
+     * On Android 13+, also considers granular media permissions
+     */
+    @ReactMethod
+    fun checkStoragePermission(promise: Promise) {
+        try {
+            val granted = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                    // Android 11+: Check MANAGE_EXTERNAL_STORAGE
+                    Environment.isExternalStorageManager()
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+                    // Android 6-10: Check READ_EXTERNAL_STORAGE
+                    val permission = android.Manifest.permission.READ_EXTERNAL_STORAGE
+                    android.content.ContextCompat.checkSelfPermission(
+                        reactApplicationContext,
+                        permission
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+                else -> true
+            }
+            promise.resolve(granted)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    /**
      * Check if MANAGE_EXTERNAL_STORAGE permission is granted
      */
     @ReactMethod

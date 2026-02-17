@@ -10,6 +10,7 @@ import Animated, {
   FadeIn,
 } from 'react-native-reanimated';
 import { Image } from 'expo-image';
+import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
@@ -95,23 +96,51 @@ export default function HUDViewfinder({
         <View style={styles.viewfinder}>
           {mediaUri ? (
             <View style={styles.mediaContainer}>
-              <Image
-                source={{ uri: mediaUri }}
-                style={[
-                  styles.mediaImage,
-                  {
-                    transform: [
-                      { translateX: offsetX },
-                      { translateY: offsetY },
-                      { rotate: `${rotation}deg` },
-                      { scaleX: mirrored ? -1 : 1 },
-                      { scaleY: flippedVertical ? -1 : 1 },
-                    ],
-                  },
-                ]}
-                contentFit={getContentFit()}
-                transition={200}
-              />
+              {mediaUri.match(/\.(mp4|mov|mkv|avi|webm)$/i) ? (
+                <Video
+                  source={{ uri: mediaUri }}
+                  style={[
+                    styles.mediaImage,
+                    {
+                      transform: [
+                        { translateX: offsetX },
+                        { translateY: offsetY },
+                        { rotate: `${rotation}deg` },
+                        { scaleX: mirrored ? -1 : 1 },
+                        { scaleY: flippedVertical ? -1 : 1 },
+                      ],
+                    },
+                  ]}
+                  resizeMode={
+                    scaleMode === 'fill'
+                      ? ResizeMode.COVER
+                      : scaleMode === 'stretch'
+                        ? ResizeMode.STRETCH
+                        : ResizeMode.CONTAIN
+                  }
+                  shouldPlay
+                  isLooping
+                  isMuted
+                />
+              ) : (
+                <Image
+                  source={{ uri: mediaUri }}
+                  style={[
+                    styles.mediaImage,
+                    {
+                      transform: [
+                        { translateX: offsetX },
+                        { translateY: offsetY },
+                        { rotate: `${rotation}deg` },
+                        { scaleX: mirrored ? -1 : 1 },
+                        { scaleY: flippedVertical ? -1 : 1 },
+                      ],
+                    },
+                  ]}
+                  contentFit={getContentFit()}
+                  transition={200}
+                />
+              )}
             </View>
           ) : (
             <View style={styles.emptyState}>

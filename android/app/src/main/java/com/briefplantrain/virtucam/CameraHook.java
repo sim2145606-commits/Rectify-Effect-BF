@@ -1297,7 +1297,11 @@ public class CameraHook implements IXposedHookLoadPackage {
 
     private boolean shouldHookCamera(Object cameraManager, String cameraId,
                                      ClassLoader classLoader) {
-        if ("all".equals(cameraTarget)) return true;
+        // Handle "both" and "all" as synonyms for hooking all cameras
+        if ("both".equals(cameraTarget) || "all".equals(cameraTarget)) return true;
+        
+        // Handle "none" - don't hook any camera
+        if ("none".equals(cameraTarget)) return false;
 
         try {
             Object characteristics = XposedHelpers.callMethod(
