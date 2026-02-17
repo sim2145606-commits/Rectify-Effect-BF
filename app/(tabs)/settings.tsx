@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
+  Linking,
 } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import Animated, {
@@ -805,9 +806,29 @@ export default function SettingsScreen() {
             <Text style={styles.sectionTitle}>About VirtuCam</Text>
           </View>
           <Card>
+            {/* App Logo & Name */}
+            <View style={styles.aboutHeader}>
+              <View style={styles.aboutLogoContainer}>
+                <MaterialCommunityIcons name="camera-iris" size={36} color={Colors.electricBlue} />
+              </View>
+              <View style={styles.aboutHeaderInfo}>
+                <Text style={styles.aboutAppName}>VirtuCam</Text>
+                <Text style={styles.aboutAppTagline}>Virtual Camera Engine for Android</Text>
+              </View>
+            </View>
+
+            <View style={styles.aboutDivider} />
+
+            {/* Info Grid */}
             <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>Version</Text>
               <Text style={styles.aboutValue}>1.0.0</Text>
+            </View>
+            <View style={styles.aboutRow}>
+              <Text style={styles.aboutLabel}>Build</Text>
+              <Text style={styles.aboutValue}>
+                {Platform.OS} {Platform.Version}
+              </Text>
             </View>
             <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>Hook Engine</Text>
@@ -830,7 +851,25 @@ export default function SettingsScreen() {
             </View>
             <View style={[styles.aboutRow, { borderBottomWidth: 0 }]}>
               <Text style={styles.aboutLabel}>Developer</Text>
-              <Text style={styles.aboutValue}>VirtuCam Team</Text>
+              <Text style={styles.aboutValue}>ggSetRanges</Text>
+            </View>
+
+            {/* Links */}
+            <View style={styles.aboutLinks}>
+              <Pressable
+                style={styles.aboutLinkButton}
+                onPress={() => Linking.openURL('https://github.com/ggsetRanges/virtucam')}
+              >
+                <Ionicons name="logo-github" size={16} color={Colors.textSecondary} />
+                <Text style={styles.aboutLinkText}>Source Code</Text>
+              </Pressable>
+              <Pressable
+                style={styles.aboutLinkButton}
+                onPress={() => Linking.openURL('https://github.com/ggsetRanges/virtucam/issues')}
+              >
+                <Ionicons name="bug-outline" size={16} color={Colors.textSecondary} />
+                <Text style={styles.aboutLinkText}>Report Issue</Text>
+              </Pressable>
             </View>
           </Card>
         </Animated.View>
@@ -1736,6 +1775,41 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.5,
   },
+  aboutHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingBottom: Spacing.md,
+  },
+  aboutLogoContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: Colors.electricBlue + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.electricBlue + '30',
+  },
+  aboutHeaderInfo: {
+    flex: 1,
+  },
+  aboutAppName: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xl,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  aboutAppTagline: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.sm,
+    marginTop: 2,
+  },
+  aboutDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.border,
+    marginVertical: Spacing.md,
+  },
   aboutRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1751,6 +1825,28 @@ const styles = StyleSheet.create({
   aboutValue: {
     color: Colors.textPrimary,
     fontSize: FontSize.md,
+    fontWeight: '600',
+  },
+  aboutLinks: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginTop: Spacing.lg,
+  },
+  aboutLinkButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  aboutLinkText: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
     fontWeight: '600',
   },
   resetSection: {
