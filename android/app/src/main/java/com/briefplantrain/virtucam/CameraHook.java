@@ -273,6 +273,9 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
         hookSurfaceTextureTracking(lpparam);
         hookCaptureRequestBuilder(lpparam);
         hookCamera1SurfaceBinding(lpparam);
+        
+        // Also hook CameraX if available in this app
+        CameraXHookStrategy.applyIfAvailable(lpparam);
 
         log("All hooks installed for: " + lpparam.packageName);
     }
