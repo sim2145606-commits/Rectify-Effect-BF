@@ -61,7 +61,7 @@ class FloatingOverlayService : Service() {
         super.onCreate()
         isRunning = true
         
-        prefs = getSharedPreferences("virtucam_config", Context.MODE_WORLD_READABLE)
+        prefs = getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
         loadCurrentState()
         
         createNotificationChannel()

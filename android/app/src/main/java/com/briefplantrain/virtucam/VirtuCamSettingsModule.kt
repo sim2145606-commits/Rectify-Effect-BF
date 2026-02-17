@@ -19,7 +19,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     private val prefs: SharedPreferences by lazy {
-        reactContext.getSharedPreferences("virtucam_config", Context.MODE_WORLD_READABLE)
+        reactContext.getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
     }
     
     companion object {
