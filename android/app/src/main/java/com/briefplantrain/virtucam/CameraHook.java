@@ -45,6 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.IXposedHookZygoteInit;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
@@ -59,7 +60,7 @@ import com.briefplantrain.virtucam.hooks.*;
  * Hooks Camera1 API, Camera2 API (ImageReader listener interception + Surface replacement),
  * for comprehensive virtual camera injection.
  */
-public class CameraHook implements IXposedHookLoadPackage {
+public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit {
 
     private static final String PACKAGE_NAME = "com.briefplantrain.virtucam";
     private static final String PREFS_NAME = "virtucam_config";
@@ -205,6 +206,24 @@ public class CameraHook implements IXposedHookLoadPackage {
                 try { imageWriter.close(); } catch (Exception ignored) {}
                 imageWriter = null;
             }
+        }
+    }
+
+    private static String modulePath;
+
+    @Override
+    public void initZygote(StartupParam startupParam) throws Throwable {
+        modulePath = startupParam.modulePath;
+        log("Zygote init — module path: " + modulePath);
+
+        // Pre-load configuration at Zygote level for faster hook initialization
+        try {
+            XSharedPreferences prefs = new XSharedPreferences(PACKAGE_NAME, PREFS_NAME);
+            prefs.makeWorldReadable();
+            enabled = prefs.getBoolean("enabled", false);
+            log("Zygote pre-config — enabled: " + enabled);
+        } catch (Throwable t) {
+            log("Zygote config preload failed: " + t.getMessage());
         }
     }
 
@@ -1561,6 +1580,18 @@ public class CameraHook implements IXposedHookLoadPackage {
             }
 
             bitmap.getPixels(argbBuf, 0, width, 0, 0, width, height);
+            
+            // Try native encoder first for performance
+            if (NativeEncoder.isNativeAvailable()) {
+                try {
+                    NativeEncoder.rgbToNv21(argbBuf, yuvBuf, width, height);
+                    return yuvBuf;
+                } catch (Exception e) {
+                    log("Native YUV encoding failed, falling back to Java: " + e.getMessage());
+                }
+            }
+            
+            // Fallback to Java lookup-table implementation
             encodeNV21(yuvBuf, argbBuf, width, height);
             return yuvBuf;
         } catch (Exception e) {
