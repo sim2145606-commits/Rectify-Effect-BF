@@ -106,7 +106,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         try {
             val config = Arguments.createMap()
             config.putBoolean("enabled", prefs.getBoolean("enabled", false))
-            config.putString("mediaSourcePath", prefs.getString("mediaSourcePath", null))
+            
+            val mediaSourcePath = prefs.getString("mediaSourcePath", null)
+            if (mediaSourcePath != null) {
+                config.putString("mediaSourcePath", mediaSourcePath)
+            } else {
+                config.putNull("mediaSourcePath")
+            }
+            
             config.putString("cameraTarget", prefs.getString("cameraTarget", "front"))
             config.putBoolean("mirrored", prefs.getBoolean("mirrored", false))
             config.putInt("rotation", prefs.getInt("rotation", 0))
@@ -158,7 +165,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             val result = Arguments.createMap()
             result.putBoolean("granted", false)
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -203,7 +210,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             val result = Arguments.createMap()
             result.putString("solution", "Unknown")
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -332,43 +339,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
             }
             
-            // Method 2: Check LSPosed database (most reliable for modern forks including ReLSPosed)
-            if (!moduleActive && lsposedExists) {
-                val dbCheckResult = checkLSPosedDatabase(packageName)
-                if (dbCheckResult) {
-                    moduleActive = true
-                    detectionMethod = "lspd_database"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed database")
-                }
-            }
-            
-            // Method 3: Check scope configuration files
-            if (!moduleActive && lsposedExists) {
-                val scopeCheckResult = checkLSPosedScope(packageName)
-                if (scopeCheckResult) {
-                    moduleActive = true
-                    detectionMethod = "scope_config"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via scope configuration")
-                }
-            }
-            
-            // Method 4: Check prefs.db for module enabled state (ReLSPosed specific)
-            if (!moduleActive && lsposedExists) {
-                val prefsCheckResult = checkLSPosedPrefs(packageName)
-                if (prefsCheckResult) {
-                    moduleActive = true
-                    detectionMethod = "prefs_db"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via prefs database")
-                }
-            }
-            
-            // Method 5: Check if module APK is in LSPosed's modules directory
-            if (!moduleActive && lsposedExists) {
-                val moduleDirCheck = checkModulesDirectory(packageName)
-                if (moduleDirCheck) {
-                    moduleActive = true
-                    detectionMethod = "modules_dir"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via modules directory")
                 }
             }
             
@@ -385,8 +355,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("xposedActive", false)
             result.putBoolean("lsposedInstalled", false)
             result.putBoolean("moduleActive", false)
-            result.putString("detectionMethod", "error")
-            result.putString("error", e.message)
             promise.resolve(result)
         }
     }
@@ -585,7 +553,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val result = Arguments.createMap()
             result.putString("logs", "")
             result.putBoolean("success", false)
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -609,7 +577,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val result = Arguments.createMap()
             result.putString("logs", "")
             result.putBoolean("success", false)
-            result.putString("error", e.message)
+            putErrorMessage(result, e)
             promise.resolve(result)
         }
     }
@@ -624,6 +592,130 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             promise.resolve(true)
         } catch (e: Exception) {
             promise.resolve(false)
+        }
+    }
+
+    /**
+     * Get detailed LSPosed diagnostic information for troubleshooting
+     */
+    @ReactMethod
+    fun getLSPosedDiagnostics(promise: Promise) {
+        try {
+            val result = Arguments.createMap()
+            val packageName = sanitizePackageName(reactApplicationContext.packageName)
+            val escapedPackageName = escapeShellArg(packageName)
+            
+            // Check which LSPosed variant is installed
+            val variantCheckScript = """
+                if [ -d /data/adb/lspd ]; then echo "standard"; fi
+                if [ -d /data/adb/modules/zygisk_lsposed ]; then echo "zygisk"; fi
+                if [ -d /data/adb/modules/riru_lsposed ]; then echo "riru"; fi
+                if [ -d /data/adb/modules/lsposed ]; then echo "generic"; fi
+            """.trimIndent()
+            val variants = executeRootCommand(variantCheckScript)
+            result.putString("lsposedVariants", variants.trim())
+            
+            // Check if module is in modules list
+            val moduleListCheck = executeRootCommand(
+                "grep $escapedPackageName /data/adb/lspd/config/modules.list 2>/dev/null || " +
+                "grep $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null || " +
+                "grep $escapedPackageName /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null || " +
+                "echo 'not_in_list'"
+            )
+            result.putString("moduleListStatus", moduleListCheck.trim())
+            
+            // Check scope configuration
+            val scopeCheck = executeRootCommand(
+                "ls -la /data/adb/lspd/config/scope/$escapedPackageName 2>/dev/null || " +
+                "ls -la /data/adb/modules/zygisk_lsposed/config/scope/$escapedPackageName 2>/dev/null || " +
+                "ls -la /data/adb/modules/riru_lsposed/config/scope/$escapedPackageName 2>/dev/null || " +
+                "echo 'no_scope_dir'"
+            )
+            result.putString("scopeConfiguration", scopeCheck.trim())
+            
+            // Check marker file
+            val markerFile = File("/data/local/tmp/virtucam_module_active")
+            if (markerFile.exists()) {
+                val age = (System.currentTimeMillis() - markerFile.lastModified()) / 1000
+                result.putString("markerFileAge", "${age}s ago")
+                result.putBoolean("markerFileExists", true)
+            } else {
+                result.putString("markerFileAge", "not found")
+                result.putBoolean("markerFileExists", false)
+            }
+            
+            // Check xposed_init in APK
+            val xposedInitCheck = executeCommand("unzip -l ${escapeShellArg(reactApplicationContext.applicationInfo.sourceDir)} | grep xposed_init")
+            result.putBoolean("hasXposedInit", xposedInitCheck.contains("xposed_init"))
+            
+            promise.resolve(result)
+        } catch (e: Exception) {
+            val result = Arguments.createMap()
+            putErrorMessage(result, e)
+            promise.resolve(result)
+        }
+    }
+
+    /**
+     * Detect which manager app to use for LSPosed configuration
+     * Returns package name of the appropriate manager app
+     */
+    @ReactMethod
+    fun detectLSPosedManager(promise: Promise) {
+        try {
+            val result = Arguments.createMap()
+            val pm = reactApplicationContext.packageManager
+            
+            // List of possible LSPosed Manager package names
+            val lsposedPackages = listOf(
+                "org.lsposed.manager",
+                "io.github.lsposed.manager",
+                "org.lsposed.manager.parasitic"
+            )
+            
+            // Check for LSPosed Manager (standalone)
+            for (pkg in lsposedPackages) {
+                try {
+                    pm.getPackageInfo(pkg, 0)
+                    result.putString("managerType", "lsposed")
+                    result.putString("packageName", pkg)
+                    result.putBoolean("isParasitic", false)
+                    promise.resolve(result)
+                    return
+                } catch (e: Exception) {
+                    // Continue checking
+                }
+            }
+            
+            // Check for KernelSU (which may host parasitic LSPosed)
+            val kernelSUPackages = listOf(
+                "me.weishu.kernelsu",
+                "com.topjohnwu.magisk"  // Magisk can also host LSPosed
+            )
+            
+            for (pkg in kernelSUPackages) {
+                try {
+                    pm.getPackageInfo(pkg, 0)
+                    result.putString("managerType", if (pkg.contains("kernelsu")) "kernelsu" else "magisk")
+                    result.putString("packageName", pkg)
+                    result.putBoolean("isParasitic", true)
+                    promise.resolve(result)
+                    return
+                } catch (e: Exception) {
+                    // Continue checking
+                }
+            }
+            
+            // No manager found - LSPosed might be parasitic without a known host
+            result.putString("managerType", "unknown")
+            result.putNull("packageName")
+            result.putBoolean("isParasitic", true)
+            promise.resolve(result)
+        } catch (e: Exception) {
+            val result = Arguments.createMap()
+            result.putString("managerType", "unknown")
+            putErrorMessage(result, e)
+            promise.resolve(result)
         }
     }
 
@@ -674,5 +766,17 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private fun escapeShellArg(arg: String): String {
         // Replace single quotes with '\'' (end quote, escaped quote, start quote)
         return "'${arg.replace("'", "'\\''")}'"
+    }
+    
+    /**
+     * Safely put error message in result map, handling null messages
+     */
+    private fun putErrorMessage(result: WritableMap, error: Exception) {
+        val message = error.message
+        if (message != null) {
+            result.putString("error", message)
+        } else {
+            result.putString("error", "Unknown error")
+        }
     }
 }
