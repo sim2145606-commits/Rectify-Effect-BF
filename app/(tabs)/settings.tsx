@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
   Modal,
   Linking,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import Animated, {
@@ -32,6 +34,11 @@ import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
 import { launchTargetApp } from '@/services/AppLauncher';
+import {
+  runDiagnostics,
+  type DiagnosticsReport,
+  type DiagnosticCheckResult,
+} from '@/services/DiagnosticsService';
 import { writeBridgeConfig } from '@/services/ConfigBridge';
 import {
   requestCameraPermission,
@@ -233,8 +240,13 @@ export default function SettingsScreen() {
     DEFAULT_APPS
   );
 
-  const { status: systemStatus } = useSystemStatus();
+  const { status: systemStatus, refresh: refreshSystemStatus } = useSystemStatus();
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Diagnostics state
+  const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
+  const [diagnosticsReport, setDiagnosticsReport] = useState<DiagnosticsReport | null>(null);
+  const [diagnosticsChecks, setDiagnosticsChecks] = useState<DiagnosticCheckResult[]>([]);
   const [showAddApp, setShowAddApp] = useState(false);
   const [newAppName, setNewAppName] = useState('');
   const [newAppPackage, setNewAppPackage] = useState('');
@@ -445,7 +457,7 @@ export default function SettingsScreen() {
               'Root Access',
               'Root must be granted via Magisk or KernelSU. Check the system setup wizard for guidance.'
             );
-            break;
+            return; // Don't refresh for root — it's just an alert
           case 'overlay':
             await requestOverlayPermission();
             break;
@@ -453,13 +465,28 @@ export default function SettingsScreen() {
             await requestAllFilesAccess();
             break;
         }
+        // Wait a brief moment for the OS to register the permission change, then re-check
+        setTimeout(() => {
+          refreshSystemStatus();
+        }, 500);
         success();
       } catch {
         warning();
       }
     },
-    [lightImpact, success, warning]
+    [lightImpact, success, warning, refreshSystemStatus]
   );
+
+  // Add AppState listener to refresh permissions when returning from system settings
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        refreshSystemStatus();
+      }
+    };
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [refreshSystemStatus]);
 
   const switchTargetMode = useCallback(
     (mode: TargetMode) => {
@@ -474,6 +501,34 @@ export default function SettingsScreen() {
     },
     [mediumImpact, setTargetMode, targetApps]
   );
+
+  const handleRunDiagnostics = useCallback(async () => {
+    setIsRunningDiagnostics(true);
+    setDiagnosticsChecks([]);
+    setDiagnosticsReport(null);
+    mediumImpact();
+
+    try {
+      const report = await runDiagnostics((check, index) => {
+        setDiagnosticsChecks(prev => {
+          const updated = [...prev];
+          updated[index] = check;
+          return updated;
+        });
+      });
+      setDiagnosticsReport(report);
+      if (report.failCount === 0) {
+        success();
+      } else {
+        warning();
+      }
+    } catch {
+      warning();
+      Alert.alert('Diagnostics Error', 'Failed to run diagnostics.');
+    } finally {
+      setIsRunningDiagnostics(false);
+    }
+  }, [mediumImpact, success, warning]);
 
   const handleAppTap = useCallback(
     (app: TargetApp) => {
@@ -764,7 +819,7 @@ export default function SettingsScreen() {
               icon="camera-outline"
               label="Camera Access"
               description="Required to intercept camera feed"
-              granted={systemStatus.storagePermission.status === 'ok'}
+              granted={systemStatus.cameraPermission.status === 'ok'}
               onRequest={() => handleRequestPermission('camera')}
             />
             <PermissionRow
@@ -792,7 +847,7 @@ export default function SettingsScreen() {
               icon="layers-outline"
               label="Overlay Permission"
               description="Display over other apps for status"
-              granted={systemStatus.moduleActive.status === 'ok'}
+              granted={systemStatus.overlayPermission.status === 'ok'}
               onRequest={() => handleRequestPermission('overlay')}
               last
             />
@@ -881,6 +936,96 @@ export default function SettingsScreen() {
             <Text style={styles.sectionTitle}>Diagnostics</Text>
           </View>
           <Card>
+            {/* Run Diagnostics Button */}
+            <Pressable
+              onPress={handleRunDiagnostics}
+              disabled={isRunningDiagnostics}
+              style={[styles.aboutRow, diagnosticsReport ? {} : { borderBottomWidth: 0 }]}
+            >
+              <View style={styles.logsButtonContent}>
+                {isRunningDiagnostics ? (
+                  <ActivityIndicator size={14} color={Colors.accent} />
+                ) : (
+                  <Ionicons name="pulse" size={16} color={Colors.accent} />
+                )}
+                <Text style={[styles.aboutLabel, { color: Colors.accent }]}>
+                  {isRunningDiagnostics ? 'Running Diagnostics...' : 'Run Diagnostics'}
+                </Text>
+              </View>
+              {!isRunningDiagnostics && (
+                <Ionicons name="play-circle" size={18} color={Colors.accent} />
+              )}
+            </Pressable>
+
+            {/* Diagnostics Results */}
+            {diagnosticsChecks.length > 0 &&
+              diagnosticsChecks.map((check, i) => {
+                const color =
+                  check.status === 'pass'
+                    ? Colors.success
+                    : check.status === 'fail'
+                      ? Colors.danger
+                      : Colors.warningAmber;
+                const icon =
+                  check.status === 'pass'
+                    ? 'checkmark-circle'
+                    : check.status === 'fail'
+                      ? 'close-circle'
+                      : 'alert-circle';
+                return (
+                  <View
+                    key={i}
+                    style={[
+                      styles.permissionRow,
+                      i < diagnosticsChecks.length - 1 && {
+                        borderBottomWidth: 1,
+                        borderBottomColor: Colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.permissionIcon, { backgroundColor: color + '20' }]}>
+                      <Ionicons name={icon} size={18} color={color} />
+                    </View>
+                    <View style={styles.permissionInfo}>
+                      <Text style={styles.permissionLabel}>{check.name}</Text>
+                      <Text style={styles.permissionDesc}>{check.detail}</Text>
+                    </View>
+                    <View style={[styles.permissionBadge, { backgroundColor: color + '20' }]}>
+                      <Text style={[styles.permissionBadgeText, { color }]}>
+                        {check.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+
+            {/* Summary Bar */}
+            {diagnosticsReport && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-around',
+                  paddingVertical: Spacing.md,
+                  borderTopWidth: 1,
+                  borderTopColor: Colors.border,
+                  marginTop: Spacing.sm,
+                }}
+              >
+                <Text style={{ color: Colors.success, fontSize: FontSize.sm, fontWeight: '700' }}>
+                  ✓ {diagnosticsReport.passCount} Passed
+                </Text>
+                <Text style={{ color: Colors.danger, fontSize: FontSize.sm, fontWeight: '700' }}>
+                  ✗ {diagnosticsReport.failCount} Failed
+                </Text>
+                <Text
+                  style={{ color: Colors.warningAmber, fontSize: FontSize.sm, fontWeight: '700' }}
+                >
+                  ⚠ {diagnosticsReport.warnCount} Warnings
+                </Text>
+              </View>
+            )}
+
+            {/* View Logs Link */}
             <Pressable
               onPress={() => router.push('/logs' as Href)}
               style={[styles.aboutRow, { borderBottomWidth: 0 }]}
