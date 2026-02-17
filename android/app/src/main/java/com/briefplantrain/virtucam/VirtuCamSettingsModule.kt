@@ -7,8 +7,10 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import com.facebook.react.bridge.*
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
+import java.io.FileWriter
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
@@ -81,16 +83,92 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             editor.apply()
             
-            // Make file world-readable for Xposed
+            // ISSUE 1 FIX: Dual-strategy approach for Android 9+ compatibility
+            // Strategy A: Use root to chmod the SharedPreferences file and directory
             try {
-                val prefsFile = File(reactApplicationContext.applicationInfo.dataDir, 
+                val prefsFile = File(reactApplicationContext.applicationInfo.dataDir,
                     "shared_prefs/virtucam_config.xml")
+                val prefsDir = File(reactApplicationContext.applicationInfo.dataDir,
+                    "shared_prefs")
+                
                 if (prefsFile.exists()) {
+                    // Try non-root first (will work on some devices)
                     prefsFile.setReadable(true, false)
+                    
+                    // Try root chmod for better compatibility
+                    try {
+                        val escapedPrefsDir = escapeShellArg(prefsDir.absolutePath)
+                        val escapedPrefsFile = escapeShellArg(prefsFile.absolutePath)
+                        
+                        // Chmod directory to 755 and file to 644
+                        val chmodCommand = "chmod 755 $escapedPrefsDir && chmod 644 $escapedPrefsFile"
+                        executeRootCommand(chmodCommand)
+                        
+                        android.util.Log.d("VirtuCamSettings", "Root chmod applied successfully")
+                    } catch (e: Exception) {
+                        android.util.Log.w("VirtuCamSettings", "Root chmod failed (non-fatal): ${e.message}")
+                    }
                 }
             } catch (e: Exception) {
-                // Non-fatal, just log
                 android.util.Log.w("VirtuCamSettings", "Could not set prefs file readable: ${e.message}")
+            }
+            
+            // Strategy B: Write fallback JSON config to world-readable location
+            try {
+                val fallbackConfig = JSONObject()
+                if (config.hasKey("enabled")) {
+                    fallbackConfig.put("enabled", config.getBoolean("enabled"))
+                }
+                if (config.hasKey("mediaSourcePath")) {
+                    fallbackConfig.put("mediaSourcePath", config.getString("mediaSourcePath"))
+                }
+                if (config.hasKey("cameraTarget")) {
+                    fallbackConfig.put("cameraTarget", config.getString("cameraTarget"))
+                }
+                if (config.hasKey("mirrored")) {
+                    fallbackConfig.put("mirrored", config.getBoolean("mirrored"))
+                }
+                if (config.hasKey("rotation")) {
+                    fallbackConfig.put("rotation", config.getInt("rotation"))
+                }
+                if (config.hasKey("scaleX")) {
+                    fallbackConfig.put("scaleX", config.getDouble("scaleX"))
+                }
+                if (config.hasKey("scaleY")) {
+                    fallbackConfig.put("scaleY", config.getDouble("scaleY"))
+                }
+                if (config.hasKey("offsetX")) {
+                    fallbackConfig.put("offsetX", config.getDouble("offsetX"))
+                }
+                if (config.hasKey("offsetY")) {
+                    fallbackConfig.put("offsetY", config.getDouble("offsetY"))
+                }
+                if (config.hasKey("scaleMode")) {
+                    fallbackConfig.put("scaleMode", config.getString("scaleMode"))
+                }
+                if (config.hasKey("targetMode")) {
+                    fallbackConfig.put("targetMode", config.getString("targetMode"))
+                }
+                if (config.hasKey("targetPackages")) {
+                    val packages = config.getArray("targetPackages")
+                    val packageList = mutableListOf<String>()
+                    if (packages != null) {
+                        for (i in 0 until packages.size()) {
+                            packages.getString(i)?.let { packageList.add(it) }
+                        }
+                    }
+                    fallbackConfig.put("targetPackages", packageList.joinToString(","))
+                }
+                
+                val fallbackFile = File("/data/local/tmp/virtucam_config.json")
+                FileWriter(fallbackFile).use { writer ->
+                    writer.write(fallbackConfig.toString())
+                }
+                fallbackFile.setReadable(true, false)
+                
+                android.util.Log.d("VirtuCamSettings", "Fallback JSON config written successfully")
+            } catch (e: Exception) {
+                android.util.Log.w("VirtuCamSettings", "Could not write fallback config: ${e.message}")
             }
             
             promise.resolve(true)

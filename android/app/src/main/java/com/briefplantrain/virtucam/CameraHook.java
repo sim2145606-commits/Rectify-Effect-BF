@@ -21,8 +21,12 @@ import android.os.HandlerThread;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileReader;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
@@ -58,6 +62,32 @@ public class CameraHook implements IXposedHookLoadPackage {
     private static final String PACKAGE_NAME = "com.briefplantrain.virtucam";
     private static final String PREFS_NAME = "virtucam_config";
     private static final String TAG = "VirtuCam";
+
+    // ISSUE 4 FIX: Pre-computed YUV conversion lookup tables for performance
+    private static final int[] Y_R_TABLE = new int[256];
+    private static final int[] Y_G_TABLE = new int[256];
+    private static final int[] Y_B_TABLE = new int[256];
+    private static final int[] U_R_TABLE = new int[256];
+    private static final int[] U_G_TABLE = new int[256];
+    private static final int[] U_B_TABLE = new int[256];
+    private static final int[] V_R_TABLE = new int[256];
+    private static final int[] V_G_TABLE = new int[256];
+    private static final int[] V_B_TABLE = new int[256];
+    
+    static {
+        // Pre-compute RGB to YUV conversion tables
+        for (int i = 0; i < 256; i++) {
+            Y_R_TABLE[i] = 66 * i;
+            Y_G_TABLE[i] = 129 * i;
+            Y_B_TABLE[i] = 25 * i;
+            U_R_TABLE[i] = -38 * i;
+            U_G_TABLE[i] = -74 * i;
+            U_B_TABLE[i] = 112 * i;
+            V_R_TABLE[i] = 112 * i;
+            V_G_TABLE[i] = -94 * i;
+            V_B_TABLE[i] = -18 * i;
+        }
+    }
 
     // --- Configuration fields ---
     private volatile boolean enabled = false;
@@ -129,6 +159,10 @@ public class CameraHook implements IXposedHookLoadPackage {
 
     // Track which concrete onOpened classes we've already hooked
     private final Set<Class<?>> hookedOnOpenedClasses = Collections.newSetFromMap(new ConcurrentHashMap<Class<?>, Boolean>());
+    
+    // ISSUE 5 FIX: Track cameraId and cameraManager for each StateCallback instance
+    private final Map<Integer, String> callbackToCameraId = new ConcurrentHashMap<>();
+    private final Map<Integer, Object> callbackToCameraManager = new ConcurrentHashMap<>();
 
     // Helper class to track surface replacements
     private static class SurfaceMapping {
@@ -141,6 +175,7 @@ public class CameraHook implements IXposedHookLoadPackage {
         final int format;
         final String detectedType;
         volatile boolean closed = false;
+        boolean useCanvasForwarding = false; // ISSUE 3 FIX: Flag for Canvas-based forwarding
 
         SurfaceMapping(Surface original, Surface replacement, ImageReader reader,
                        int w, int h, int fmt, String type) {
@@ -222,42 +257,112 @@ public class CameraHook implements IXposedHookLoadPackage {
 
     private void loadPreferences() {
         try {
-            XSharedPreferences prefs = new XSharedPreferences(PACKAGE_NAME, PREFS_NAME);
-            if (Build.VERSION.SDK_INT < 24) {
-                prefs.makeWorldReadable();
-            }
-            prefs.reload();
-
-            enabled = prefs.getBoolean("enabled", false);
-            String newMediaPath = prefs.getString("mediaSourcePath", null);
-            cameraTarget = prefs.getString("cameraTarget", "front");
-            mirrored = prefs.getBoolean("mirrored", false);
-            rotation = prefs.getInt("rotation", 0);
-            scaleX = prefs.getFloat("scaleX", 1.0f);
-            scaleY = prefs.getFloat("scaleY", 1.0f);
-            offsetX = prefs.getFloat("offsetX", 0.0f);
-            offsetY = prefs.getFloat("offsetY", 0.0f);
-            targetMode = prefs.getString("targetMode", "whitelist");
-
-            String packagesStr = prefs.getString("targetPackages", "");
-            if (!packagesStr.isEmpty()) {
-                targetPackages = new HashSet<>(Arrays.asList(packagesStr.split(",")));
-            } else {
-                targetPackages = new HashSet<>();
-            }
-
-            // Invalidate frame cache if media source changed
-            if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
-                synchronized (frameLock) {
-                    if (cachedFrame != null && cachedFrame != currentVideoFrame) {
-                        cachedFrame.recycle();
-                    }
-                    cachedFrame = null;
-                    cachedMediaPath = null;
+            // ISSUE 1 FIX: Try XSharedPreferences first, then fallback to JSON
+            boolean configLoaded = false;
+            
+            // Strategy A: Try XSharedPreferences (works on some devices with LSPosed patches)
+            try {
+                XSharedPreferences prefs = new XSharedPreferences(PACKAGE_NAME, PREFS_NAME);
+                if (Build.VERSION.SDK_INT < 24) {
+                    prefs.makeWorldReadable();
                 }
-                stopVideoDecoder();
+                prefs.reload();
+
+                enabled = prefs.getBoolean("enabled", false);
+                
+                // If enabled is true, we successfully read the config
+                if (enabled || prefs.getFile().canRead()) {
+                    String newMediaPath = prefs.getString("mediaSourcePath", null);
+                    cameraTarget = prefs.getString("cameraTarget", "front");
+                    mirrored = prefs.getBoolean("mirrored", false);
+                    rotation = prefs.getInt("rotation", 0);
+                    scaleX = prefs.getFloat("scaleX", 1.0f);
+                    scaleY = prefs.getFloat("scaleY", 1.0f);
+                    offsetX = prefs.getFloat("offsetX", 0.0f);
+                    offsetY = prefs.getFloat("offsetY", 0.0f);
+                    targetMode = prefs.getString("targetMode", "whitelist");
+
+                    String packagesStr = prefs.getString("targetPackages", "");
+                    if (!packagesStr.isEmpty()) {
+                        targetPackages = new HashSet<>(Arrays.asList(packagesStr.split(",")));
+                    } else {
+                        targetPackages = new HashSet<>();
+                    }
+
+                    // Invalidate frame cache if media source changed
+                    if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
+                        synchronized (frameLock) {
+                            if (cachedFrame != null && cachedFrame != currentVideoFrame) {
+                                cachedFrame.recycle();
+                            }
+                            cachedFrame = null;
+                            cachedMediaPath = null;
+                        }
+                        stopVideoDecoder();
+                    }
+                    mediaSourcePath = newMediaPath;
+                    configLoaded = true;
+                    log("Config loaded via XSharedPreferences");
+                }
+            } catch (Exception e) {
+                log("XSharedPreferences failed: " + e.getMessage());
             }
-            mediaSourcePath = newMediaPath;
+            
+            // Strategy B: Fallback to JSON config if XSharedPreferences failed
+            if (!configLoaded || !enabled) {
+                try {
+                    File fallbackFile = new File("/data/local/tmp/virtucam_config.json");
+                    if (fallbackFile.exists() && fallbackFile.canRead()) {
+                        StringBuilder jsonBuilder = new StringBuilder();
+                        BufferedReader reader = new BufferedReader(new FileReader(fallbackFile));
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            jsonBuilder.append(line);
+                        }
+                        reader.close();
+                        
+                        JSONObject json = new JSONObject(jsonBuilder.toString());
+                        
+                        enabled = json.optBoolean("enabled", false);
+                        String newMediaPath = json.optString("mediaSourcePath", null);
+                        if ("null".equals(newMediaPath)) newMediaPath = null;
+                        
+                        cameraTarget = json.optString("cameraTarget", "front");
+                        mirrored = json.optBoolean("mirrored", false);
+                        rotation = json.optInt("rotation", 0);
+                        scaleX = (float) json.optDouble("scaleX", 1.0);
+                        scaleY = (float) json.optDouble("scaleY", 1.0);
+                        offsetX = (float) json.optDouble("offsetX", 0.0);
+                        offsetY = (float) json.optDouble("offsetY", 0.0);
+                        targetMode = json.optString("targetMode", "whitelist");
+                        
+                        String packagesStr = json.optString("targetPackages", "");
+                        if (!packagesStr.isEmpty()) {
+                            targetPackages = new HashSet<>(Arrays.asList(packagesStr.split(",")));
+                        } else {
+                            targetPackages = new HashSet<>();
+                        }
+                        
+                        // Invalidate frame cache if media source changed
+                        if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
+                            synchronized (frameLock) {
+                                if (cachedFrame != null && cachedFrame != currentVideoFrame) {
+                                    cachedFrame.recycle();
+                                }
+                                cachedFrame = null;
+                                cachedMediaPath = null;
+                            }
+                            stopVideoDecoder();
+                        }
+                        mediaSourcePath = newMediaPath;
+                        configLoaded = true;
+                        log("Config loaded via JSON fallback (enabled=" + enabled + ")");
+                    }
+                } catch (Exception e) {
+                    log("JSON fallback failed: " + e.getMessage());
+                }
+            }
+            
             lastConfigReload = System.currentTimeMillis();
 
         } catch (Exception e) {
@@ -427,14 +532,19 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Hook onOpened on a per-class basis (not per-instance) to track camera device targeting.
-     * Only hooks each concrete class once to avoid stacking.
+     * ISSUE 5 FIX: Hook onOpened on a per-class basis to track camera device targeting.
+     * Fixed closure bug by storing cameraId/cameraManager per callback instance.
      */
     private void hookOnOpenedForTracking(Object stateCallback, final Object cameraManager,
                                          final String cameraId, final ClassLoader classLoader) {
+        // ISSUE 5 FIX: Store the cameraId and cameraManager for this callback instance
+        int callbackKey = identityKey(stateCallback);
+        callbackToCameraId.put(callbackKey, cameraId);
+        callbackToCameraManager.put(callbackKey, cameraManager);
+        
         Class<?> callbackClass = stateCallback.getClass();
         if (hookedOnOpenedClasses.contains(callbackClass)) {
-            return; // Already hooked this class
+            return; // Already hooked this class, but we stored the mapping above
         }
 
         try {
@@ -452,8 +562,36 @@ public class CameraHook implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             Object cameraDevice = param.args[0];
-                            boolean shouldHook = shouldHookCamera(cameraManager, cameraId, classLoader);
-                            cameraDeviceHookStatus.put(identityKey(cameraDevice), shouldHook);
+                            
+                            // ISSUE 5 FIX: Get the actual cameraId from the CameraDevice object
+                            // instead of using the captured closure variable
+                            String actualCameraId = null;
+                            Object actualCameraManager = null;
+                            
+                            try {
+                                // Try to get camera ID from the device
+                                actualCameraId = (String) XposedHelpers.callMethod(cameraDevice, "getId");
+                            } catch (Exception e) {
+                                // Fallback: look up by callback instance (param.thisObject is the callback)
+                                int thisCallbackKey = identityKey(param.thisObject);
+                                actualCameraId = callbackToCameraId.get(thisCallbackKey);
+                                actualCameraManager = callbackToCameraManager.get(thisCallbackKey);
+                            }
+                            
+                            // If we still don't have cameraManager, we can't determine shouldHook
+                            if (actualCameraManager == null) {
+                                actualCameraManager = callbackToCameraManager.get(identityKey(param.thisObject));
+                            }
+                            
+                            if (actualCameraId != null && actualCameraManager != null) {
+                                boolean shouldHook = shouldHookCamera(actualCameraManager, actualCameraId, classLoader);
+                                cameraDeviceHookStatus.put(identityKey(cameraDevice), shouldHook);
+                                log("Camera opened: id=" + actualCameraId + " shouldHook=" + shouldHook);
+                            } else {
+                                // Default to hooking if we can't determine
+                                cameraDeviceHookStatus.put(identityKey(cameraDevice), true);
+                                log("Camera opened: unknown id, defaulting to hook=true");
+                            }
                         }
                     });
 
@@ -753,10 +891,133 @@ public class CameraHook implements IXposedHookLoadPackage {
                         }
                 );
             }
+            
+            // ISSUE 2 FIX: Hook Camera.takePicture() to replace JPEG data
+            hookCamera1TakePicture(lpparam);
 
             log("Camera1 API hooks installed");
         } catch (Exception e) {
             log("Failed to hook Camera1 API: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * ISSUE 2 FIX: Hook Camera1 takePicture() to inject virtual frames into captured photos.
+     * Hooks all overloads of takePicture().
+     */
+    private void hookCamera1TakePicture(final LoadPackageParam lpparam) {
+        try {
+            // Hook takePicture(ShutterCallback shutter, PictureCallback raw, PictureCallback jpeg)
+            XposedHelpers.findAndHookMethod(
+                    "android.hardware.Camera", lpparam.classLoader,
+                    "takePicture",
+                    "android.hardware.Camera$ShutterCallback",
+                    "android.hardware.Camera$PictureCallback",
+                    "android.hardware.Camera$PictureCallback",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (!isActive()) return;
+                            
+                            // Wrap the JPEG callback (3rd parameter, index 2)
+                            Object jpegCallback = param.args[2];
+                            if (jpegCallback != null) {
+                                Camera camera = (Camera) param.thisObject;
+                                param.args[2] = createWrappedPictureCallback(
+                                        jpegCallback, camera, lpparam.classLoader);
+                            }
+                        }
+                    }
+            );
+            
+            // Hook takePicture(ShutterCallback shutter, PictureCallback raw,
+            //                  PictureCallback postview, PictureCallback jpeg)
+            XposedHelpers.findAndHookMethod(
+                    "android.hardware.Camera", lpparam.classLoader,
+                    "takePicture",
+                    "android.hardware.Camera$ShutterCallback",
+                    "android.hardware.Camera$PictureCallback",
+                    "android.hardware.Camera$PictureCallback",
+                    "android.hardware.Camera$PictureCallback",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (!isActive()) return;
+                            
+                            // Wrap the JPEG callback (4th parameter, index 3)
+                            Object jpegCallback = param.args[3];
+                            if (jpegCallback != null) {
+                                Camera camera = (Camera) param.thisObject;
+                                param.args[3] = createWrappedPictureCallback(
+                                        jpegCallback, camera, lpparam.classLoader);
+                            }
+                        }
+                    }
+            );
+            
+            log("Camera1 takePicture hooks installed");
+        } catch (Exception e) {
+            log("Failed to hook Camera1 takePicture: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Create a wrapped PictureCallback that replaces JPEG data with virtual frame.
+     */
+    private Object createWrappedPictureCallback(
+            final Object originalCallback,
+            final Camera camera,
+            final ClassLoader classLoader) {
+        try {
+            Class<?> callbackClass = XposedHelpers.findClass(
+                    "android.hardware.Camera$PictureCallback", classLoader);
+            
+            return Proxy.newProxyInstance(
+                    classLoader,
+                    new Class<?>[]{callbackClass},
+                    new InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                            if ("onPictureTaken".equals(method.getName())
+                                    && isActive() && args.length >= 2) {
+                                try {
+                                    reloadPreferencesIfNeeded();
+                                    
+                                    // Get picture size from camera parameters
+                                    Camera.Parameters params = camera.getParameters();
+                                    Camera.Size pictureSize = params.getPictureSize();
+                                    
+                                    if (pictureSize != null) {
+                                        // Generate virtual frame at picture resolution
+                                        Bitmap frame = getProcessedFrame(
+                                                pictureSize.width, pictureSize.height);
+                                        
+                                        if (frame != null) {
+                                            // Compress to JPEG
+                                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                            frame.compress(Bitmap.CompressFormat.JPEG, 95, baos);
+                                            byte[] jpegData = baos.toByteArray();
+                                            
+                                            // Replace the data argument
+                                            args[0] = jpegData;
+                                            
+                                            recycleTempFrame(frame);
+                                            log("Replaced Camera1 JPEG photo: " +
+                                                    pictureSize.width + "x" + pictureSize.height +
+                                                    " (" + jpegData.length + " bytes)");
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    log("Camera1 takePicture injection failed: " + e.getMessage());
+                                }
+                            }
+                            return method.invoke(originalCallback, args);
+                        }
+                    }
+            );
+        } catch (Exception e) {
+            log("Failed to create wrapped PictureCallback: " + e.getMessage());
+            return originalCallback;
         }
     }
 
@@ -1123,7 +1384,8 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Decode YUV420 (semi-planar NV12/NV21 or planar) to ARGB.
+     * ISSUE 4 FIX: Optimized YUV420 to ARGB decoding using integer math.
+     * Replaces float multiplication with integer operations for better performance.
      */
     private static void decodeYUV420ToARGB(int[] argb, byte[] yuv,
                                             int stride, int sliceHeight,
@@ -1148,9 +1410,11 @@ public class CameraHook implements IXposedHookLoadPackage {
                     V = 0;
                 }
 
-                int R = (int) (1.164f * Y + 1.596f * V);
-                int G = (int) (1.164f * Y - 0.813f * V - 0.391f * U);
-                int B = (int) (1.164f * Y + 2.018f * U);
+                // Use integer math: multiply by 1024 and shift right by 10
+                // 1.164 ≈ 1192/1024, 1.596 ≈ 1634/1024, 0.813 ≈ 833/1024, 0.391 ≈ 400/1024, 2.018 ≈ 2066/1024
+                int R = (1192 * Y + 1634 * V) >> 10;
+                int G = (1192 * Y - 833 * V - 400 * U) >> 10;
+                int B = (1192 * Y + 2066 * U) >> 10;
 
                 R = Math.max(0, Math.min(255, R));
                 G = Math.max(0, Math.min(255, G));
@@ -1265,6 +1529,10 @@ public class CameraHook implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * ISSUE 4 FIX: Optimized NV21 encoding using pre-computed lookup tables.
+     * Eliminates per-pixel multiplication, reducing CPU load significantly.
+     */
     private static void encodeNV21(byte[] nv21, int[] argb, int width, int height) {
         final int frameSize = width * height;
         int yIndex = 0;
@@ -1278,12 +1546,13 @@ public class CameraHook implements IXposedHookLoadPackage {
                 int G = (pixel >> 8) & 0xFF;
                 int B = pixel & 0xFF;
 
-                int Y = ((66 * R + 129 * G + 25 * B + 128) >> 8) + 16;
+                // Use lookup tables instead of multiplication
+                int Y = ((Y_R_TABLE[R] + Y_G_TABLE[G] + Y_B_TABLE[B] + 128) >> 8) + 16;
                 nv21[yIndex++] = (byte) Math.max(0, Math.min(255, Y));
 
                 if ((j & 1) == 0 && (i & 1) == 0 && uvIndex < nv21.length - 1) {
-                    int V = ((112 * R - 94 * G - 18 * B + 128) >> 8) + 128;
-                    int U = ((-38 * R - 74 * G + 112 * B + 128) >> 8) + 128;
+                    int V = ((V_R_TABLE[R] + V_G_TABLE[G] + V_B_TABLE[B] + 128) >> 8) + 128;
+                    int U = ((U_R_TABLE[R] + U_G_TABLE[G] + U_B_TABLE[B] + 128) >> 8) + 128;
                     nv21[uvIndex++] = (byte) Math.max(0, Math.min(255, V));
                     nv21[uvIndex++] = (byte) Math.max(0, Math.min(255, U));
                 }
@@ -1618,14 +1887,20 @@ public class CameraHook implements IXposedHookLoadPackage {
             int height = dims[1] > 0 ? dims[1] : 1080;
 
             int format = ImageFormat.YUV_420_888;
+            boolean useCanvasForwarding = false;
+            
             if (surfaceType.startsWith("ImageReader:")) {
                 try {
                     int detectedFormat = Integer.parseInt(surfaceType.substring(12));
                     if (detectedFormat == ImageFormat.JPEG) {
                         format = ImageFormat.JPEG;
                     } else if (detectedFormat == ImageFormat.PRIVATE) {
-                        // Can't write to PRIVATE format — pass through
-                        return null;
+                        // ISSUE 3 FIX: Handle PRIVATE format with Canvas-based forwarding
+                        // PRIVATE format surfaces are common for camera preview (SurfaceTexture-backed)
+                        // We can't write to them via ImageWriter, but we CAN use lockCanvas()
+                        format = ImageFormat.YUV_420_888; // Use YUV for our replacement surface
+                        useCanvasForwarding = true;
+                        log("PRIVATE format detected - using Canvas forwarding strategy");
                     }
                 } catch (NumberFormatException e) {
                     log("Invalid format in surface type: " + surfaceType);
@@ -1633,6 +1908,8 @@ public class CameraHook implements IXposedHookLoadPackage {
             } else if ("SurfaceTexture".equals(surfaceType)) {
                 // SurfaceTexture-backed surfaces use YUV for ImageWriter injection
                 format = ImageFormat.YUV_420_888;
+                // Try Canvas forwarding for SurfaceTexture as well (more reliable)
+                useCanvasForwarding = true;
             }
 
             // maxImages=4 to avoid buffer exhaustion
@@ -1642,12 +1919,14 @@ public class CameraHook implements IXposedHookLoadPackage {
             SurfaceMapping mapping = new SurfaceMapping(
                     originalSurface, replacementSurface, reader,
                     width, height, format, surfaceType);
+            mapping.useCanvasForwarding = useCanvasForwarding;
             surfaceMappings.put(replacementSurface, mapping);
 
             setupImageReaderForForwarding(reader, mapping);
 
             log("Replaced surface: " + width + "x" + height
-                    + " type=" + surfaceType + " format=" + format);
+                    + " type=" + surfaceType + " format=" + format
+                    + " canvasMode=" + useCanvasForwarding);
             return mapping;
         } catch (Exception e) {
             log("Failed to create surface mapping: " + e.getMessage());
@@ -1712,11 +1991,18 @@ public class CameraHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Forward virtual frame to the original surface via ImageWriter.
+     * Forward virtual frame to the original surface via ImageWriter or Canvas.
+     * ISSUE 3 FIX: Use Canvas forwarding for PRIVATE format surfaces.
      */
     private void forwardVirtualFrame(SurfaceMapping mapping) {
         if (mapping.closed || mapping.originalSurface == null
                 || !mapping.originalSurface.isValid()) return;
+
+        // ISSUE 3 FIX: Use Canvas forwarding for PRIVATE format and SurfaceTexture
+        if (mapping.useCanvasForwarding) {
+            forwardVirtualFrameViaCanvas(mapping);
+            return;
+        }
 
         try {
             // Initialize ImageWriter lazily
@@ -1731,7 +2017,8 @@ public class CameraHook implements IXposedHookLoadPackage {
                         return;
                     }
                 } catch (Exception e) {
-                    // Canvas fallback
+                    // Canvas fallback - also set flag to avoid retrying ImageWriter
+                    mapping.useCanvasForwarding = true;
                     forwardVirtualFrameViaCanvas(mapping);
                     return;
                 }
