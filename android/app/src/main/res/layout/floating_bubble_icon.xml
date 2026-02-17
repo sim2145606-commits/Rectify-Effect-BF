@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="56dp"
+    android:layout_height="56dp"
+    android:background="@drawable/floating_icon_bg"
+    android:elevation="8dp">
+
+    <ImageView
+        android:id="@+id/icon_camera"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="center"
+        android:src="@android:drawable/ic_menu_camera"
+        android:tint="#F5F5F7"
+        android:contentDescription="VirtuCam Floating Controls" />
+
+</FrameLayout>

@@ -747,6 +747,63 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Start the floating overlay service
+     */
+    @ReactMethod
+    fun startFloatingOverlay(promise: Promise) {
+        try {
+            // Check overlay permission first
+            val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.provider.Settings.canDrawOverlays(reactApplicationContext)
+            } else {
+                true
+            }
+            
+            if (!hasPermission) {
+                promise.reject("NO_PERMISSION", "Overlay permission not granted")
+                return
+            }
+            
+            FloatingOverlayService.start(reactApplicationContext)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("START_ERROR", "Failed to start overlay: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Stop the floating overlay service
+     */
+    @ReactMethod
+    fun stopFloatingOverlay(promise: Promise) {
+        try {
+            FloatingOverlayService.stop(reactApplicationContext)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("STOP_ERROR", "Failed to stop overlay: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Check if the floating overlay service is currently running
+     */
+    @ReactMethod
+    fun isFloatingOverlayRunning(promise: Promise) {
+        try {
+            val activityManager = reactApplicationContext.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val services = activityManager.getRunningServices(Integer.MAX_VALUE)
+            
+            val isRunning = services.any {
+                it.service.className == FloatingOverlayService::class.java.name
+            }
+            
+            promise.resolve(isRunning)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    /**
      * Get all user-installed apps on the device (for "Add App" feature)
      * Returns list of {packageName, name} objects
      */

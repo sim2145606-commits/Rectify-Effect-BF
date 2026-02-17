@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="280dp"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#E612121A"
+    android:padding="16dp"
+    android:elevation="12dp">
+
+    <!-- Header -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="VirtuCam Tools"
+            android:textColor="#F5F5F7"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_centerVertical="true" />
+
+        <ImageButton
+            android:id="@+id/btn_close"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_alignParentEnd="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:tint="#8E8E93"
+            android:contentDescription="Close" />
+    </RelativeLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#2A2A35"
+        android:layout_marginBottom="12dp" />
+
+    <!-- Scale Mode Section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Scale Mode"
+        android:textColor="#8E8E93"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <Button
+            android:id="@+id/btn_scale_fit"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:text="Fit"
+            android:textSize="12sp"
+            android:textColor="#F5F5F7"
+            android:background="#2979FF"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btn_scale_fill"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:text="Fill"
+            android:textSize="12sp"
+            android:textColor="#F5F5F7"
+            android:background="#2A2A35"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btn_scale_stretch"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:text="Stretch"
+            android:textSize="12sp"
+            android:textColor="#F5F5F7"
+            android:background="#2A2A35" />
+    </LinearLayout>
+
+    <!-- Axis Toggles Section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Axis Transforms"
+        android:textColor="#8E8E93"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mirror H"
+                android:textColor="#F5F5F7"
+                android:textSize="13sp"
+                android:layout_marginEnd="8dp" />
+
+            <Switch
+                android:id="@+id/toggle_mirror"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Flip V"
+                android:textColor="#F5F5F7"
+                android:textSize="13sp"
+                android:layout_marginEnd="8dp" />
+
+            <Switch
+                android:id="@+id/toggle_flip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Position Section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Position Offset"
+        android:textColor="#8E8E93"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Offset Display -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="8dp">
+
+        <TextView
+            android:id="@+id/txt_offset_x"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="X: 0.00"
+            android:textColor="#2979FF"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:layout_marginEnd="16dp" />
+
+        <TextView
+            android:id="@+id/txt_offset_y"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Y: 0.00"
+            android:textColor="#2979FF"
+            android:textSize="13sp"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+
+    <!-- D-Pad Controls -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:layout_marginBottom="8dp">
+
+        <!-- Up -->
+        <ImageButton
+            android:id="@+id/btn_offset_up"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerHorizontal="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/arrow_up_float"
+            android:tint="#2979FF"
+            android:contentDescription="Move Up" />
+
+        <!-- Down -->
+        <ImageButton
+            android:id="@+id/btn_offset_down"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerHorizontal="true"
+            android:layout_alignParentBottom="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/arrow_down_float"
+            android:tint="#2979FF"
+            android:contentDescription="Move Down" />
+
+        <!-- Left -->
+        <ImageButton
+            android:id="@+id/btn_offset_left"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerVertical="true"
+            android:layout_alignParentStart="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_media_previous"
+            android:tint="#2979FF"
+            android:contentDescription="Move Left" />
+
+        <!-- Right -->
+        <ImageButton
+            android:id="@+id/btn_offset_right"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerVertical="true"
+            android:layout_alignParentEnd="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_media_next"
+            android:tint="#2979FF"
+            android:contentDescription="Move Right" />
+
+        <!-- Center Reset Button -->
+        <Button
+            android:id="@+id/btn_center"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:layout_centerInParent="true"
+            android:text="⊙"
+            android:textSize="24sp"
+            android:textColor="#F5F5F7"
+            android:background="#2A2A35"
+            android:contentDescription="Reset to Center" />
+    </RelativeLayout>
+
+</LinearLayout>
