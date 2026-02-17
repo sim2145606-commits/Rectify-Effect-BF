@@ -1,6 +1,7 @@
 package com.briefplantrain.virtucam
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.Environment
@@ -950,6 +951,65 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putString("error", message)
         } else {
             result.putString("error", "Unknown error")
+        }
+    }
+    
+    /**
+     * Start the floating overlay service
+     */
+    @ReactMethod
+    fun startFloatingOverlay(promise: Promise) {
+        try {
+            // Check overlay permission first
+            val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Settings.canDrawOverlays(reactApplicationContext)
+            } else {
+                true
+            }
+            
+            if (!hasPermission) {
+                promise.reject("NO_PERMISSION", "Overlay permission not granted")
+                return
+            }
+            
+            // Start the service
+            val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                reactApplicationContext.startForegroundService(intent)
+            } else {
+                reactApplicationContext.startService(intent)
+            }
+            
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("START_ERROR", "Failed to start floating overlay: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Stop the floating overlay service
+     */
+    @ReactMethod
+    fun stopFloatingOverlay(promise: Promise) {
+        try {
+            val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java)
+            reactApplicationContext.stopService(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("STOP_ERROR", "Failed to stop floating overlay: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Check if the floating overlay service is currently running
+     */
+    @ReactMethod
+    fun isFloatingOverlayRunning(promise: Promise) {
+        try {
+            val isRunning = FloatingOverlayService.isServiceRunning()
+            promise.resolve(isRunning)
+        } catch (e: Exception) {
+            promise.resolve(false)
         }
     }
 }

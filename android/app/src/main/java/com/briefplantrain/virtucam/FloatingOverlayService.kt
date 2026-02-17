@@ -10,57 +10,91 @@ import android.os.IBinder
 import android.view.*
 import android.widget.*
 import androidx.core.app.NotificationCompat
+import kotlin.math.roundToInt
 
 class FloatingOverlayService : Service() {
 
     private var windowManager: WindowManager? = null
     private var floatingView: View? = null
-    private var expandedView: View? = null
     private var isExpanded = false
     
     private lateinit var prefs: SharedPreferences
     
+    // UI Components - Bubble
+    private var bubbleIcon: View? = null
+    
+    // UI Components - Panel
+    private var panelView: View? = null
+    private var btnFit: Button? = null
+    private var btnFill: Button? = null
+    private var btnStretch: Button? = null
+    private var toggleMirrorH: ToggleButton? = null
+    private var toggleFlipV: ToggleButton? = null
+    private var btnNudgeUp: ImageButton? = null
+    private var btnNudgeDown: ImageButton? = null
+    private var btnNudgeLeft: ImageButton? = null
+    private var btnNudgeRight: ImageButton? = null
+    private var btnCenter: Button? = null
+    private var btnClose: ImageButton? = null
+    private var txtOffsetX: TextView? = null
+    private var txtOffsetY: TextView? = null
+    
+    // Current state
+    private var currentScaleMode = "fit"
+    private var currentMirrored = false
+    private var currentFlipV = false
+    private var currentOffsetX = 0f
+    private var currentOffsetY = 0f
+    
     companion object {
-        private const val NOTIFICATION_ID = 1001
-        private const val CHANNEL_ID = "virtucam_overlay_channel"
+        private const val NOTIFICATION_ID = 9001
+        private const val CHANNEL_ID = "virtucam_overlay"
+        private const val NUDGE_STEP = 10f
         
-        fun start(context: Context) {
-            val intent = Intent(context, FloatingOverlayService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        }
+        @Volatile
+        private var isRunning = false
         
-        fun stop(context: Context) {
-            context.stopService(Intent(context, FloatingOverlayService::class.java))
-        }
+        fun isServiceRunning(): Boolean = isRunning
     }
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         
         prefs = getSharedPreferences("virtucam_config", Context.MODE_WORLD_READABLE)
+        loadCurrentState()
         
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
         
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         
-        createFloatingIcon()
+        createFloatingBubble()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        isRunning = false
+        removeFloatingView()
+        super.onDestroy()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "VirtuCam Floating Controls",
+                "VirtuCam Floating Overlay",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Floating overlay controls for real-time adjustments"
+                description = "Floating controls for VirtuCam"
                 setShowBadge(false)
             }
+            
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
@@ -70,14 +104,12 @@ class FloatingOverlayService : Service() {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
-                PendingIntent.FLAG_IMMUTABLE 
-            else 0
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("VirtuCam Floating Controls")
-            .setContentText("Tap to return to VirtuCam")
+            .setContentTitle("VirtuCam Overlay Active")
+            .setContentText("Tap to return to app")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -85,10 +117,18 @@ class FloatingOverlayService : Service() {
             .build()
     }
 
-    private fun createFloatingIcon() {
+    private fun loadCurrentState() {
+        currentScaleMode = prefs.getString("scaleMode", "fit") ?: "fit"
+        currentMirrored = prefs.getBoolean("mirrored", false)
+        currentFlipV = prefs.getBoolean("flippedVertical", false)
+        currentOffsetX = prefs.getFloat("offsetX", 0f)
+        currentOffsetY = prefs.getFloat("offsetY", 0f)
+    }
+
+    private fun createFloatingBubble() {
         try {
             val layoutInflater = LayoutInflater.from(this)
-            floatingView = layoutInflater.inflate(R.layout.floating_bubble_icon, null)
+            bubbleIcon = layoutInflater.inflate(R.layout.floating_bubble_icon, null)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -109,27 +149,79 @@ class FloatingOverlayService : Service() {
                 y = 100
             }
 
-            windowManager?.addView(floatingView, params)
+            windowManager?.addView(bubbleIcon, params)
+            floatingView = bubbleIcon
 
-            // Make draggable
-            floatingView?.setOnTouchListener(FloatingOnTouchListener(params))
-            
-            // Expand on click
-            floatingView?.setOnClickListener {
-                if (!isExpanded) {
-                    expandPanel()
-                }
-            }
+            setupBubbleDrag(params)
+            setupBubbleClick()
+
         } catch (e: Exception) {
-            android.util.Log.e("FloatingOverlay", "Failed to create floating icon: ${e.message}")
+            android.util.Log.e("FloatingOverlay", "Failed to create bubble: ${e.message}")
             stopSelf()
         }
     }
 
-    private fun expandPanel() {
+    private fun setupBubbleDrag(params: WindowManager.LayoutParams) {
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var isDragging = false
+        var hasMoved = false
+
+        bubbleIcon?.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = true
+                    hasMoved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (isDragging) {
+                        val deltaX = (event.rawX - initialTouchX).toInt()
+                        val deltaY = (event.rawY - initialTouchY).toInt()
+                        
+                        if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+                            hasMoved = true
+                        }
+                        
+                        params.x = initialX + deltaX
+                        params.y = initialY + deltaY
+                        windowManager?.updateViewLayout(bubbleIcon, params)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    isDragging = false
+                    if (!hasMoved) {
+                        // It was a tap, not a drag
+                        expandToPanel()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun setupBubbleClick() {
+        bubbleIcon?.setOnClickListener {
+            expandToPanel()
+        }
+    }
+
+    private fun expandToPanel() {
+        if (isExpanded) return
+        
         try {
+            removeFloatingView()
+            
             val layoutInflater = LayoutInflater.from(this)
-            expandedView = layoutInflater.inflate(R.layout.floating_panel, null)
+            panelView = layoutInflater.inflate(R.layout.floating_panel, null)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -142,186 +234,170 @@ class FloatingOverlayService : Service() {
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 layoutType,
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or 
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.CENTER
             }
 
-            windowManager?.addView(expandedView, params)
+            windowManager?.addView(panelView, params)
+            floatingView = panelView
             isExpanded = true
 
-            // Hide the floating icon
-            floatingView?.visibility = View.GONE
-
             setupPanelControls()
+
         } catch (e: Exception) {
             android.util.Log.e("FloatingOverlay", "Failed to expand panel: ${e.message}")
         }
     }
 
     private fun setupPanelControls() {
-        expandedView?.let { panel ->
-            // Close button
-            panel.findViewById<ImageButton>(R.id.btn_close)?.setOnClickListener {
-                collapsePanel()
-            }
+        panelView?.let { panel ->
+            // Find all controls
+            btnFit = panel.findViewById(R.id.btnFit)
+            btnFill = panel.findViewById(R.id.btnFill)
+            btnStretch = panel.findViewById(R.id.btnStretch)
+            toggleMirrorH = panel.findViewById(R.id.toggleMirrorH)
+            toggleFlipV = panel.findViewById(R.id.toggleFlipV)
+            btnNudgeUp = panel.findViewById(R.id.btnNudgeUp)
+            btnNudgeDown = panel.findViewById(R.id.btnNudgeDown)
+            btnNudgeLeft = panel.findViewById(R.id.btnNudgeLeft)
+            btnNudgeRight = panel.findViewById(R.id.btnNudgeRight)
+            btnCenter = panel.findViewById(R.id.btnCenter)
+            btnClose = panel.findViewById(R.id.btnClose)
+            txtOffsetX = panel.findViewById(R.id.txtOffsetX)
+            txtOffsetY = panel.findViewById(R.id.txtOffsetY)
+
+            // Set initial states
+            updateScaleModeButtons()
+            toggleMirrorH?.isChecked = currentMirrored
+            toggleFlipV?.isChecked = currentFlipV
+            updateOffsetDisplay()
 
             // Scale mode buttons
-            val btnFit = panel.findViewById<Button>(R.id.btn_scale_fit)
-            val btnFill = panel.findViewById<Button>(R.id.btn_scale_fill)
-            val btnStretch = panel.findViewById<Button>(R.id.btn_scale_stretch)
-
             btnFit?.setOnClickListener { setScaleMode("fit") }
             btnFill?.setOnClickListener { setScaleMode("fill") }
             btnStretch?.setOnClickListener { setScaleMode("stretch") }
 
-            // Mirror and Flip toggles
-            val toggleMirror = panel.findViewById<Switch>(R.id.toggle_mirror)
-            val toggleFlip = panel.findViewById<Switch>(R.id.toggle_flip)
-
-            toggleMirror?.isChecked = prefs.getBoolean("mirrored", false)
-            toggleFlip?.isChecked = prefs.getBoolean("flippedVertical", false)
-
-            toggleMirror?.setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("mirrored", isChecked).apply()
+            // Mirror/Flip toggles
+            toggleMirrorH?.setOnCheckedChangeListener { _, isChecked ->
+                currentMirrored = isChecked
+                writeToPrefs("mirrored", isChecked)
             }
 
-            toggleFlip?.setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("flippedVertical", isChecked).apply()
+            toggleFlipV?.setOnCheckedChangeListener { _, isChecked ->
+                currentFlipV = isChecked
+                writeToPrefs("flippedVertical", isChecked)
             }
 
-            // Position controls
-            val btnUp = panel.findViewById<ImageButton>(R.id.btn_offset_up)
-            val btnDown = panel.findViewById<ImageButton>(R.id.btn_offset_down)
-            val btnLeft = panel.findViewById<ImageButton>(R.id.btn_offset_left)
-            val btnRight = panel.findViewById<ImageButton>(R.id.btn_offset_right)
-            val btnCenter = panel.findViewById<Button>(R.id.btn_center)
+            // Position nudge buttons
+            btnNudgeUp?.setOnClickListener { nudgeOffset(0f, -NUDGE_STEP) }
+            btnNudgeDown?.setOnClickListener { nudgeOffset(0f, NUDGE_STEP) }
+            btnNudgeLeft?.setOnClickListener { nudgeOffset(-NUDGE_STEP, 0f) }
+            btnNudgeRight?.setOnClickListener { nudgeOffset(NUDGE_STEP, 0f) }
+            btnCenter?.setOnClickListener { centerOffset() }
 
-            btnUp?.setOnClickListener { adjustOffset(0f, -0.05f) }
-            btnDown?.setOnClickListener { adjustOffset(0f, 0.05f) }
-            btnLeft?.setOnClickListener { adjustOffset(-0.05f, 0f) }
-            btnRight?.setOnClickListener { adjustOffset(0.05f, 0f) }
-            btnCenter?.setOnClickListener { resetOffset() }
-
-            // Display current offset
-            updateOffsetDisplay()
+            // Close button
+            btnClose?.setOnClickListener { collapseToIcon() }
         }
     }
 
     private fun setScaleMode(mode: String) {
-        val editor = prefs.edit()
-        when (mode) {
-            "fit" -> {
-                editor.putFloat("scaleX", 1.0f)
-                editor.putFloat("scaleY", 1.0f)
-            }
-            "fill" -> {
-                editor.putFloat("scaleX", 1.5f)
-                editor.putFloat("scaleY", 1.5f)
-            }
-            "stretch" -> {
-                editor.putFloat("scaleX", 1.0f)
-                editor.putFloat("scaleY", 1.2f)
-            }
+        currentScaleMode = mode
+        updateScaleModeButtons()
+        
+        // Calculate scaleX and scaleY based on mode
+        val (scaleX, scaleY) = when (mode) {
+            "fit" -> Pair(1.0f, 1.0f)
+            "fill" -> Pair(1.5f, 1.5f)
+            "stretch" -> Pair(1.0f, 1.5f)
+            else -> Pair(1.0f, 1.0f)
         }
-        editor.putString("scaleMode", mode)
-        editor.apply()
         
-        Toast.makeText(this, "Scale: ${mode.capitalize()}", Toast.LENGTH_SHORT).show()
+        writeToPrefs("scaleMode", mode)
+        writeToPrefs("scaleX", scaleX)
+        writeToPrefs("scaleY", scaleY)
     }
 
-    private fun adjustOffset(deltaX: Float, deltaY: Float) {
-        val currentX = prefs.getFloat("offsetX", 0f)
-        val currentY = prefs.getFloat("offsetY", 0f)
+    private fun updateScaleModeButtons() {
+        val activeColor = android.graphics.Color.parseColor("#2979FF")
+        val inactiveColor = android.graphics.Color.parseColor("#3A3A48")
         
-        val newX = (currentX + deltaX).coerceIn(-1f, 1f)
-        val newY = (currentY + deltaY).coerceIn(-1f, 1f)
-        
-        prefs.edit()
-            .putFloat("offsetX", newX)
-            .putFloat("offsetY", newY)
-            .apply()
-        
-        updateOffsetDisplay()
+        btnFit?.setBackgroundColor(if (currentScaleMode == "fit") activeColor else inactiveColor)
+        btnFill?.setBackgroundColor(if (currentScaleMode == "fill") activeColor else inactiveColor)
+        btnStretch?.setBackgroundColor(if (currentScaleMode == "stretch") activeColor else inactiveColor)
     }
 
-    private fun resetOffset() {
-        prefs.edit()
-            .putFloat("offsetX", 0f)
-            .putFloat("offsetY", 0f)
-            .apply()
+    private fun nudgeOffset(deltaX: Float, deltaY: Float) {
+        currentOffsetX += deltaX
+        currentOffsetY += deltaY
+        
+        // Clamp to reasonable range
+        currentOffsetX = currentOffsetX.coerceIn(-500f, 500f)
+        currentOffsetY = currentOffsetY.coerceIn(-500f, 500f)
         
         updateOffsetDisplay()
-        Toast.makeText(this, "Position centered", Toast.LENGTH_SHORT).show()
+        writeToPrefs("offsetX", currentOffsetX)
+        writeToPrefs("offsetY", currentOffsetY)
+    }
+
+    private fun centerOffset() {
+        currentOffsetX = 0f
+        currentOffsetY = 0f
+        updateOffsetDisplay()
+        writeToPrefs("offsetX", currentOffsetX)
+        writeToPrefs("offsetY", currentOffsetY)
     }
 
     private fun updateOffsetDisplay() {
-        expandedView?.let { panel ->
-            val offsetX = prefs.getFloat("offsetX", 0f)
-            val offsetY = prefs.getFloat("offsetY", 0f)
+        txtOffsetX?.text = "X: ${currentOffsetX.roundToInt()}"
+        txtOffsetY?.text = "Y: ${currentOffsetY.roundToInt()}"
+    }
+
+    private fun writeToPrefs(key: String, value: Any) {
+        try {
+            val editor = prefs.edit()
+            when (value) {
+                is Boolean -> editor.putBoolean(key, value)
+                is Float -> editor.putFloat(key, value)
+                is String -> editor.putString(key, value)
+                is Int -> editor.putInt(key, value)
+            }
+            editor.apply()
             
-            panel.findViewById<TextView>(R.id.txt_offset_x)?.text = 
-                String.format("X: %.2f", offsetX)
-            panel.findViewById<TextView>(R.id.txt_offset_y)?.text = 
-                String.format("Y: %.2f", offsetY)
+            // Make file world-readable for Xposed
+            try {
+                val prefsFile = java.io.File(applicationInfo.dataDir, 
+                    "shared_prefs/virtucam_config.xml")
+                if (prefsFile.exists()) {
+                    prefsFile.setReadable(true, false)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("FloatingOverlay", "Could not set prefs readable: ${e.message}")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FloatingOverlay", "Failed to write prefs: ${e.message}")
         }
     }
 
-    private fun collapsePanel() {
-        expandedView?.let {
-            windowManager?.removeView(it)
-            expandedView = null
-        }
-        isExpanded = false
-        floatingView?.visibility = View.VISIBLE
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
+    private fun collapseToIcon() {
+        if (!isExpanded) return
         
+        removeFloatingView()
+        isExpanded = false
+        createFloatingBubble()
+    }
+
+    private fun removeFloatingView() {
         try {
             floatingView?.let {
                 windowManager?.removeView(it)
-                floatingView = null
             }
-            expandedView?.let {
-                windowManager?.removeView(it)
-                expandedView = null
-            }
+            floatingView = null
+            bubbleIcon = null
+            panelView = null
         } catch (e: Exception) {
-            android.util.Log.e("FloatingOverlay", "Error removing views: ${e.message}")
-        }
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    private inner class FloatingOnTouchListener(
-        private val params: WindowManager.LayoutParams
-    ) : View.OnTouchListener {
-        private var initialX = 0
-        private var initialY = 0
-        private var initialTouchX = 0f
-        private var initialTouchY = 0f
-
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x
-                    initialY = params.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    return false
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
-                    windowManager?.updateViewLayout(floatingView, params)
-                    return true
-                }
-            }
-            return false
+            android.util.Log.e("FloatingOverlay", "Error removing view: ${e.message}")
         }
     }
 }

@@ -9,6 +9,9 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  Switch,
+  AppState,
+  NativeModules,
 } from 'react-native';
 import Animated, {
   FadeInDown,
@@ -33,6 +36,8 @@ import HUDViewfinder from '@/components/media-studio/HUDViewfinder';
 import SpanScalePanel from '@/components/media-studio/SpanScalePanel';
 import PositionControl from '@/components/media-studio/PositionControl';
 
+const { VirtuCamSettings } = NativeModules;
+
 type ScaleMode = 'fit' | 'fill' | 'stretch';
 
 type MediaItem = {
@@ -51,6 +56,12 @@ export default function StudioScreen() {
 
   // Hook enabled state for floating overlay
   const [hookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
+
+  // Floating overlay state
+  const [floatingBubbleEnabled, setFloatingBubbleEnabled] = useStorage(
+    STORAGE_KEYS.FLOATING_BUBBLE,
+    false
+  );
 
   // Media state
   const [selectedMedia, setSelectedMedia] = useStorage<string | null>(
@@ -246,6 +257,77 @@ export default function StudioScreen() {
     setOffsetY,
   ]);
 
+  // Request overlay permission
+  const requestOverlayPermission = useCallback(async () => {
+    try {
+      await VirtuCamSettings.requestOverlayPermission();
+    } catch (e) {
+      console.warn('Failed to request overlay permission:', e);
+    }
+  }, []);
+
+  // Handle floating overlay toggle
+  const handleFloatingToggle = useCallback(
+    async (value: boolean) => {
+      try {
+        // 1. Check overlay permission FIRST
+        if (value) {
+          const hasPermission = await VirtuCamSettings.checkOverlayPermission();
+          if (!hasPermission) {
+            Alert.alert(
+              'Permission Required',
+              'Overlay permission is needed to display floating controls over other apps.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Grant Permission', onPress: () => requestOverlayPermission() },
+              ]
+            );
+            return; // Don't enable if no permission
+          }
+        }
+
+        // 2. Update state
+        setFloatingBubbleEnabled(value);
+        lightImpact();
+
+        // 3. If disabling, stop the service immediately
+        if (!value) {
+          try {
+            await VirtuCamSettings.stopFloatingOverlay();
+          } catch (e) {
+            console.warn('Failed to stop overlay:', e);
+          }
+        }
+      } catch (e) {
+        console.error('Error toggling floating overlay:', e);
+        Alert.alert('Error', 'Failed to toggle floating overlay. Please try again.');
+      }
+    },
+    [setFloatingBubbleEnabled, lightImpact, requestOverlayPermission]
+  );
+
+  // AppState listener to auto-start/stop the overlay service
+  useEffect(() => {
+    const handleAppState = async (nextState: string) => {
+      if (!floatingBubbleEnabled) return;
+
+      try {
+        if (nextState === 'background' || nextState === 'inactive') {
+          // App going to background → start floating overlay
+          await VirtuCamSettings.startFloatingOverlay();
+        } else if (nextState === 'active') {
+          // App coming to foreground → stop floating overlay
+          await VirtuCamSettings.stopFloatingOverlay();
+        }
+      } catch (e) {
+        console.warn('AppState overlay control error:', e);
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppState);
+    return () => subscription.remove();
+  }, [floatingBubbleEnabled]);
+
   const renderRecentItem = ({ item }: { item: MediaItem }) => (
     <RecentFileCard
       item={item}
@@ -302,6 +384,44 @@ export default function StudioScreen() {
               color={offsetX === 0 && offsetY === 0 ? Colors.success : Colors.electricBlue}
             />
           </LinearGradient>
+        </View>
+      </Animated.View>
+
+      {/* Floating Overlay Toggle */}
+      <Animated.View entering={FadeInDown.delay(75).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons
+            name="picture-in-picture-top-right"
+            size={18}
+            color={Colors.electricBlue}
+          />
+          <Text style={styles.sectionTitle}>Floating Tools</Text>
+        </View>
+        <View style={styles.card}>
+          <View style={styles.floatingToggleRow}>
+            <View style={styles.floatingToggleInfo}>
+              <Text style={styles.floatingToggleLabel}>Enable Floating Overlay</Text>
+              <Text style={styles.floatingToggleDesc}>
+                Show floating controls when you leave the app to adjust scale & position in
+                real-time
+              </Text>
+            </View>
+            <Switch
+              value={floatingBubbleEnabled}
+              onValueChange={handleFloatingToggle}
+              trackColor={{ false: Colors.inactive, true: Colors.electricBlue + '60' }}
+              thumbColor={floatingBubbleEnabled ? Colors.electricBlue : Colors.textTertiary}
+            />
+          </View>
+          {/* Status indicator */}
+          {floatingBubbleEnabled && (
+            <View style={styles.floatingStatus}>
+              <View style={styles.floatingStatusDot} />
+              <Text style={styles.floatingStatusText}>
+                Overlay will appear when you leave the app
+              </Text>
+            </View>
+          )}
         </View>
       </Animated.View>
 
@@ -945,5 +1065,54 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1,
+  },
+  // Floating overlay toggle styles
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  floatingToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.md,
+  },
+  floatingToggleInfo: {
+    flex: 1,
+  },
+  floatingToggleLabel: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.md,
+    fontWeight: '600',
+    marginBottom: Spacing.xs,
+  },
+  floatingToggleDesc: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    lineHeight: 18,
+  },
+  floatingStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  floatingStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.electricBlue,
+  },
+  floatingStatusText: {
+    color: Colors.textSecondary,
+    fontSize: FontSize.sm,
+    fontStyle: 'italic',
   },
 });
