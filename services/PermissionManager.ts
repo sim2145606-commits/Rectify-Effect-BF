@@ -390,7 +390,6 @@ export async function openLSPosedManager(): Promise<void> {
   }
 }
 
-
 /**
  * Open app settings
  */
