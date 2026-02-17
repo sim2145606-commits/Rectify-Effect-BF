@@ -9,12 +9,19 @@ import com.facebook.react.bridge.*
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 
 class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     private val prefs: SharedPreferences by lazy {
         reactContext.getSharedPreferences("virtucam_config", Context.MODE_WORLD_READABLE)
+    }
+    
+    companion object {
+        // Marker file timeout: Module remains active until device reboot
+        // (marker file is in /data/local/tmp which is cleared on reboot)
+        private val MARKER_FILE_TIMEOUT_MS = TimeUnit.HOURS.toMillis(24)
     }
 
     override fun getName(): String = "VirtuCamSettings"
@@ -316,9 +323,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 // This prevents false negatives when user hasn't opened a target app recently
                 val lastModified = markerFile.lastModified()
                 val currentTime = System.currentTimeMillis()
-                val twentyFourHours = 24 * 60 * 60 * 1000L
                 
-                if (currentTime - lastModified < twentyFourHours) {
+                if (currentTime - lastModified < MARKER_FILE_TIMEOUT_MS) {
                     moduleActive = true
                     android.util.Log.d("VirtuCamSettings", "Module active via marker file (age: ${(currentTime - lastModified) / 1000}s)")
                 }
@@ -326,19 +332,18 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Method 2: Check LSPosed scope configuration via root
             if (!moduleActive && lsposedExists) {
-                val packageName = reactApplicationContext.packageName
+                val packageName = sanitizePackageName(reactApplicationContext.packageName)
                 
                 // Try to check if our module is in LSPosed's enabled modules list
-                // Check both the module config and the scope list files
+                // Check specific known files first for better performance
                 val lsposedConfigCheck = executeRootCommand(
-                    "grep -r '$packageName' /data/adb/lspd/config 2>/dev/null || " +
-                    "grep -r '$packageName' /data/adb/modules/zygisk_lsposed/config 2>/dev/null || " +
-                    "grep -r '$packageName' /data/adb/modules/riru_lsposed/config 2>/dev/null || " +
-                    "find /data/adb/lspd -name 'modules' -type f -exec grep -l '$packageName' {} \\; 2>/dev/null || " +
-                    "find /data/adb/modules/zygisk_lsposed -name 'modules' -type f -exec grep -l '$packageName' {} \\; 2>/dev/null"
+                    "grep -q '$packageName' /data/adb/lspd/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -q '$packageName' /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -q '$packageName' /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null && echo 'found' || " +
+                    "grep -r '$packageName' /data/adb/lspd/config 2>/dev/null | head -1"
                 )
                 
-                if (lsposedConfigCheck.isNotEmpty() && lsposedConfigCheck.contains(packageName)) {
+                if (lsposedConfigCheck.isNotEmpty() && (lsposedConfigCheck.contains("found") || lsposedConfigCheck.contains(packageName))) {
                     moduleActive = true
                     android.util.Log.d("VirtuCamSettings", "Module active via LSPosed config check")
                 }
@@ -347,7 +352,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             // Method 3: Check module database in LSPosed
             // This is more reliable than just checking xposed_init existence
             if (!moduleActive && lsposedExists) {
-                val packageName = reactApplicationContext.packageName
+                val packageName = sanitizePackageName(reactApplicationContext.packageName)
                 
                 // Check if module is enabled in LSPosed's module list
                 // LSPosed stores module enable state in various locations
@@ -543,5 +548,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             ""
         }
+    }
+    
+    /**
+     * Sanitize package name for use in shell commands
+     * Package names should only contain alphanumeric characters, dots, and underscores
+     */
+    private fun sanitizePackageName(packageName: String): String {
+        // Android package names can only contain [a-zA-Z0-9._]
+        // Remove any potentially dangerous characters
+        return packageName.replace(Regex("[^a-zA-Z0-9._]"), "")
     }
 }
