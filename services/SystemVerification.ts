@@ -172,37 +172,41 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     if (VirtuCamSettings && VirtuCamSettings.checkXposedStatus) {
       try {
         const xposedResult = await VirtuCamSettings.checkXposedStatus();
-        if (xposedResult.xposedActive) {
+        
+        // If module is active, framework MUST be active (module can't load without framework)
+        if (xposedResult.moduleActive) {
           result.xposedFramework = {
             label: 'LSPosed / Xposed',
             detail: 'Framework active',
             status: 'ok',
           };
+          result.moduleActive = {
+            label: 'VirtuCam Module',
+            detail: `Module active (${xposedResult.detectionMethod || 'detected'})`,
+            status: 'ok',
+          };
         } else if (xposedResult.lsposedInstalled) {
+          // Framework is installed but module needs activation
           result.xposedFramework = {
             label: 'LSPosed / Xposed',
-            detail: 'Installed but not active',
+            detail: 'Framework installed',
+            status: 'ok', // Framework IS installed, just module needs activation
+          };
+          result.moduleActive = {
+            label: 'VirtuCam Module',
+            detail: 'Activate in LSPosed Manager & reboot',
             status: 'warning',
           };
         } else {
+          // No LSPosed found at all
           result.xposedFramework = {
             label: 'LSPosed / Xposed',
             detail: 'Not installed',
             status: 'error',
           };
-        }
-
-        // Check module activation
-        if (xposedResult.moduleActive) {
           result.moduleActive = {
             label: 'VirtuCam Module',
-            detail: 'Module active',
-            status: 'ok',
-          };
-        } else {
-          result.moduleActive = {
-            label: 'VirtuCam Module',
-            detail: 'Activate in LSPosed Manager',
+            detail: 'Install LSPosed first',
             status: 'error',
           };
         }

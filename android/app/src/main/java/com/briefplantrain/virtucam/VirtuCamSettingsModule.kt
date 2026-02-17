@@ -272,6 +272,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     /**
      * Check if LSPosed/Xposed is installed and module is active
      * Improved detection for ReLSPosed and modern LSPosed forks
+     *
+     * IMPORTANT: The Class.forName("XposedBridge") check only works INSIDE a hooked process,
+     * NOT inside VirtuCam's own process. Since VirtuCam hooks OTHER apps (not itself),
+     * we rely on the marker file and LSPosed config checks instead.
      */
     @ReactMethod
     fun checkXposedStatus(promise: Promise) {
@@ -279,26 +283,18 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val result = Arguments.createMap()
             val packageName = reactApplicationContext.packageName
             
-            // Check if running in Xposed environment
-            val isXposedActive = try {
-                Class.forName("de.robv.android.xposed.XposedBridge")
-                true
-            } catch (e: ClassNotFoundException) {
-                false
-            }
-            
-            result.putBoolean("xposedActive", isXposedActive)
-            
             // Check for LSPosed installation via multiple methods
             var lsposedExists = false
             var detectedPath = ""
             
-            // Check common LSPosed directories
+            // Check common LSPosed directories (expanded for ReLSPosed and forks)
             val lsposedPaths = listOf(
                 "/data/adb/lspd",
                 "/data/adb/modules/zygisk_lsposed",
                 "/data/adb/modules/riru_lsposed",
-                "/data/adb/modules/lsposed"  // Some forks use this
+                "/data/adb/modules/lsposed",  // ReLSPosed and some forks
+                "/data/adb/modules/zygisk-lsposed",
+                "/data/adb/modules/riru-lsposed"
             )
             
             for (path in lsposedPaths) {
@@ -312,7 +308,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             // Fallback: Check via root if direct access fails
             if (!lsposedExists) {
                 val lsposedCheck = executeRootCommand(
-                    "ls -d /data/adb/lspd /data/adb/modules/*lsposed* 2>/dev/null | head -1"
+                    "ls -d /data/adb/lspd /data/adb/modules/*lsposed* /data/adb/modules/*LSPosed* 2>/dev/null | head -1"
                 )
                 if (lsposedCheck.isNotEmpty() && !lsposedCheck.contains("No such file")) {
                     lsposedExists = true
@@ -328,33 +324,71 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             var detectionMethod = "none"
             
             // Method 1: Check marker file (created when module hooks an app)
+            // The marker file persists until reboot (it's in /data/local/tmp)
+            // No time-based validation needed - if it exists, module has loaded at least once since boot
             val markerFile = File("/data/local/tmp/virtucam_module_active")
             if (markerFile.exists()) {
-                val lastModified = markerFile.lastModified()
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastModified < MARKER_FILE_TIMEOUT_MS) {
+                moduleActive = true
+                detectionMethod = "marker_file"
+                android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
+            }
+            
+            // Method 2: Check LSPosed database for module enabled state
+            if (!moduleActive && lsposedExists) {
+                if (checkLSPosedDatabase(packageName)) {
                     moduleActive = true
-                    detectionMethod = "marker_file"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
+                    detectionMethod = "lspd_database"
+                    android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed database")
                 }
             }
             
+            // Method 3: Check LSPosed scope configuration
+            if (!moduleActive && lsposedExists) {
+                if (checkLSPosedScope(packageName)) {
+                    moduleActive = true
+                    detectionMethod = "lspd_scope"
+                    android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed scope")
                 }
             }
+            
+            // Method 4: Check LSPosed prefs (ReLSPosed and some forks)
+            if (!moduleActive && lsposedExists) {
+                if (checkLSPosedPrefs(packageName)) {
+                    moduleActive = true
+                    detectionMethod = "lspd_prefs"
+                    android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed prefs")
+                }
+            }
+            
+            // Method 5: Check modules directory registration
+            if (!moduleActive && lsposedExists) {
+                if (checkModulesDirectory(packageName)) {
+                    moduleActive = true
+                    detectionMethod = "modules_dir"
+                    android.util.Log.d("VirtuCamSettings", "Module detected via modules directory")
+                }
+            }
+            
+            // If module is active, the Xposed framework MUST be active
+            // (we can't detect XposedBridge from our own process, but if module loaded, framework works)
+            val xposedActive = moduleActive || lsposedExists
+            result.putBoolean("xposedActive", xposedActive)
             
             result.putBoolean("moduleActive", moduleActive)
             result.putString("detectionMethod", detectionMethod)
             
             android.util.Log.d("VirtuCamSettings",
-                "Detection results: xposedActive=$isXposedActive, lsposedInstalled=$lsposedExists, " +
+                "Detection results: xposedActive=$xposedActive, lsposedInstalled=$lsposedExists, " +
                 "moduleActive=$moduleActive, method=$detectionMethod, path=$detectedPath")
             
             promise.resolve(result)
         } catch (e: Exception) {
+            android.util.Log.e("VirtuCamSettings", "checkXposedStatus error: ${e.message}")
             val result = Arguments.createMap()
             result.putBoolean("xposedActive", false)
             result.putBoolean("lsposedInstalled", false)
             result.putBoolean("moduleActive", false)
+            result.putString("detectionMethod", "error")
             promise.resolve(result)
         }
     }
@@ -653,6 +687,59 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val result = Arguments.createMap()
             putErrorMessage(result, e)
             promise.resolve(result)
+        }
+    }
+
+    /**
+     * Filter a list of package names to only those that are installed on the device
+     * Used to show only installed apps in the target list (no false positives)
+     */
+    @ReactMethod
+    fun getInstalledPackages(packageNames: ReadableArray, promise: Promise) {
+        try {
+            val pm = reactApplicationContext.packageManager
+            val result = Arguments.createArray()
+            
+            for (i in 0 until packageNames.size()) {
+                val pkgName = packageNames.getString(i)
+                if (pkgName != null) {
+                    try {
+                        pm.getPackageInfo(pkgName, 0)
+                        result.pushString(pkgName)  // Package is installed
+                    } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
+                        // Not installed, skip
+                    }
+                }
+            }
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("PKG_ERROR", e.message, e)
+        }
+    }
+
+    /**
+     * Get all user-installed apps on the device (for "Add App" feature)
+     * Returns list of {packageName, name} objects
+     */
+    @ReactMethod
+    fun getAllInstalledApps(promise: Promise) {
+        try {
+            val pm = reactApplicationContext.packageManager
+            val apps = pm.getInstalledApplications(android.content.pm.PackageManager.GET_META_DATA)
+            val result = Arguments.createArray()
+            
+            for (app in apps) {
+                // Only include user-installed apps (not system apps)
+                if (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0) {
+                    val appMap = Arguments.createMap()
+                    appMap.putString("packageName", app.packageName)
+                    appMap.putString("name", pm.getApplicationLabel(app).toString())
+                    result.pushMap(appMap)
+                }
+            }
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("SCAN_ERROR", e.message, e)
         }
     }
 

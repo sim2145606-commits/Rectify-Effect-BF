@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -12,6 +12,7 @@ import Animated, {
   FadeIn,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -26,13 +27,14 @@ import {
   type SystemCheckStatus,
   type SystemInfo,
 } from '@/services/SystemVerification';
-import { syncAllSettings, getBridgeStatus } from '@/services/ConfigBridge';
+import { syncAllSettings, getBridgeStatus, verifyBridge, readBridgeConfig } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
 
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { heavyImpact, success, warning, mediumImpact } = useHaptics();
 
   const [hookEnabled, setHookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
@@ -48,6 +50,13 @@ export default function Dashboard() {
   const [bridgeReadable, setBridgeReadable] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loadingSystemInfo, setLoadingSystemInfo] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Additional bridge status info
+  const [bridgeHookEnabled, setBridgeHookEnabled] = useState(false);
+  const [bridgeMediaPath, setBridgeMediaPath] = useState<string | null>(null);
+  const [bridgeCameraTarget, setBridgeCameraTarget] = useState<string>('front');
+  const [bridgeTargetAppsCount, setBridgeTargetAppsCount] = useState(0);
 
   const masterGlow = useSharedValue(0);
   const masterScale = useSharedValue(1);
@@ -63,6 +72,19 @@ export default function Dashboard() {
         setBridgePath(bridgeSt.path);
         setBridgeReadable(bridgeSt.readable);
         setLastSyncTime(new Date().toLocaleTimeString());
+        
+        // Load additional bridge config details
+        try {
+          const config = await readBridgeConfig();
+          if (config) {
+            setBridgeHookEnabled(config.enabled || false);
+            setBridgeMediaPath(config.mediaSourcePath || null);
+            setBridgeCameraTarget(config.cameraTarget || 'front');
+            setBridgeTargetAppsCount(config.targetPackages?.length || 0);
+          }
+        } catch {
+          // Silent - config read may fail
+        }
       } catch {
         // Silent
       }
@@ -143,12 +165,38 @@ export default function Dashboard() {
     setBridgeReadable(bridgeSt.readable);
     setLastSyncTime(new Date().toLocaleTimeString());
 
+    // Refresh bridge config details
+    try {
+      const config = await readBridgeConfig();
+      if (config) {
+        setBridgeHookEnabled(config.enabled || false);
+        setBridgeMediaPath(config.mediaSourcePath || null);
+        setBridgeCameraTarget(config.cameraTarget || 'front');
+        setBridgeTargetAppsCount(config.targetPackages?.length || 0);
+      }
+    } catch {
+      // Silent
+    }
+
     // Refresh system info
     setLoadingSystemInfo(true);
     const info = await getSystemInfo();
     setSystemInfo(info);
     setLoadingSystemInfo(false);
   }, [mediumImpact, refreshSystemStatus]);
+
+  // Pull-to-refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await handleRefreshStatus();
+    setRefreshing(false);
+  }, [handleRefreshStatus]);
+
+  // Navigate to setup/onboarding
+  const handleSetup = useCallback(() => {
+    mediumImpact();
+    router.push('/onboarding');
+  }, [mediumImpact, router]);
 
   const activeTargets = [frontCamera && 'Front', backCamera && 'Back'].filter(Boolean);
 
@@ -157,6 +205,15 @@ export default function Dashboard() {
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={Colors.electricBlue}
+          colors={[Colors.electricBlue]}
+          progressBackgroundColor={Colors.surface}
+        />
+      }
     >
       {/* Header */}
       <Animated.View entering={FadeInDown.delay(100).duration(500)}>
@@ -166,12 +223,9 @@ export default function Dashboard() {
             <Text style={styles.appSubtitle}>Virtual Camera Engine</Text>
           </View>
           <View style={styles.headerRight}>
-            <Pressable onPress={handleRefreshStatus} style={styles.refreshButton}>
-              {isChecking ? (
-                <ActivityIndicator color={Colors.electricBlue} size="small" />
-              ) : (
-                <Ionicons name="refresh" size={18} color={Colors.electricBlue} />
-              )}
+            <Pressable onPress={handleSetup} style={styles.setupButton}>
+              <Ionicons name="settings-outline" size={16} color={Colors.accent} />
+              <Text style={styles.setupButtonText}>Setup</Text>
             </Pressable>
             <View
               style={[
@@ -397,23 +451,57 @@ export default function Dashboard() {
                   { color: bridgeReadable ? Colors.success : Colors.danger },
                 ]}
               >
-                {bridgeReadable ? 'Readable' : 'Not Readable'}
+                {bridgeReadable ? 'Connected' : 'Disconnected'}
               </Text>
             </View>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Hook Status</Text>
+            <View style={styles.infoValueRow}>
+              <View
+                style={[
+                  styles.miniDot,
+                  { backgroundColor: bridgeHookEnabled ? Colors.electricBlue : Colors.inactive },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.infoValue,
+                  { color: bridgeHookEnabled ? Colors.electricBlue : Colors.textTertiary },
+                ]}
+              >
+                {bridgeHookEnabled ? 'Enabled' : 'Disabled'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Camera Target</Text>
+            <Text style={styles.infoValue}>
+              {bridgeCameraTarget === 'both' ? 'Front & Back' : bridgeCameraTarget === 'front' ? 'Front Only' : 'Back Only'}
+            </Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Target Apps</Text>
+            <Text style={styles.infoValue}>
+              {bridgeTargetAppsCount > 0 ? `${bridgeTargetAppsCount} app${bridgeTargetAppsCount > 1 ? 's' : ''}` : 'All apps'}
+            </Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Active Media</Text>
+            <Text
+              style={[styles.infoValue, !bridgeMediaPath && { color: Colors.textTertiary }]}
+              numberOfLines={1}
+            >
+              {bridgeMediaPath ? bridgeMediaPath.split('/').pop() : 'None selected'}
+            </Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Config Version</Text>
             <Text style={styles.infoValue}>v{bridgeVersion}</Text>
           </View>
-          <View style={styles.infoRow}>
+          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
             <Text style={styles.infoLabel}>Last Sync</Text>
             <Text style={styles.infoValue}>{lastSyncTime}</Text>
-          </View>
-          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.infoLabel}>Storage Path</Text>
-            <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={2}>
-              {bridgePath || 'Unknown'}
-            </Text>
           </View>
         </Card>
       </Animated.View>
@@ -430,66 +518,80 @@ export default function Dashboard() {
             <>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Device</Text>
-                <Text style={styles.infoValue}>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.manufacturer} {systemInfo.model}
                 </Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Brand</Text>
-                <Text style={styles.infoValue}>{systemInfo.brand}</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.brand}
+                </Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Product</Text>
-                <Text style={styles.infoValue}>{systemInfo.product}</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.product}
+                </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Android Version</Text>
-                <Text style={styles.infoValue}>
+                <Text style={styles.infoLabel}>Android</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.androidVersion} (SDK {systemInfo.sdkLevel})
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Build Number</Text>
-                <Text style={styles.infoValue}>{systemInfo.buildNumber}</Text>
+                <Text style={styles.infoLabel}>Build</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.buildNumber}
+                </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Security Patch</Text>
-                <Text style={styles.infoValue}>{systemInfo.securityPatch}</Text>
+                <Text style={styles.infoLabel}>Security</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.securityPatch}
+                </Text>
               </View>
-              <View style={styles.infoRow}>
+              <View style={styles.infoRowColumn}>
                 <Text style={styles.infoLabel}>Kernel Version</Text>
-                <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={2}>
+                <Text style={[styles.infoValueWrap, { marginTop: Spacing.xs }]}>
                   {systemInfo.kernelVersion}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>SELinux Status</Text>
-                <Text style={styles.infoValue}>{systemInfo.selinuxStatus}</Text>
+                <Text style={styles.infoLabel}>SELinux</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.selinuxStatus}
+                </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Root Solution</Text>
-                <Text style={styles.infoValue}>
+                <Text style={styles.infoLabel}>Root</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.rootSolution}
                   {systemInfo.rootVersion ? ` ${systemInfo.rootVersion}` : ''}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>ABI List</Text>
-                <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={1}>
+                <Text style={styles.infoLabel}>ABI</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.abiList}
                 </Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Storage</Text>
-                <Text style={styles.infoValue}>{systemInfo.storage}</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.storage}
+                </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Max Memory</Text>
-                <Text style={styles.infoValue}>{systemInfo.maxMemory}</Text>
+                <Text style={styles.infoLabel}>Memory</Text>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.maxMemory}
+                </Text>
               </View>
-              <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+              <View style={[styles.infoRowColumn, { borderBottomWidth: 0 }]}>
                 <Text style={styles.infoLabel}>Fingerprint</Text>
-                <Text style={[styles.infoValue, { fontSize: FontSize.xs }]} numberOfLines={2}>
+                <Text style={[styles.infoValueWrap, { marginTop: Spacing.xs }]}>
                   {systemInfo.fingerprint}
                 </Text>
               </View>
@@ -860,6 +962,24 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     fontWeight: '600',
   },
+  infoValueFlex: {
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: Spacing.md,
+  },
+  infoValueWrap: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.xs,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  infoRowColumn: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
   infoValueRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -869,5 +989,22 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
+  },
+  setupButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.accent + '15',
+    borderWidth: 1,
+    borderColor: Colors.accent + '40',
+  },
+  setupButtonText: {
+    color: Colors.accent,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });
