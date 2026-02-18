@@ -134,22 +134,17 @@ Java_com_briefplantrain_virtucam_NativeEncoder_rgbToNv21(
             uint16x4_t b16 = vget_low_u16(vmovl_u8(b_sub));
             
             // V = (112*R - 94*G - 18*B + 128) >> 8 + 128
-            int16x4_t v16 = vreinterpret_s16_u16(
-                vmlaq_n_u16(
-                    vmulq_n_u16(vcombine_u16(r16, vdup_n_u16(0)), 112),
-                    vcombine_u16(g16, vdup_n_u16(0)), -94
-                )
-            );
+            // Use signed arithmetic for proper handling of negative values
+            int16x4_t v16 = vreinterpret_s16_u16(vmul_n_u16(r16, 112));
+            v16 = vsub_s16(v16, vreinterpret_s16_u16(vmul_n_u16(g16, 94)));
             v16 = vsub_s16(v16, vreinterpret_s16_u16(vmul_n_u16(b16, 18)));
             v16 = vadd_s16(v16, vdup_n_s16(128));
             v16 = vshr_n_s16(v16, 8);
             v16 = vadd_s16(v16, vdup_n_s16(128));
             
             // U = (-38*R - 74*G + 112*B + 128) >> 8 + 128
-            int16x4_t u16 = vreinterpret_s16_u16(
-                vmulq_n_u16(vcombine_u16(b16, vdup_n_u16(0)), 112)
-            );
-            u16 = vsub_s16(vget_low_s16(u16), vreinterpret_s16_u16(vmul_n_u16(r16, 38)));
+            int16x4_t u16 = vreinterpret_s16_u16(vmul_n_u16(b16, 112));
+            u16 = vsub_s16(u16, vreinterpret_s16_u16(vmul_n_u16(r16, 38)));
             u16 = vsub_s16(u16, vreinterpret_s16_u16(vmul_n_u16(g16, 74)));
             u16 = vadd_s16(u16, vdup_n_s16(128));
             u16 = vshr_n_s16(u16, 8);
