@@ -1,0 +1,28 @@
+diff --git a/node_modules/@react-native/gradle-plugin/build.gradle.kts b/node_modules/@react-native/gradle-plugin/build.gradle.kts
+index 9346508..772a4e4 100644
+--- a/node_modules/@react-native/gradle-plugin/build.gradle.kts
++++ b/node_modules/@react-native/gradle-plugin/build.gradle.kts
+@@ -7,7 +7,6 @@
+ 
+ import org.gradle.api.internal.classpath.ModuleRegistry
+ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+-import org.gradle.configurationcache.extensions.serviceOf
+ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+ 
+ plugins {
+@@ -51,11 +50,13 @@ dependencies {
+ 
+   testRuntimeOnly(
+       files(
+-          serviceOf<ModuleRegistry>()
++          gradle.sharedServices
++              .getByType(ModuleRegistry::class.java)
+               .getModule("gradle-tooling-api-builders")
+               .classpath
+               .asFiles
+-              .first()))
++              .first()
++      ))
+ }
+ 
+ // We intentionally don't build for Java 17 as users will see a cryptic bytecode version
