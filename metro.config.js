@@ -19,6 +19,10 @@ config.resolver = {
   // Fix for react-native-svg module resolution
   sourceExts: [...(config.resolver.sourceExts || []), 'svg'],
   resolverMainFields: ['react-native', 'browser', 'main'],
+  // Add alias for @ to resolve project root imports
+  extraNodeModules: {
+    '@': path.resolve(__dirname),
+  },
 };
 
 // Configure Metro for proxy deployment
