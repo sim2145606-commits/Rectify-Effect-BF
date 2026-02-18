@@ -6,22 +6,18 @@ pluginManagement {
   }
   
   
-  def reactNativeGradlePlugin = new File(
-    providers.exec {
-      workingDir(rootDir)
-      commandLine("node", "--print", "require.resolve('@react-native/gradle-plugin/package.json', { paths: [require.resolve('react-native/package.json')] })")
-    }.standardOutput.asText.get().trim()
-  ).getParentFile().absolutePath
-  includeBuild(reactNativeGradlePlugin)
-  
-  def expoPluginsPath = new File(
+  def expoAutolinkingPath = new File(
     providers.exec {
       workingDir(rootDir)
       commandLine("node", "--print", "require.resolve('expo-modules-autolinking/package.json', { paths: [require.resolve('expo/package.json')] })")
-    }.standardOutput.asText.get().trim(),
-    "../android/expo-gradle-plugin"
-  ).absolutePath
+    }.standardOutput.asText.get().trim()
+  ).getParentFile()
+  
+  def expoPluginsPath = new File(expoAutolinkingPath, "android/expo-gradle-plugin").absolutePath
   includeBuild(expoPluginsPath)
+  
+  def reactNativeGradlePlugin = new File(expoAutolinkingPath, "../react-native/node_modules/@react-native/gradle-plugin").absolutePath
+  includeBuild(reactNativeGradlePlugin)
 }
 
 plugins {
@@ -43,4 +39,3 @@ rootProject.name = 'Virtucam'
 expoAutolinking.useExpoVersionCatalog()
 
 include ':app'
-includeBuild(expoAutolinking.reactNativeGradlePlugin)
