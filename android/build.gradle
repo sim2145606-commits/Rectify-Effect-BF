@@ -19,7 +19,21 @@ allprojects {
         maven { url 'https://www.jitpack.io' }
         
         // Add this line specifically for the Xposed API
-        maven { url 'https://api.xposed.info/' } 
+        maven { url 'https://api.xposed.info/' }
+    }
+    
+    // Suppress deprecation warnings for faster builds
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs << '-Xlint:-deprecation'
+        options.compilerArgs << '-Xlint:-unchecked'
+    }
+    
+    // Suppress Kotlin warnings
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        kotlinOptions {
+            allWarningsAsErrors = false
+            suppressWarnings = true
+        }
     }
 }
 

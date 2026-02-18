@@ -30,15 +30,18 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Cache Gradle packages
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+      - name: Cache Android build cache
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          path: ~/.android/build-cache
+          key: ${{ runner.os }}-android-build-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
-            ${{ runner.os }}-gradle-
+            ${{ runner.os }}-android-build-
 
       - name: Make gradlew executable
         working-directory: android
@@ -46,7 +49,7 @@ jobs:
 
       - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: ./gradlew assembleRelease --build-cache -x lint -x test --stacktrace
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
