@@ -1,4 +1,10 @@
 pluginManagement {
+  repositories {
+    google()
+    mavenCentral()
+    gradlePluginPortal()
+  }
+  
   def reactNativeGradlePlugin = new File(
     providers.exec {
       workingDir(rootDir)
@@ -15,16 +21,10 @@ pluginManagement {
     "../android/expo-gradle-plugin"
   ).absolutePath
   includeBuild(expoPluginsPath)
-  
-  repositories {
-    google()
-    mavenCentral()
-    gradlePluginPortal()
-  }
 }
 
 plugins {
-  id("com.facebook.react.settings") version "0.81.5"
+  id("com.facebook.react.settings")
   id("expo-autolinking-settings")
 }
 
