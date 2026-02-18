@@ -12,6 +12,48 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # ============================================
+# React Native Core (CRITICAL FOR APP STARTUP)
+# ============================================
+-keep class com.facebook.react.** { *; }
+-keep class com.facebook.hermes.** { *; }
+-keep class com.facebook.jni.** { *; }
+-keep class com.facebook.soloader.** { *; }
+
+# Keep React Native modules
+-keepclassmembers class * {
+    @com.facebook.react.uimanager.annotations.ReactProp <methods>;
+    @com.facebook.react.uimanager.annotations.ReactPropGroup <methods>;
+}
+
+# Keep React Native bridge
+-keepclassmembers class * extends com.facebook.react.bridge.JavaScriptModule { *; }
+-keepclassmembers class * extends com.facebook.react.bridge.NativeModule { *; }
+-keepclassmembers class * extends com.facebook.react.bridge.BaseJavaModule { *; }
+
+# ============================================
+# Expo Framework (CRITICAL FOR EXPO APPS)
+# ============================================
+-keep class expo.modules.** { *; }
+-keep class expo.modules.core.** { *; }
+-keep class expo.modules.kotlin.** { *; }
+
+# Keep Expo module registry
+-keepclassmembers class * {
+    @expo.modules.kotlin.modules.Module *;
+}
+
+# ============================================
+# New Architecture / Fabric / TurboModules
+# ============================================
+-keep class com.facebook.react.fabric.** { *; }
+-keep class com.facebook.react.uimanager.** { *; }
+-keep class com.facebook.react.views.** { *; }
+-keep class com.facebook.react.animated.** { *; }
+
+# Keep codegen classes
+-keep class com.facebook.react.viewmanagers.** { *; }
+
+# ============================================
 # VirtuCam Xposed Module — MUST KEEP
 # ============================================
 
