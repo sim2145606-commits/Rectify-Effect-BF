@@ -2,17 +2,23 @@
 
 ## Problem
 
-The Gradle build is failing with the error:
+The Gradle build is failing with multiple errors:
 
 ```
 Error resolving plugin [id: 'com.facebook.react.settings']
 > 25.0.2
 ```
 
-And subsequently:
-
 ```
 Unsupported class file major version 69
+```
+
+```
+Connection to the Kotlin daemon has been unexpectedly lost
+```
+
+```
+There is insufficient memory for the Java Runtime Environment to continue
 ```
 
 ## Root Cause
@@ -23,6 +29,8 @@ You are using **Java 25.0.2** (OpenJDK Corretto 25.0.2), but:
 - Class file major version 69 corresponds to Java 25
 - The maximum Java version supported by Gradle 8.13 is Java 23
 - React Native 0.81.5 and Expo SDK 54 are tested with Java 17 or Java 21 (LTS versions)
+- The Kotlin compiler daemon is crashing due to Java 25 incompatibility
+- Memory allocation failures are occurring due to JVM incompatibility
 
 ## Solution
 
@@ -111,6 +119,33 @@ To permanently set Java 17 as your default:
 3. Edit `Path` system variable and add: `%JAVA_HOME%\bin`
 4. Restart your terminal/IDE
 
+## Additional Workarounds (If You Can't Install Java 17 Immediately)
+
+### Workaround 1: Disable Kotlin Daemon
+
+Add to `android/gradle.properties`:
+
+```properties
+kotlin.compiler.execution.strategy=in-process
+org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError
+```
+
+### Workaround 2: Stop All Gradle Daemons
+
+```powershell
+cd android
+.\gradlew --stop
+```
+
+### Workaround 3: Clean Gradle Cache
+
+```powershell
+cd android
+.\gradlew clean --no-daemon
+```
+
+**IMPORTANT**: These workarounds may allow the build to proceed but are NOT recommended for long-term use. Java 25 is simply not compatible with this project's toolchain. You MUST install Java 17 for stable builds.
+
 ## Verification
 
 After fixing, you should see:
@@ -120,4 +155,15 @@ java -version
 openjdk version "17.x.x" ...
 ```
 
-And the build should succeed without the "Unsupported class file major version" error.
+And the build should succeed without the "Unsupported class file major version" error, Kotlin daemon crashes, or memory allocation failures.
+
+## Current Build Status
+
+Your build is failing because:
+
+1. ✗ Java 25.0.2 is incompatible with Gradle 8.13
+2. ✗ Kotlin compiler daemon cannot run on Java 25
+3. ✗ Memory allocation failures due to JVM incompatibility
+4. ✗ Fallback compilation strategies are also failing
+
+**Action Required**: Install Java 17 (LTS) to resolve all these issues.
