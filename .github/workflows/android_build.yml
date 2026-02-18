@@ -47,9 +47,14 @@ jobs:
         working-directory: android
         run: chmod +x ./gradlew
 
+      - name: Set NODE_ENV
+        run: echo "NODE_ENV=production" >> $GITHUB_ENV
+
       - name: Build Release APK
         working-directory: android
         run: ./gradlew assembleRelease --build-cache -x lint -x test --stacktrace
+        env:
+          NODE_ENV: production
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
