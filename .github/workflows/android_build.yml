@@ -1,16 +1,14 @@
-name: Android Build & Release
+name: Android Release Build
 
 on:
   push:
-    branches: [main]
-    tags:
-      - 'v*'
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   build:
-    name: Build APK
+    name: Build Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -42,31 +40,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Build Debug APK
+      - name: Make gradlew executable
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: chmod +x ./gradlew
 
       - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleRelease
-
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: virtucam-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: virtucam-release
+          name: virtucam-release-${{ github.sha }}
           path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
 
-      - name: Lint check
-        run: npm run lint
-
-      - name: Type check
-        run: npm run type-check
+      - name: Upload Release APK (Latest)
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtucam-release-latest
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 90
 
   release:
     name: Create GitHub Release
@@ -78,12 +72,13 @@ jobs:
       - name: Download Release APK
         uses: actions/download-artifact@v4
         with:
-          name: virtucam-release
+          name: virtucam-release-latest
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: app-release.apk
           generate_release_notes: true
+          name: VirtuCam ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

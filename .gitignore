@@ -51,3 +51,20 @@ CLAUDE.md
 # Java/JVM crash logs
 hs_err_pid*.log
 replay_pid*.log
+
+# Android build artifacts and cache (CRITICAL - prevents 13GB+ bloat)
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/.cxx/
+android/*/build/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Gradle cache
+.gradle/
+local.properties
