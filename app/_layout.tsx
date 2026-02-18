@@ -19,31 +19,8 @@ export default function RootLayout() {
           name="onboarding"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
+        <Stack.Screen name="logs" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="cloud"
-          options={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            presentation: 'card',
-          }}
-        />
-        <Stack.Screen
-          name="engine"
-          options={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            presentation: 'card',
-          }}
-        />
-        <Stack.Screen
-          name="integrity"
-          options={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            presentation: 'card',
-          }}
-        />
         <Stack.Screen name="+not-found" options={{ headerShown: false }} />
       </Stack>
     </>
