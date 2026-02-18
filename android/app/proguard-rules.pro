@@ -43,7 +43,7 @@
 }
 
 # ============================================
-# New Architecture / Fabric / TurboModules
+# New Architecture / Fabric / TurboModules (CRITICAL)
 # ============================================
 -keep class com.facebook.react.fabric.** { *; }
 -keep class com.facebook.react.uimanager.** { *; }
@@ -52,6 +52,26 @@
 
 # Keep codegen classes
 -keep class com.facebook.react.viewmanagers.** { *; }
+
+# Keep TurboModule registry and core modules (FIXES CRASH)
+-keep class com.facebook.react.turbomodule.core.** { *; }
+-keep class com.facebook.react.turbomodule.core.interfaces.** { *; }
+-keep class com.facebook.react.modules.core.** { *; }
+-keep class com.facebook.react.modules.systeminfo.** { *; }
+
+# Keep all TurboModule implementations
+-keep @com.facebook.react.bridge.ReactModule class * { *; }
+-keep @com.facebook.react.turbomodule.core.interfaces.TurboModule class * { *; }
+
+# Keep PlatformConstants and other core modules
+-keep class com.facebook.react.modules.systeminfo.AndroidInfoModule { *; }
+-keep class com.facebook.react.modules.core.DeviceEventManagerModule { *; }
+-keep class com.facebook.react.modules.core.ExceptionsManagerModule { *; }
+-keep class com.facebook.react.modules.core.Timing { *; }
+-keep class com.facebook.react.modules.core.HeadlessJsTaskSupportModule { *; }
+-keep class com.facebook.react.modules.appstate.AppStateModule { *; }
+-keep class com.facebook.react.modules.appearance.AppearanceModule { *; }
+-keep class com.facebook.react.modules.deviceinfo.DeviceInfoModule { *; }
 
 # ============================================
 # VirtuCam Xposed Module — MUST KEEP
