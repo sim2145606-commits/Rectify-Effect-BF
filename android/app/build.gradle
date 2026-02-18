@@ -182,4 +182,5 @@ dependencies {
     compileOnly 'de.robv.android.xposed:api:82'
 }
 
-apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)
+// Expo handles autolinking automatically via expo-modules-autolinking plugin
+// No need for React Native CLI's native_modules.gradle
