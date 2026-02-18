@@ -15,10 +15,16 @@ pluginManagement {
     "../android/expo-gradle-plugin"
   ).absolutePath
   includeBuild(expoPluginsPath)
+  
+  repositories {
+    google()
+    mavenCentral()
+    gradlePluginPortal()
+  }
 }
 
 plugins {
-  id("com.facebook.react.settings")
+  id("com.facebook.react.settings") version "0.81.5"
   id("expo-autolinking-settings")
 }
 
