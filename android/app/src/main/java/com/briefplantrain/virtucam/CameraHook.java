@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicReference;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.IXposedHookZygoteInit;
@@ -113,6 +114,10 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private Bitmap cachedFrame = null;
     private String cachedMediaPath = null;
     private final Object frameLock = new Object();
+    
+    // PERFORMANCE FIX: Bitmap pool to avoid GC churn
+    private final Map<Long, Bitmap> bitmapPool = new ConcurrentHashMap<>();
+    private static final int MAX_POOL_SIZE = 8;
 
     // Thread-local YUV buffers to avoid races
     private final ThreadLocal<int[]> threadLocalArgbBuffer = new ThreadLocal<>();
@@ -131,7 +136,8 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private volatile boolean videoDecoderRunning = false;
     private MediaExtractor videoExtractor;
     private MediaCodec videoCodec;
-    private volatile Bitmap currentVideoFrame = null;
+    // THREAD SAFETY FIX: Use AtomicReference to avoid blocking in frame access
+    private final AtomicReference<Bitmap> currentVideoFrame = new AtomicReference<>(null);
 
     private long lastConfigReload = 0;
     private static final long CONFIG_RELOAD_INTERVAL = 3000;
@@ -343,7 +349,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     // Invalidate frame cache if media source changed
                     if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
                         synchronized (frameLock) {
-                            if (cachedFrame != null && cachedFrame != currentVideoFrame) {
+                            if (cachedFrame != null && cachedFrame != currentVideoFrame.get()) {
                                 cachedFrame.recycle();
                             }
                             cachedFrame = null;
@@ -408,7 +414,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         // Invalidate frame cache if media source changed
                         if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
                             synchronized (frameLock) {
-                                if (cachedFrame != null && cachedFrame != currentVideoFrame) {
+                                if (cachedFrame != null && cachedFrame != currentVideoFrame.get()) {
                                     cachedFrame.recycle();
                                 }
                                 cachedFrame = null;
@@ -762,11 +768,12 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     }
 
     private void recycleTempFrame(Bitmap frame) {
+        // PERFORMANCE FIX: Return to pool instead of recycling
+        // THREAD SAFETY FIX: Check against AtomicReference value
         synchronized (frameLock) {
-            if (frame != cachedFrame && frame != currentVideoFrame) {
-                frame.recycle();
-            }
+            if (frame == cachedFrame || frame == currentVideoFrame.get()) return;
         }
+        returnBitmapToPool(frame);
     }
 
     /**
@@ -1147,12 +1154,12 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
     private void ensureFrameLoaded() {
         if (isVideoSource) {
-            // Grab latest decoded video frame
+            // THREAD SAFETY FIX: Non-blocking frame swap using AtomicReference
             Bitmap latest = videoFrameQueue.poll();
             if (latest != null) {
                 Bitmap old = cachedFrame;
                 cachedFrame = latest;
-                currentVideoFrame = latest;
+                currentVideoFrame.set(latest);
                 if (old != null && old != latest) {
                     old.recycle();
                 }
@@ -1224,7 +1231,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
                 cachedFrame = retriever.getFrameAtTime(0,
                         MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-                currentVideoFrame = cachedFrame;
+                currentVideoFrame.set(cachedFrame);
             } finally {
                 try { retriever.release(); } catch (Exception ignored) {}
             }
@@ -1502,19 +1509,20 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             while ((frame = videoFrameQueue.poll()) != null) {
                 frame.recycle();
             }
-            currentVideoFrame = null;
+            currentVideoFrame.set(null);
         }
     }
 
     /**
      * Apply transformations: scale, rotation, mirror, offset.
+     * PERFORMANCE FIX: Uses bitmap pool to avoid GC churn.
      */
     private Bitmap processFrame(Bitmap source, int targetWidth, int targetHeight) {
         if (targetWidth <= 0 || targetHeight <= 0) return source;
 
         try {
-            Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight,
-                    Bitmap.Config.ARGB_8888);
+            // PERFORMANCE FIX: Reuse bitmap from pool
+            Bitmap output = obtainBitmapFromPool(targetWidth, targetHeight);
             Canvas canvas = new Canvas(output);
             canvas.drawColor(Color.BLACK);
 
@@ -1561,6 +1569,49 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 return null;
             }
         }
+    }
+    
+    // =========================================================================
+    // Bitmap Pool Management (PERFORMANCE FIX)
+    // =========================================================================
+    
+    /**
+     * Obtain a bitmap from the pool or create a new one.
+     * Reuses bitmaps to avoid GC pressure.
+     */
+    private Bitmap obtainBitmapFromPool(int width, int height) {
+        long key = ((long) width << 32) | height;
+        Bitmap pooled = bitmapPool.remove(key);
+        
+        if (pooled != null && !pooled.isRecycled()
+                && pooled.getWidth() == width && pooled.getHeight() == height) {
+            return pooled;
+        }
+        
+        // Create new bitmap if pool miss
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+    }
+    
+    /**
+     * Return a bitmap to the pool for reuse.
+     * THREAD SAFETY FIX: Check against AtomicReference value
+     */
+    private void returnBitmapToPool(Bitmap bitmap) {
+        if (bitmap == null || bitmap.isRecycled()) return;
+        
+        // Don't pool if it's the cached frame or current video frame
+        synchronized (frameLock) {
+            if (bitmap == cachedFrame || bitmap == currentVideoFrame.get()) return;
+        }
+        
+        // Limit pool size to prevent memory bloat
+        if (bitmapPool.size() >= MAX_POOL_SIZE) {
+            bitmap.recycle();
+            return;
+        }
+        
+        long key = ((long) bitmap.getWidth() << 32) | bitmap.getHeight();
+        bitmapPool.put(key, bitmap);
     }
 
     // =========================================================================

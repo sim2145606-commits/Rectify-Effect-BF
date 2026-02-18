@@ -227,27 +227,31 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     /**
      * Check if root access is available
+     * PERFORMANCE FIX: Runs on background thread to avoid ANR
      */
     @ReactMethod
     fun checkRootAccess(promise: Promise) {
-        try {
-            val process = Runtime.getRuntime().exec("su -c id")
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val output = reader.readText()
-            val exitCode = process.waitFor()
-            
-            val result = Arguments.createMap()
-            result.putBoolean("granted", exitCode == 0 && output.contains("uid=0"))
-            result.putString("output", output)
-            result.putInt("exitCode", exitCode)
-            
-            promise.resolve(result)
-        } catch (e: Exception) {
-            val result = Arguments.createMap()
-            result.putBoolean("granted", false)
-            putErrorMessage(result, e)
-            promise.resolve(result)
-        }
+        // Run on background thread to avoid blocking UI
+        Thread {
+            try {
+                val process = Runtime.getRuntime().exec("su -c id")
+                val reader = BufferedReader(InputStreamReader(process.inputStream))
+                val output = reader.readText()
+                val exitCode = process.waitFor()
+                
+                val result = Arguments.createMap()
+                result.putBoolean("granted", exitCode == 0 && output.contains("uid=0"))
+                result.putString("output", output)
+                result.putInt("exitCode", exitCode)
+                
+                promise.resolve(result)
+            } catch (e: Exception) {
+                val result = Arguments.createMap()
+                result.putBoolean("granted", false)
+                putErrorMessage(result, e)
+                promise.resolve(result)
+            }
+        }.start()
     }
 
     /**
@@ -932,15 +936,24 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     
     /**
      * Execute a root command and return output
+     * PERFORMANCE FIX: This is called from background threads in writeConfig
+     * to avoid blocking the UI thread with root operations
      */
     private fun executeRootCommand(command: String): String {
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val output = reader.readText()
-            process.waitFor()
+            // Add timeout to prevent indefinite blocking
+            val completed = process.waitFor(5, TimeUnit.SECONDS)
+            if (!completed) {
+                process.destroy()
+                android.util.Log.w("VirtuCamSettings", "Root command timed out: $command")
+                return ""
+            }
             output
         } catch (e: Exception) {
+            android.util.Log.w("VirtuCamSettings", "Root command failed: ${e.message}")
             ""
         }
     }

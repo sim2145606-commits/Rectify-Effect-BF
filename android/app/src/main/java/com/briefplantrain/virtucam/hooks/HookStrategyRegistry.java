@@ -20,13 +20,17 @@ public class HookStrategyRegistry {
     private final Map<String, IHookStrategy> packageMap = new HashMap<>();
 
     private HookStrategyRegistry() {
-        // Register all app-specific strategies
-        register(new WhatsAppHookStrategy());
+        // CLEANUP FIX: Only register strategies that are actually implemented
+        // Removed WhatsAppHookStrategy and CameraXHookStrategy as they only contain TODOs
         register(new DouYinHookStrategy());
-        // Register more strategies here as needed:
+        
+        // TODO: Re-enable these once they are fully implemented:
+        // register(new WhatsAppHookStrategy());
         // register(new InstagramHookStrategy());
         // register(new SnapchatHookStrategy());
         // register(new TelegramHookStrategy());
+        
+        XposedBridge.log(TAG + ": Initialized with " + strategies.size() + " active strategies");
     }
 
     public static synchronized HookStrategyRegistry getInstance() {

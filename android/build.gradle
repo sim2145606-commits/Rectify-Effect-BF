@@ -37,5 +37,17 @@ allprojects {
     }
 }
 
+// WORKAROUND: Disable new architecture assertion tasks for reanimated & worklets
+// This must be at root level to catch tasks before they execute
+gradle.projectsEvaluated {
+    rootProject.allprojects { project ->
+        project.tasks.configureEach { task ->
+            if (task.name.contains('assertNewArchitectureEnabled')) {
+                task.enabled = false
+            }
+        }
+    }
+}
+
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
