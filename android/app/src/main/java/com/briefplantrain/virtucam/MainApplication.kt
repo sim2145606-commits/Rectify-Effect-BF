@@ -40,12 +40,8 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    // Initialize SoLoader first (required for New Architecture)
+    // Initialize SoLoader for React Native
     SoLoader.init(this, false)
-    // Initialize New Architecture if enabled
-    if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-      DefaultNewArchitectureEntryPoint.load()
-    }
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
   }
 
