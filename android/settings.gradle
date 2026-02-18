@@ -5,7 +5,6 @@ pluginManagement {
     gradlePluginPortal()
   }
   
-  
   def expoPluginsPath = new File(
     providers.exec {
       workingDir(rootDir)
@@ -14,28 +13,14 @@ pluginManagement {
     "../android/expo-gradle-plugin"
   ).absolutePath
   includeBuild(expoPluginsPath)
-  
-  def reactNativeGradlePlugin = new File(
-    providers.exec {
-      workingDir(rootDir)
-      commandLine("node", "--print", "require.resolve('@react-native/gradle-plugin/package.json')")
-    }.standardOutput.asText.get().trim()
-  ).getParentFile().absolutePath
-  includeBuild(reactNativeGradlePlugin)
 }
 
 plugins {
-  id("com.facebook.react.settings")
   id("expo-autolinking-settings")
 }
 
-extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
-  if (System.getenv('EXPO_USE_COMMUNITY_AUTOLINKING') == '1') {
-    ex.autolinkLibrariesFromCommand()
-  } else {
-    ex.autolinkLibrariesFromCommand(expoAutolinking.rnConfigCommand)
-  }
-}
+apply from: new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim(), "../scripts/react-native.config.js")
+
 expoAutolinking.useExpoModules()
 
 rootProject.name = 'Virtucam'
