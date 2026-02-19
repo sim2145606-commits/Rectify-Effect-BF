@@ -72,11 +72,13 @@ jobs:
         run: chmod +x android/gradlew
 
       # ── 7. Build ─────────────────────────────────────────────────────────────
+      # NOTE: Do NOT set NODE_ENV=production here. When set, npm skips devDependencies
+      # (including metro) during install, causing createBundleReleaseJsAndAssets to
+      # fail with "Cannot find module 'metro/src/lib/TerminalReporter'".
+      # Gradle's assembleRelease already builds a release APK without this env var.
       - name: Build Release APK
         working-directory: android
         run: ./gradlew assembleRelease --build-cache -x lint -x test --stacktrace
-        env:
-          NODE_ENV: production
 
       # ── 8. Upload artefacts ──────────────────────────────────────────────────
       - name: Upload Release APK (by commit)
