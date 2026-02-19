@@ -15,23 +15,35 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Set up Node.js
+      # ── 1. Node.js ────────────────────────────────────────────────────────────
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
+      # ── 2. JS dependencies ───────────────────────────────────────────────────
       - name: Install Node dependencies
         run: npm ci --legacy-peer-deps
 
-      # Fixed: cache ~/.gradle/caches + ~/.gradle/wrapper (not ~/.android/build-cache
-      # which is the wrong path and was never populated by Gradle).
+      # ── 3. JDK (needed by Gradle, set up before prebuild so JAVA_HOME is
+      #         available if any Expo plugin inspects it during prebuild) ────────
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # ── 4. Expo Prebuild ─────────────────────────────────────────────────────
+      # This regenerates the entire android/ native directory from scratch,
+      # including android/build/generated/autolinking/autolinking.json which
+      # Gradle's GeneratePackageListTask requires at task-graph construction time.
+      # Running with --clean ensures no stale artefacts from a previously
+      # committed android/ directory interfere with the build.
+      - name: Expo Prebuild (Android)
+        run: npx expo prebuild --platform android --clean --non-interactive
+
+      # ── 5. Gradle cache ──────────────────────────────────────────────────────
       - name: Cache Gradle wrapper and caches
         uses: actions/cache@v4
         with:
@@ -43,52 +55,37 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Setup Gradle Wrapper permissions
+      # ── 6. Gradle permissions ────────────────────────────────────────────────
+      - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Set NODE_ENV
-        run: echo "NODE_ENV=production" >> $GITHUB_ENV
-
-      # Fix: Generate autolinking.json via Node.js CLI BEFORE any Gradle invocation.
-      #
-      # Root cause: Gradle 8.13 validates all @InputFile properties during task graph
-      # construction — before any task executes. GeneratePackageListTask.autolinkInputFile
-      # is declared as @InputFile (not @Optional), so Gradle aborts the entire build if
-      # the file is absent, even before :expo:generatePackagesList can write it.
-      #
-      # Solution: Use the expo-modules-autolinking Node.js CLI to write the file
-      # outside of Gradle entirely, guaranteeing it exists when ./gradlew starts.
-      - name: Generate Expo autolinking manifest
-        run: |
-          mkdir -p android/build/generated/autolinking
-          node node_modules/expo-modules-autolinking/bin/expo-modules-autolinking.js \
-            generate-package-list \
-            --platform android \
-            --target android/build/generated/autolinking/autolinking.json \
-            --namespace com.briefplantrain.virtucam
-        env:
-          NODE_ENV: production
-
+      # ── 7. Build ─────────────────────────────────────────────────────────────
       - name: Build Release APK
         working-directory: android
         run: ./gradlew assembleRelease --build-cache -x lint -x test --stacktrace
         env:
           NODE_ENV: production
 
-      - name: Upload Release APK
+      # ── 8. Upload artefacts ──────────────────────────────────────────────────
+      - name: Upload Release APK (by commit)
         uses: actions/upload-artifact@v4
         with:
           name: virtucam-release-${{ github.sha }}
           path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
           retention-days: 30
 
-      - name: Upload Release APK (Latest)
+      - name: Upload Release APK (latest)
         uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
         with:
           name: virtucam-release-latest
           path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          overwrite: true
           retention-days: 90
 
+  # ── GitHub Release (tag pushes only) ────────────────────────────────────────
   release:
     name: Create GitHub Release
     needs: build
@@ -100,11 +97,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: virtucam-release-latest
+          path: ./artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app-release.apk
+          files: artifacts/app-release.apk
           generate_release_notes: true
           name: VirtuCam ${{ github.ref_name }}
         env:
