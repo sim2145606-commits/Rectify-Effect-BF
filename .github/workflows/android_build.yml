@@ -30,9 +30,8 @@ jobs:
       - name: Install Node dependencies
         run: npm ci --legacy-peer-deps
 
-      # Fix: Cache ~/.gradle/caches and ~/.gradle/wrapper (not ~/.android/build-cache
-      # which is the wrong path and was never being populated by Gradle).
-      # Also include android/.gradle for project-level Gradle caches.
+      # Fixed: cache ~/.gradle/caches + ~/.gradle/wrapper (not ~/.android/build-cache
+      # which is the wrong path and was never populated by Gradle).
       - name: Cache Gradle wrapper and caches
         uses: actions/cache@v4
         with:
@@ -50,18 +49,23 @@ jobs:
       - name: Set NODE_ENV
         run: echo "NODE_ENV=production" >> $GITHUB_ENV
 
-      # Fix: Pre-generate autolinking.json by running :expo:generatePackagesList
-      # as a separate Gradle invocation BEFORE assembleRelease.
+      # Fix: Generate autolinking.json via Node.js CLI BEFORE any Gradle invocation.
       #
-      # Root cause: :app:generateAutolinkingPackageList (React Native plugin) reads
-      # android/build/generated/autolinking/autolinking.json, but Gradle has no
-      # declared dependency on :expo:generatePackagesList (Expo plugin) which writes
-      # that file. In a cold-cache CI environment the file is absent when the RN task
-      # runs, causing the build to fail. Running the Expo task first guarantees the
-      # file exists before assembleRelease starts.
+      # Root cause: Gradle 8.13 validates all @InputFile properties during task graph
+      # construction — before any task executes. GeneratePackageListTask.autolinkInputFile
+      # is declared as @InputFile (not @Optional), so Gradle aborts the entire build if
+      # the file is absent, even before :expo:generatePackagesList can write it.
+      #
+      # Solution: Use the expo-modules-autolinking Node.js CLI to write the file
+      # outside of Gradle entirely, guaranteeing it exists when ./gradlew starts.
       - name: Generate Expo autolinking manifest
-        working-directory: android
-        run: ./gradlew :expo:generatePackagesList --stacktrace
+        run: |
+          mkdir -p android/build/generated/autolinking
+          node node_modules/expo-modules-autolinking/bin/expo-modules-autolinking.js \
+            generate-package-list \
+            --platform android \
+            --target android/build/generated/autolinking/autolinking.json \
+            --namespace com.briefplantrain.virtucam
         env:
           NODE_ENV: production
 
