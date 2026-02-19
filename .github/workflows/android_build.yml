@@ -54,22 +54,26 @@ jobs:
       - name: Expo Prebuild (Android)
         run: npx expo prebuild --platform android --clean --no-install
 
-      # ── 5b. Patch Kotlin version ──────────────────────────────────────────────
-      # Root cause: react-native 0.76's bundled libs.versions.toml sets kotlin="1.9.25".
-      # expo-modules-autolinking's useExpoVersionCatalog() loads that TOML as the base
-      # for the "expoLibs" version catalog, then overrides individual entries only when
-      # the corresponding Gradle property (android.kotlinVersion) is present.
-      # ExpoRootProjectPlugin then reads kotlinVersion from the catalog — getting 1.9.25 —
-      # and KSPLookup has no entry for 1.9.25, causing the build to fail.
+      # ── 5b. Patch generated android files after expo prebuild ─────────────────
+      # Fix 1 — Kotlin version:
+      #   react-native 0.76's bundled libs.versions.toml sets kotlin="1.9.25".
+      #   useExpoVersionCatalog() loads that TOML as the base for the "expoLibs"
+      #   version catalog, then overrides entries only when the Gradle property
+      #   android.kotlinVersion is present. ExpoRootProjectPlugin reads kotlinVersion
+      #   from the catalog → gets 1.9.25 → KSPLookup has no entry → crash.
+      #   Fix: set android.kotlinVersion=2.0.21 so the catalog override fires.
       #
-      # Fix: set android.kotlinVersion=2.0.21 in gradle.properties so the catalog
-      # override fires, AND update kotlinVersion= so the ext fallback also uses 2.0.21.
-      - name: Patch Kotlin version in gradle.properties to 2.0.21
+      # Fix 2 — enableBundleCompression:
+      #   expo prebuild generates enableBundleCompression in app/build.gradle but
+      #   ReactExtension in RN 0.76 doesn't support this property → crash.
+      #   Fix: delete that line from the generated file.
+      - name: Patch generated android files after expo prebuild
         run: |
           sed -i 's/^kotlinVersion=.*/kotlinVersion=2.0.21/' android/gradle.properties
           grep -q '^android\.kotlinVersion=' android/gradle.properties \
             && sed -i 's/^android\.kotlinVersion=.*/android.kotlinVersion=2.0.21/' android/gradle.properties \
             || echo 'android.kotlinVersion=2.0.21' >> android/gradle.properties
+          sed -i '/enableBundleCompression/d' android/app/build.gradle
 
       # ── 6. Gradle permissions ────────────────────────────────────────────────
       - name: Make gradlew executable
