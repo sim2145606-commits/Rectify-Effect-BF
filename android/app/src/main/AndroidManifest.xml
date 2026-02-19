@@ -1,8 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
-  <!-- PERMISSION FIX: Removed MANAGE_EXTERNAL_STORAGE per Google Play policy -->
-  <!-- Using granular media permissions instead (READ_MEDIA_VIDEO) which is sufficient -->
-  <!-- for accessing user-selected video files via Storage Access Framework (SAF) -->
-  
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   
@@ -10,10 +6,13 @@
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
   
-  <!-- Android 13+ granular media permissions (preferred over MANAGE_EXTERNAL_STORAGE) -->
+  <!-- Android 13+ granular media permissions -->
   <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
   <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
+  
+  <!-- MANAGE_EXTERNAL_STORAGE for full file system access (required for Xposed module) -->
+  <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage"/>
   
   <!-- Other permissions -->
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
