@@ -5,10 +5,12 @@
     <item name="colorPrimary">@color/colorPrimary</item>
     <item name="android:statusBarColor">#ffffff</item>
   </style>
-  <style name="Theme.App.SplashScreen" parent="Theme.SplashScreen">
-    <item name="windowSplashScreenBackground">@color/splashscreen_background</item>
-    <item name="windowSplashScreenAnimatedIcon">@drawable/splashscreen_logo</item>
-    <item name="postSplashScreenTheme">@style/AppTheme</item>
-    <item name="android:windowSplashScreenBehavior">icon_preferred</item>
+  <style name="Theme.App.SplashScreen" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <!-- Use window background drawable for splash screen -->
+    <item name="android:windowBackground">@drawable/splash_screen</item>
+    <!-- Match status bar color to splash background -->
+    <item name="android:statusBarColor">@color/splashscreen_background</item>
+    <!-- Disable window content transitions for instant display -->
+    <item name="android:windowDisablePreview">false</item>
   </style>
 </resources>
