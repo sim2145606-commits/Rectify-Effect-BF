@@ -44,7 +44,7 @@ module.exports = {
         android: {},
       },
     },
-    'react-native-worklets': {
+    'react-native-worklets-core': {
       platforms: {
         android: {},
       },

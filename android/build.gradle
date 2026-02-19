@@ -6,7 +6,7 @@ buildscript {
     mavenCentral()
   }
   dependencies {
-    classpath('com.android.tools.build:gradle:8.11.0')
+    classpath('com.android.tools.build:gradle:8.7.2')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
   }
@@ -17,34 +17,22 @@ allprojects {
         google()
         mavenCentral()
         maven { url 'https://www.jitpack.io' }
-        
+
         // Add this line specifically for the Xposed API
         maven { url 'https://api.xposed.info/' }
     }
-    
+
     // Suppress deprecation warnings for faster builds
     tasks.withType(JavaCompile).configureEach {
         options.compilerArgs << '-Xlint:-deprecation'
         options.compilerArgs << '-Xlint:-unchecked'
     }
-    
+
     // Suppress Kotlin warnings
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
         compilerOptions {
             allWarningsAsErrors.set(false)
             suppressWarnings.set(true)
-        }
-    }
-}
-
-// WORKAROUND: Disable new architecture assertion tasks for reanimated & worklets
-// This must be at root level to catch tasks before they execute
-gradle.projectsEvaluated {
-    rootProject.allprojects { project ->
-        project.tasks.configureEach { task ->
-            if (task.name.contains('assertNewArchitectureEnabled')) {
-                task.enabled = false
-            }
         }
     }
 }

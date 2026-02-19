@@ -56,19 +56,6 @@ react {
  */
 def enableProguardInReleaseBuilds = false
 
-/**
- * The preferred build flavor of JavaScriptCore (JSC)
- *
- * For example, to use the international variant, you can use:
- * `def jscFlavor = 'org.webkit:android-jsc-intl:+'`
- *
- * The international variant includes ICU i18n library and necessary data
- * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare` that
- * give correct results when using with locales other than en-US. Note that
- * this variant is about 6MiB larger per architecture than default.
- */
-def jscFlavor = 'org.webkit:android-jsc:+'
-
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -81,10 +68,10 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
-        
+
         // Enable multidex for apps with more than 65K methods
         multiDexEnabled true
-        
+
         // Configure NDK build
         externalNativeBuild {
             cmake {
@@ -94,12 +81,12 @@ android {
                 abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
             }
         }
-        
+
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
         }
     }
-    
+
     // Configure native build
     externalNativeBuild {
         cmake {
@@ -126,7 +113,7 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-            
+
             // Ensure native libraries are compressed in APK
             packagingOptions {
                 jniLibs {
@@ -137,50 +124,22 @@ android {
     }
 }
 
-// WORKAROUND: Disable new architecture assertion in react-native-reanimated
-// This prevents build failures when newArchEnabled=false
-project.afterEvaluate {
-    def reanimatedProject = project.rootProject.findProject(':react-native-reanimated')
-    if (reanimatedProject != null) {
-        reanimatedProject.tasks.findAll { 
-            it.name.contains('assertNewArchitectureEnabled') 
-        }.each { task ->
-            task.enabled = false
-        }
-    }
-    
-    def workletsProject = project.rootProject.findProject(':react-native-worklets')
-    if (workletsProject != null) {
-        workletsProject.tasks.findAll { 
-            it.name.contains('assertNewArchitectureEnabled') 
-        }.each { task ->
-            task.enabled = false
-        }
-    }
-}
-
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    
-    // Flipper is only for debug builds
-    debugImplementation("com.facebook.react:flipper-integration")
 
-    if (hermesEnabled.toBoolean()) {
-        implementation("com.facebook.react:hermes-android")
-    } else {
-        implementation jscFlavor
-    }
-    
+    // React Native 0.76+ uses Hermes exclusively — JSC is no longer supported
+    implementation("com.facebook.react:hermes-android")
+
     // Kotlin standard library
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
-    
+
     // AndroidX libraries
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.multidex:multidex:2.0.1'
-    
+
     // Xposed API (provided, not packaged in APK)
     compileOnly 'de.robv.android.xposed:api:82'
 }
