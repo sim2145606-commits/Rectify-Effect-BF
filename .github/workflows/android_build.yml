@@ -55,13 +55,21 @@ jobs:
         run: npx expo prebuild --platform android --clean --no-install
 
       # ── 5b. Patch Kotlin version ──────────────────────────────────────────────
-      # expo prebuild generates android/gradle.properties with kotlinVersion=1.9.25
-      # but expo-modules-autolinking 3.x (expo-modules-core 3.x) requires Kotlin 2.0+.
-      # The ExpoRootProjectPlugin uses setIfNotExist(), so it only falls back to 2.0.21
-      # when kotlinVersion is NOT already set — but gradle.properties pre-sets it to
-      # 1.9.25, which wins. We patch it here to 2.0.21 after prebuild runs.
-      - name: Patch kotlinVersion in gradle.properties to 2.0.21
-        run: sed -i 's/^kotlinVersion=.*/kotlinVersion=2.0.21/' android/gradle.properties
+      # Root cause: react-native 0.76's bundled libs.versions.toml sets kotlin="1.9.25".
+      # expo-modules-autolinking's useExpoVersionCatalog() loads that TOML as the base
+      # for the "expoLibs" version catalog, then overrides individual entries only when
+      # the corresponding Gradle property (android.kotlinVersion) is present.
+      # ExpoRootProjectPlugin then reads kotlinVersion from the catalog — getting 1.9.25 —
+      # and KSPLookup has no entry for 1.9.25, causing the build to fail.
+      #
+      # Fix: set android.kotlinVersion=2.0.21 in gradle.properties so the catalog
+      # override fires, AND update kotlinVersion= so the ext fallback also uses 2.0.21.
+      - name: Patch Kotlin version in gradle.properties to 2.0.21
+        run: |
+          sed -i 's/^kotlinVersion=.*/kotlinVersion=2.0.21/' android/gradle.properties
+          grep -q '^android\.kotlinVersion=' android/gradle.properties \
+            && sed -i 's/^android\.kotlinVersion=.*/android.kotlinVersion=2.0.21/' android/gradle.properties \
+            || echo 'android.kotlinVersion=2.0.21' >> android/gradle.properties
 
       # ── 6. Gradle permissions ────────────────────────────────────────────────
       - name: Make gradlew executable
