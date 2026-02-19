@@ -40,9 +40,13 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    android.util.Log.d("VirtuCam", "🚀 Application starting...")
+    android.util.Log.d("VirtuCam", "BuildConfig.DEBUG = ${BuildConfig.DEBUG}")
+    android.util.Log.d("VirtuCam", "BuildConfig.IS_NEW_ARCHITECTURE_ENABLED = ${BuildConfig.IS_NEW_ARCHITECTURE_ENABLED}")
     // Initialize SoLoader for React Native
     SoLoader.init(this, false)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
+    android.util.Log.d("VirtuCam", "✅ Application initialized successfully")
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {

@@ -28,7 +28,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         private val MARKER_FILE_TIMEOUT_MS = TimeUnit.HOURS.toMillis(24)
     }
 
-    override fun getName(): String = "VirtuCamSettings"
+    override fun getName(): String {
+        android.util.Log.d("VirtuCamSettings", "✅ Native module registered successfully!")
+        return "VirtuCamSettings"
+    }
 
     /**
      * Write configuration to SharedPreferences (world-readable for Xposed module)

@@ -61,6 +61,11 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    // Enable BuildConfig generation (REQUIRED for MainApplication.kt)
+    buildFeatures {
+        buildConfig = true
+    }
+
     namespace 'com.briefplantrain.virtucam'
     defaultConfig {
         applicationId 'com.briefplantrain.virtucam'
@@ -71,6 +76,9 @@ android {
 
         // Enable multidex for apps with more than 65K methods
         multiDexEnabled true
+
+        // BuildConfig fields (REQUIRED for MainApplication.kt)
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
 
         // Configure NDK build
         externalNativeBuild {

@@ -9,6 +9,15 @@ export default function Index() {
   const [onboardingComplete, setOnboardingComplete] = useState(false);
 
   useEffect(() => {
+    // Diagnostic: Check if native module is available on startup
+    import('@/services/NativeModuleDiagnostics').then(({ diagnoseNativeModule }) => {
+      const diag = diagnoseNativeModule();
+      console.log('🔍 Native Module Diagnostic:', diag);
+      if (!diag.nativeModuleExists) {
+        console.error('⚠️ CRITICAL: Native module not loaded! App will not function correctly.');
+      }
+    });
+
     AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETE)
       .then(value => {
         setOnboardingComplete(value === 'true');

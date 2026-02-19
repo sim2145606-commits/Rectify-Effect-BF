@@ -7,7 +7,10 @@ import com.facebook.react.uimanager.ViewManager
 
 class VirtuCamSettingsPackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        return listOf(VirtuCamSettingsModule(reactContext))
+        android.util.Log.d("VirtuCamSettings", "📦 Creating native modules...")
+        val module = VirtuCamSettingsModule(reactContext)
+        android.util.Log.d("VirtuCamSettings", "📦 Module created: ${module.name}")
+        return listOf(module)
     }
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
