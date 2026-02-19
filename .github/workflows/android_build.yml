@@ -54,6 +54,15 @@ jobs:
       - name: Expo Prebuild (Android)
         run: npx expo prebuild --platform android --clean --no-install
 
+      # ── 5b. Patch Kotlin version ──────────────────────────────────────────────
+      # expo prebuild generates android/gradle.properties with kotlinVersion=1.9.25
+      # but expo-modules-autolinking 3.x (expo-modules-core 3.x) requires Kotlin 2.0+.
+      # The ExpoRootProjectPlugin uses setIfNotExist(), so it only falls back to 2.0.21
+      # when kotlinVersion is NOT already set — but gradle.properties pre-sets it to
+      # 1.9.25, which wins. We patch it here to 2.0.21 after prebuild runs.
+      - name: Patch kotlinVersion in gradle.properties to 2.0.21
+        run: sed -i 's/^kotlinVersion=.*/kotlinVersion=2.0.21/' android/gradle.properties
+
       # ── 6. Gradle permissions ────────────────────────────────────────────────
       - name: Make gradlew executable
         run: chmod +x android/gradlew
