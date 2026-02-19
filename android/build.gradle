@@ -30,9 +30,9 @@ allprojects {
     
     // Suppress Kotlin warnings
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-        kotlinOptions {
-            allWarningsAsErrors = false
-            suppressWarnings = true
+        compilerOptions {
+            allWarningsAsErrors.set(false)
+            suppressWarnings.set(true)
         }
     }
 }
