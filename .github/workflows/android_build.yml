@@ -34,26 +34,25 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # ── 4. Expo Prebuild ─────────────────────────────────────────────────────
-      # This regenerates the entire android/ native directory from scratch,
-      # including android/build/generated/autolinking/autolinking.json which
-      # Gradle's GeneratePackageListTask requires at task-graph construction time.
-      # Running with --clean ensures no stale artefacts from a previously
-      # committed android/ directory interfere with the build.
-      - name: Expo Prebuild (Android)
-        run: npx expo prebuild --platform android --clean --non-interactive
-
-      # ── 5. Gradle cache ──────────────────────────────────────────────────────
+      # ── 4. Gradle cache ──────────────────────────────────────────────────────
       - name: Cache Gradle wrapper and caches
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            android/.gradle
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+
+      # ── 5. Expo Prebuild ─────────────────────────────────────────────────────
+      # Regenerates the entire android/ native directory from scratch, including
+      # android/build/generated/autolinking/autolinking.json which Gradle's
+      # GeneratePackageListTask requires at task-graph construction time.
+      # --clean  : wipes any previously committed android/ dir before regenerating
+      # --no-install : skips re-running npm install (already done above)
+      - name: Expo Prebuild (Android)
+        run: npx expo prebuild --platform android --clean --no-install
 
       # ── 6. Gradle permissions ────────────────────────────────────────────────
       - name: Make gradlew executable
