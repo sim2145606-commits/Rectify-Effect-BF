@@ -4,33 +4,38 @@ echo VirtuCam APK Builder
 echo ========================================
 echo.
 
-echo [1/5] Cleaning previous build...
+echo [1/6] Cleaning node_modules...
+if exist node_modules rmdir /s /q node_modules
+echo Done!
+echo.
+
+echo [2/6] Installing dependencies...
+call npm install
+echo Done!
+echo.
+
+echo [3/6] Cleaning previous build...
 cd android
 call gradlew.bat clean
 cd ..
 echo Done!
 echo.
 
-echo [2/5] Installing dependencies...
-call npm install
-echo Done!
-echo.
-
-echo [3/5] Building release APK...
+echo [4/6] Building release APK...
 cd android
 call gradlew.bat assembleRelease
 cd ..
 echo Done!
 echo.
 
-echo [4/5] Locating APK...
+echo [5/6] Locating APK...
 set APK_PATH=android\app\build\outputs\apk\release\app-release.apk
 if exist "%APK_PATH%" (
     echo APK built successfully!
     echo Location: %APK_PATH%
     echo.
     
-    echo [5/5] Installing on device...
+    echo [6/6] Installing on device...
     echo Make sure your device is connected via USB with USB debugging enabled.
     pause
     adb install -r "%APK_PATH%"
