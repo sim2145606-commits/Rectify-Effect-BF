@@ -1,4 +1,4 @@
-name: Android Release Build
+﻿name: Android Release Build
 
 on:
   push:
@@ -30,23 +30,40 @@ jobs:
       - name: Install Node dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Setup Gradle Wrapper
-        run: |
-          cd android
-          chmod +x gradlew
-          # The Gradle wrapper will automatically use the version specified in gradle-wrapper.properties
-          # No need to setup a separate Gradle installation
-
-      - name: Cache Android build cache
+      # Fix: Cache ~/.gradle/caches and ~/.gradle/wrapper (not ~/.android/build-cache
+      # which is the wrong path and was never being populated by Gradle).
+      # Also include android/.gradle for project-level Gradle caches.
+      - name: Cache Gradle wrapper and caches
         uses: actions/cache@v4
         with:
-          path: ~/.android/build-cache
-          key: ${{ runner.os }}-android-build.${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
-            ${{ runner.os }}-android-build-
+            ${{ runner.os }}-gradle-
+
+      - name: Setup Gradle Wrapper permissions
+        run: chmod +x android/gradlew
 
       - name: Set NODE_ENV
         run: echo "NODE_ENV=production" >> $GITHUB_ENV
+
+      # Fix: Pre-generate autolinking.json by running :expo:generatePackagesList
+      # as a separate Gradle invocation BEFORE assembleRelease.
+      #
+      # Root cause: :app:generateAutolinkingPackageList (React Native plugin) reads
+      # android/build/generated/autolinking/autolinking.json, but Gradle has no
+      # declared dependency on :expo:generatePackagesList (Expo plugin) which writes
+      # that file. In a cold-cache CI environment the file is absent when the RN task
+      # runs, causing the build to fail. Running the Expo task first guarantees the
+      # file exists before assembleRelease starts.
+      - name: Generate Expo autolinking manifest
+        working-directory: android
+        run: ./gradlew :expo:generatePackagesList --stacktrace
+        env:
+          NODE_ENV: production
 
       - name: Build Release APK
         working-directory: android
