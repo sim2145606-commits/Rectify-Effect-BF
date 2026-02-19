@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@expo/cli": "^0.22.28",
-    "metro": "^0.81.0",
     "@expo/vector-icons": "^14.0.4",
     "@radix-ui/react-dialog": "^1.1.15",
     "@react-native-async-storage/async-storage": "2.1.2",
@@ -74,6 +73,10 @@
     "eslint-config-expo": "~9.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.2",
+    "metro": "~0.81.0",
+    "metro-config": "~0.81.0",
+    "metro-resolver": "~0.81.0",
+    "metro-runtime": "~0.81.0",
     "patch-package": "^8.0.1",
     "postinstall-postinstall": "^2.1.0",
     "prettier": "^3.8.1",
