@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getSystemInfo } from './SystemVerification';
 
