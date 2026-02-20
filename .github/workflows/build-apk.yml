@@ -21,13 +21,12 @@ on:
       - master
   workflow_dispatch: # allows manual trigger from GitHub UI
 
-# gradle/actions/setup-gradle@v3 needs actions:write to persist the
-# Gradle home cache between runs. Without this every build re-downloads
-# all dependencies from scratch, adding 5-10 minutes per run and
-# causing intermittent HTTP 400/503 cache-save failures.
+# Explicit permission scopes for the GITHUB_TOKEN.
+# Any scope not listed here is automatically set to "none".
 permissions:
-  contents: read
-  actions: write
+  contents: read       # checkout, dependency-review source scanning
+  actions: write       # gradle/actions/setup-gradle@v3 cache saves
+  pull-requests: write # dependency-review-action@v4 PR comment posting
 
 jobs:
 
