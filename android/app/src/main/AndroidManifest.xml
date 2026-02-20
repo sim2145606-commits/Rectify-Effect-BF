@@ -9,6 +9,10 @@
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
+  <!-- Required to call startForeground() on Android 9+ -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <!-- Required alongside foregroundServiceType="specialUse" on Android 14+ (API 34+) -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -33,5 +37,20 @@
         <data android:scheme="com.briefplantrain.virtucam"/>
       </intent-filter>
     </activity>
+    <!--
+      FloatingOverlayService: provides the draggable bubble + control panel overlay.
+      - exported="false"   : only this app can start it (prevents external access)
+      - foregroundServiceType: required on Android 14+ (API 34); specialUse covers
+        overlay UI that doesn't fit any other defined type
+      - FOREGROUND_SERVICE_SPECIAL_USE permission must also be declared (done above)
+    -->
+    <service
+        android:name=".FloatingOverlayService"
+        android:foregroundServiceType="specialUse"
+        android:exported="false">
+      <property
+          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="Floating overlay UI providing camera effect controls for VirtuCam"/>
+    </service>
   </application>
 </manifest>

@@ -8,7 +8,10 @@ buildscript {
         targetSdkVersion = Integer.parseInt(findProperty('android.targetSdkVersion') ?: '34')
         kotlinVersion = findProperty('android.kotlinVersion') ?: '1.9.25'
 
-        ndkVersion = "26.1.10909125"
+        // NDK 27.1.12297006 aligns with react-native-worklets-core which requires NDK 27.
+        // Previously 26.1.10909125 caused two separate NDK versions to be downloaded
+        // on every cold cache run (adding ~3-5 minutes to CI build times).
+        ndkVersion = "27.1.12297006"
     }
     repositories {
         google()

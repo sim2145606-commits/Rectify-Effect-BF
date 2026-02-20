@@ -52,23 +52,16 @@ class FloatingOverlayService : Service() {
         private const val NOTIFICATION_ID = 9001
         private const val CHANNEL_ID = "virtucam_overlay"
         private const val NUDGE_STEP = 10f
-        private const val AUTH_TOKEN_KEY = "service_auth_token"
         
         @Volatile
         private var isRunning = false
-        private var authToken: String? = null
         
         fun isServiceRunning(): Boolean = isRunning
-        
-        private fun validateAuth(token: String?): Boolean {
-            return authToken != null && authToken == token
-        }
     }
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        authToken = java.util.UUID.randomUUID().toString()
         
         prefs = try {
             androidx.security.crypto.EncryptedSharedPreferences.create(
@@ -93,11 +86,12 @@ class FloatingOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!validateAuth(intent?.getStringExtra(AUTH_TOKEN_KEY))) {
-            android.util.Log.w("FloatingOverlay", "Unauthorized service command")
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        // Auth token check intentionally removed.
+        // The service is declared android:exported="false" in the manifest so
+        // only this app can start it — no runtime auth is needed or meaningful.
+        // The previous check was also broken: the token was generated inside
+        // onCreate() but never included in the starting intent, so validateAuth()
+        // always returned false and the service immediately called stopSelf().
         return START_STICKY
     }
 
@@ -126,9 +120,7 @@ class FloatingOverlayService : Service() {
     }
 
     private fun createNotification(): Notification {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-            putExtra(AUTH_TOKEN_KEY, authToken)
-        }
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -309,29 +301,25 @@ class FloatingOverlayService : Service() {
             toggleFlipV?.isChecked = currentFlipV
             updateOffsetDisplay()
 
-            btnFit?.setOnClickListener { if (validateAuth(authToken)) setScaleMode("fit") }
-            btnFill?.setOnClickListener { if (validateAuth(authToken)) setScaleMode("fill") }
-            btnStretch?.setOnClickListener { if (validateAuth(authToken)) setScaleMode("stretch") }
+            btnFit?.setOnClickListener { setScaleMode("fit") }
+            btnFill?.setOnClickListener { setScaleMode("fill") }
+            btnStretch?.setOnClickListener { setScaleMode("stretch") }
 
             toggleMirrorH?.setOnCheckedChangeListener { _, isChecked ->
-                if (validateAuth(authToken)) {
-                    currentMirrored = isChecked
-                    writeToPrefs("mirrored", isChecked)
-                }
+                currentMirrored = isChecked
+                writeToPrefs("mirrored", isChecked)
             }
 
             toggleFlipV?.setOnCheckedChangeListener { _, isChecked ->
-                if (validateAuth(authToken)) {
-                    currentFlipV = isChecked
-                    writeToPrefs("flippedVertical", isChecked)
-                }
+                currentFlipV = isChecked
+                writeToPrefs("flippedVertical", isChecked)
             }
 
-            btnNudgeUp?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(0f, -NUDGE_STEP) }
-            btnNudgeDown?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(0f, NUDGE_STEP) }
-            btnNudgeLeft?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(-NUDGE_STEP, 0f) }
-            btnNudgeRight?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(NUDGE_STEP, 0f) }
-            btnCenter?.setOnClickListener { if (validateAuth(authToken)) centerOffset() }
+            btnNudgeUp?.setOnClickListener { nudgeOffset(0f, -NUDGE_STEP) }
+            btnNudgeDown?.setOnClickListener { nudgeOffset(0f, NUDGE_STEP) }
+            btnNudgeLeft?.setOnClickListener { nudgeOffset(-NUDGE_STEP, 0f) }
+            btnNudgeRight?.setOnClickListener { nudgeOffset(NUDGE_STEP, 0f) }
+            btnCenter?.setOnClickListener { centerOffset() }
 
             btnClose?.setOnClickListener { collapseToIcon() }
         }
@@ -341,7 +329,6 @@ class FloatingOverlayService : Service() {
         currentScaleMode = mode
         updateScaleModeButtons()
         
-        // Calculate scaleX and scaleY based on mode
         val (scaleX, scaleY) = when (mode) {
             "fit" -> Pair(1.0f, 1.0f)
             "fill" -> Pair(1.5f, 1.5f)
@@ -368,14 +355,10 @@ class FloatingOverlayService : Service() {
     }
 
     private fun nudgeOffset(deltaX: Float, deltaY: Float) {
-        // Prevent integer overflow by checking bounds before addition (CWE-190)
         val newOffsetX = currentOffsetX + deltaX
         val newOffsetY = currentOffsetY + deltaY
-        
-        // Clamp to reasonable range to prevent overflow
         currentOffsetX = newOffsetX.coerceIn(-500f, 500f)
         currentOffsetY = newOffsetY.coerceIn(-500f, 500f)
-        
         updateOffsetDisplay()
         writeToPrefs("offsetX", currentOffsetX)
         writeToPrefs("offsetY", currentOffsetY)
@@ -414,7 +397,9 @@ class FloatingOverlayService : Service() {
                 val prefsFile = java.io.File(applicationInfo.dataDir, prefsPath).canonicalFile
                 val dataDir = java.io.File(applicationInfo.dataDir).canonicalFile
                 
-                if (prefsFile.startsWith(dataDir) && prefsFile.exists()) {
+                // FIX: java.io.File has no startsWith(File) method.
+                // Use absolutePath string comparison instead (both are already canonical files).
+                if (prefsFile.absolutePath.startsWith(dataDir.absolutePath) && prefsFile.exists()) {
                     prefsFile.setReadable(true, false)
                 }
             } catch (e: SecurityException) {
@@ -433,7 +418,6 @@ class FloatingOverlayService : Service() {
 
     private fun collapseToIcon() {
         if (!isExpanded) return
-        
         removeFloatingView()
         isExpanded = false
         createFloatingBubble()
