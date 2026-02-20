@@ -68,7 +68,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  dot: {
-    // Base styles for the dot
-  },
+  dot: {},
 });

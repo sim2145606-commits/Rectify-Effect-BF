@@ -72,7 +72,7 @@ class FloatingOverlayService : Service() {
             )
         } catch (e: Exception) {
             // Fallback to regular SharedPreferences if encryption fails
-            android.util.Log.w("FloatingOverlay", "Failed to create encrypted prefs: ${e.message}")
+            android.util.Log.w("FloatingOverlay", "Failed to create encrypted prefs: ${e.message}", e)
             getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
         }
         loadCurrentState()

@@ -38,6 +38,7 @@ export default function LogsScreen() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('Failed to load logs:', errorMessage);
+      Alert.alert('Error', `Failed to load logs: ${errorMessage}`);
       setLogs([]);
       setFilteredLogs([]);
     }

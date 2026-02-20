@@ -159,8 +159,9 @@ export async function resetToDefaults(): Promise<{
     );
 
     await Promise.all(resetPromises).catch((error) => {
-      console.error('Failed to reset AsyncStorage values:', error);
-      throw new Error(`AsyncStorage reset failed: ${error.message}`);
+      const errorMsg = error?.message ? String(error.message).replace(/[\r\n]/g, '') : 'Unknown error';
+      console.error(`Failed to reset AsyncStorage values: ${errorMsg}`);
+      throw new Error(`AsyncStorage reset failed: ${errorMsg}`);
     });
 
     // Step 2: Reset SharedPreferences bridge config

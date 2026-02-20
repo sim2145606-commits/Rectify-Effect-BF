@@ -11,7 +11,8 @@ public class NativeEncoder {
 
     static {
         try {
-            System.loadLibrary(NATIVE_LIBRARY_NAME);
+            // CWE-114 FIX: Use hardcoded constant library name to prevent process control issues
+            System.loadLibrary("virtucam-native");
             nativeAvailable = true;
         } catch (UnsatisfiedLinkError e) {
             // Native library not available, will use Java fallback

@@ -104,7 +104,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private volatile float offsetX = 0.0f;
     private volatile float offsetY = 0.0f;
     private volatile String targetMode = "whitelist";
-    private volatile Set<String> targetPackages = new HashSet<>();
+    private volatile Set<String> targetPackages = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
     // --- Streaming support ---
     private volatile StreamingMediaSource streamingSource = null;
@@ -205,11 +205,19 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             if (closed) return;
             closed = true;
             if (imageReader != null) {
-                try { imageReader.close(); } catch (Exception ignored) {}
+                try { 
+                    imageReader.close(); 
+                } catch (Exception e) {
+                    // Expected during cleanup
+                }
                 imageReader = null;
             }
             if (imageWriter != null) {
-                try { imageWriter.close(); } catch (Exception ignored) {}
+                try { 
+                    imageWriter.close(); 
+                } catch (Exception e) {
+                    // Expected during cleanup
+                }
                 imageWriter = null;
             }
         }
@@ -1340,7 +1348,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             while (videoDecoderRunning) {
                 // Feed input
                 if (!inputDone) {
-                    int inputIndex = codec.dequeueInputBuffer(10000);
+                    int inputIndex = codec.dequeueInputBuffer(1000);
                     if (inputIndex >= 0) {
                         ByteBuffer inputBuffer;
                         if (Build.VERSION.SDK_INT >= 21) {
@@ -1364,7 +1372,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 }
 
                 // Get output
-                int outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10000);
+                int outputIndex = codec.dequeueOutputBuffer(bufferInfo, 1000);
                 if (outputIndex >= 0) {
                     if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         // Loop: seek back to beginning

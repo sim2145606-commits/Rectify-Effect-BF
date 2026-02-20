@@ -21,7 +21,7 @@ class MainActivity : ReactActivity() {
     try {
       SplashScreenManager.registerOnActivity(this)
     } catch (e: Exception) {
-      android.util.Log.e("MainActivity", "Failed to register splash screen: ${e.message}")
+      android.util.Log.e("MainActivity", "Failed to register splash screen: ${e.message}", e)
     }
     // @generated end expo-splashscreen
     super.onCreate(null)

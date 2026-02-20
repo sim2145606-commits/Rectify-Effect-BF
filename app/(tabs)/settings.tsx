@@ -1074,7 +1074,7 @@ export default function SettingsScreen() {
         isCloudVerified={selectedApp ? cloudVerifiedApps.includes(selectedApp.packageName) : false}
         compatData={selectedApp ? APP_COMPATIBILITY[selectedApp.packageName] : undefined}
         onClose={() => setSelectedApp(null)}
-        onLaunch={selectedApp ? () => handleLaunchApp(selectedApp) : () => {}}
+        onLaunch={selectedApp ? () => handleLaunchApp(selectedApp) : undefined}
         targetMode={targetMode}
       />
     </>

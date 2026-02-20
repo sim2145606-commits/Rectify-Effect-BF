@@ -12,7 +12,9 @@ export function useStorage<T>(key: string, defaultValue: T) {
           try {
             setValue(JSON.parse(stored));
           } catch (error) {
-            console.error(`Failed to parse stored value for key "${key}":`, error);
+            const sanitizedKey = String(key).replace(/[\r\n]/g, '');
+            const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+            console.error(`Failed to parse stored value for key "${sanitizedKey}": ${errorMsg}`);
             setValue(stored as unknown as T);
           }
         }

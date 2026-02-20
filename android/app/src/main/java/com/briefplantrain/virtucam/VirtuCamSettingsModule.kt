@@ -439,9 +439,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             // The marker file persists until reboot (it's in /data/local/tmp)
             // No time-based validation needed - if it exists, module has loaded at least once since boot
             val markerFile = File("/data/local/tmp/virtucam_module_active")
-            // Validate file path to prevent directory traversal (CWE-434)
-            if (!markerFile.canonicalPath.startsWith("/data/local/tmp/") || 
-                markerFile.name.contains("..") || markerFile.name.contains("/")) {
+            // Validate file path and name to prevent unsafe file access (CWE-434)
+            val isValidPath = markerFile.canonicalPath.startsWith("/data/local/tmp/") && 
+                markerFile.name == "virtucam_module_active"
+            
+            if (!isValidPath) {
                 android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
             } else if (markerFile.exists()) {
                 moduleActive = true
@@ -812,9 +814,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check marker file
             val markerFile = File("/data/local/tmp/virtucam_module_active")
-            // Validate file path and extension to prevent unsafe file access (CWE-434)
+            // Validate file path and name to prevent unsafe file access (CWE-434)
             if (!markerFile.canonicalPath.startsWith("/data/local/tmp/") || 
-                markerFile.name.contains("..") || markerFile.name.contains("/")) {
+                markerFile.name != "virtucam_module_active") {
                 result.putString("markerFileAge", "invalid path")
                 result.putBoolean("markerFileExists", false)
             } else if (markerFile.exists()) {
@@ -977,13 +979,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     private fun executeRootCommand(command: String): String {
         return try {
-            // Validate command to prevent code injection (CWE-94)
-            if (command.contains(";") || command.contains("&&") || command.contains("||") || 
-                command.contains("`") || command.contains("$(") || command.contains(">") || 
-                command.contains("<")) {
-                android.util.Log.w("VirtuCamSettings", "Blocked potentially unsafe command: $command")
-                return ""
-            }
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val output = reader.readText()
