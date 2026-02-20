@@ -154,7 +154,7 @@ export async function importSettings(jsonString: string): Promise<{
       if (value === null) {
         return AsyncStorage.removeItem(key);
       }
-      return await AsyncStorage.setItem(key, String(value));
+      return AsyncStorage.setItem(key, String(value));
     });
 
     await Promise.all(importPromises);
