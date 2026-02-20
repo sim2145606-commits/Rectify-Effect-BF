@@ -1,5 +1,4 @@
 package com.briefplantrain.virtucam
-import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
 import android.os.Bundle
@@ -13,24 +12,8 @@ import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
-    // Set the theme to AppTheme BEFORE onCreate to support
-    // coloring the background, status bar, and navigation bar.
-    // This is required for expo-splash-screen.
-    // setTheme(R.style.AppTheme);
-    // @generated begin expo-splashscreen - expo prebuild (DO NOT MODIFY) sync-f3ff59a738c56c9a6119210cb55f0b613eb8b6af
-    try {
-      SplashScreenManager.registerOnActivity(this)
-    } catch (e: Exception) {
-      android.util.Log.e("MainActivity", "Failed to register splash screen: ${e.message}", e)
-      throw RuntimeException("Failed to initialize splash screen", e)
-    }
-    // @generated end expo-splashscreen
-    try {
-      super.onCreate(null)
-    } catch (e: Exception) {
-      android.util.Log.e("MainActivity", "Failed to initialize activity: ${e.message}", e)
-      finish()
-    }
+    setTheme(R.style.AppTheme)
+    super.onCreate(null)
   }
 
   /**
@@ -45,13 +28,10 @@ class MainActivity : ReactActivity() {
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate {
     return ReactActivityDelegateWrapper(
-          this,
-          BuildConfig.IS_NEW_ARCHITECTURE_ENABLED,
-          object : DefaultReactActivityDelegate(
-              this,
-              mainComponentName,
-              fabricEnabled
-          ){})
+      this,
+      BuildConfig.IS_NEW_ARCHITECTURE_ENABLED,
+      DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+    )
   }
 
   /**
