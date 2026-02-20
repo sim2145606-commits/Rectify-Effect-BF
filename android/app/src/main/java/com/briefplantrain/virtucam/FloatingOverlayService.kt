@@ -50,18 +50,24 @@ class FloatingOverlayService : Service() {
         private const val NOTIFICATION_ID = 9001
         private const val CHANNEL_ID = "virtucam_overlay"
         private const val NUDGE_STEP = 10f
+        private const val AUTH_TOKEN_KEY = "service_auth_token"
         
         @Volatile
         private var isRunning = false
+        private var authToken: String? = null
         
         fun isServiceRunning(): Boolean = isRunning
+        
+        private fun validateAuth(token: String?): Boolean {
+            return authToken != null && authToken == token
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+        authToken = java.util.UUID.randomUUID().toString()
         
-        // Use EncryptedSharedPreferences for sensitive data (CWE-311)
         prefs = try {
             androidx.security.crypto.EncryptedSharedPreferences.create(
                 "virtucam_config",
@@ -71,7 +77,6 @@ class FloatingOverlayService : Service() {
                 androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            // Fallback to regular SharedPreferences if encryption fails
             android.util.Log.w("FloatingOverlay", "Failed to create encrypted prefs: ${e.message}", e)
             getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
         }
@@ -86,6 +91,11 @@ class FloatingOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!validateAuth(intent?.getStringExtra(AUTH_TOKEN_KEY))) {
+            android.util.Log.w("FloatingOverlay", "Unauthorized service command")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
@@ -114,7 +124,9 @@ class FloatingOverlayService : Service() {
     }
 
     private fun createNotification(): Notification {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            putExtra(AUTH_TOKEN_KEY, authToken)
+        }
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -140,8 +152,8 @@ class FloatingOverlayService : Service() {
 
     private fun createFloatingBubble() {
         try {
-            val layoutInflater = LayoutInflater.from(this)
-            bubbleIcon = layoutInflater.inflate(R.layout.floating_bubble_icon, null)
+            val layoutInflater = LayoutInflater.from(this).cloneInContext(this)
+            bubbleIcon = layoutInflater.inflate(R.layout.floating_bubble_icon, null, false)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -168,9 +180,14 @@ class FloatingOverlayService : Service() {
             setupBubbleDrag(params)
             setupBubbleClick()
 
+        } catch (e: SecurityException) {
+            android.util.Log.e("FloatingOverlay", "Permission denied: ${e.message}", e)
+            stopSelf()
+        } catch (e: IllegalStateException) {
+            android.util.Log.e("FloatingOverlay", "Invalid state: ${e.message}", e)
+            stopSelf()
         } catch (e: Exception) {
-            val errorMessage = e.message ?: "Unknown error"
-            android.util.Log.e("FloatingOverlay", "Failed to create bubble: $errorMessage")
+            android.util.Log.e("FloatingOverlay", "Failed to create bubble: ${e.message}", e)
             stopSelf()
         }
     }
@@ -234,8 +251,8 @@ class FloatingOverlayService : Service() {
         try {
             removeFloatingView()
             
-            val layoutInflater = LayoutInflater.from(this)
-            panelView = layoutInflater.inflate(R.layout.floating_panel, null)
+            val layoutInflater = LayoutInflater.from(this).cloneInContext(this)
+            panelView = layoutInflater.inflate(R.layout.floating_panel, null, false)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -260,15 +277,17 @@ class FloatingOverlayService : Service() {
 
             setupPanelControls()
 
+        } catch (e: SecurityException) {
+            android.util.Log.e("FloatingOverlay", "Permission denied: ${e.message}", e)
+        } catch (e: IllegalStateException) {
+            android.util.Log.e("FloatingOverlay", "Invalid state: ${e.message}", e)
         } catch (e: Exception) {
-            val errorMessage = e.message ?: "Unknown error"
-            android.util.Log.e("FloatingOverlay", "Failed to expand panel: $errorMessage")
+            android.util.Log.e("FloatingOverlay", "Failed to expand panel: ${e.message}", e)
         }
     }
 
     private fun setupPanelControls() {
         panelView?.let { panel ->
-            // Find all controls
             btnFit = panel.findViewById(R.id.btnFit)
             btnFill = panel.findViewById(R.id.btnFill)
             btnStretch = panel.findViewById(R.id.btnStretch)
@@ -283,36 +302,35 @@ class FloatingOverlayService : Service() {
             txtOffsetX = panel.findViewById(R.id.txtOffsetX)
             txtOffsetY = panel.findViewById(R.id.txtOffsetY)
 
-            // Set initial states
             updateScaleModeButtons()
             toggleMirrorH?.isChecked = currentMirrored
             toggleFlipV?.isChecked = currentFlipV
             updateOffsetDisplay()
 
-            // Scale mode buttons
-            btnFit?.setOnClickListener { setScaleMode("fit") }
-            btnFill?.setOnClickListener { setScaleMode("fill") }
-            btnStretch?.setOnClickListener { setScaleMode("stretch") }
+            btnFit?.setOnClickListener { if (validateAuth(authToken)) setScaleMode("fit") }
+            btnFill?.setOnClickListener { if (validateAuth(authToken)) setScaleMode("fill") }
+            btnStretch?.setOnClickListener { if (validateAuth(authToken)) setScaleMode("stretch") }
 
-            // Mirror/Flip toggles
             toggleMirrorH?.setOnCheckedChangeListener { _, isChecked ->
-                currentMirrored = isChecked
-                writeToPrefs("mirrored", isChecked)
+                if (validateAuth(authToken)) {
+                    currentMirrored = isChecked
+                    writeToPrefs("mirrored", isChecked)
+                }
             }
 
             toggleFlipV?.setOnCheckedChangeListener { _, isChecked ->
-                currentFlipV = isChecked
-                writeToPrefs("flippedVertical", isChecked)
+                if (validateAuth(authToken)) {
+                    currentFlipV = isChecked
+                    writeToPrefs("flippedVertical", isChecked)
+                }
             }
 
-            // Position nudge buttons
-            btnNudgeUp?.setOnClickListener { nudgeOffset(0f, -NUDGE_STEP) }
-            btnNudgeDown?.setOnClickListener { nudgeOffset(0f, NUDGE_STEP) }
-            btnNudgeLeft?.setOnClickListener { nudgeOffset(-NUDGE_STEP, 0f) }
-            btnNudgeRight?.setOnClickListener { nudgeOffset(NUDGE_STEP, 0f) }
-            btnCenter?.setOnClickListener { centerOffset() }
+            btnNudgeUp?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(0f, -NUDGE_STEP) }
+            btnNudgeDown?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(0f, NUDGE_STEP) }
+            btnNudgeLeft?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(-NUDGE_STEP, 0f) }
+            btnNudgeRight?.setOnClickListener { if (validateAuth(authToken)) nudgeOffset(NUDGE_STEP, 0f) }
+            btnCenter?.setOnClickListener { if (validateAuth(authToken)) centerOffset() }
 
-            // Close button
             btnClose?.setOnClickListener { collapseToIcon() }
         }
     }
@@ -335,12 +353,16 @@ class FloatingOverlayService : Service() {
     }
 
     private fun updateScaleModeButtons() {
-        val activeColor = android.graphics.Color.parseColor("#2979FF")
-        val inactiveColor = android.graphics.Color.parseColor("#3A3A48")
-        
-        btnFit?.setBackgroundColor(if (currentScaleMode == "fit") activeColor else inactiveColor)
-        btnFill?.setBackgroundColor(if (currentScaleMode == "fill") activeColor else inactiveColor)
-        btnStretch?.setBackgroundColor(if (currentScaleMode == "stretch") activeColor else inactiveColor)
+        try {
+            val activeColor = android.graphics.Color.parseColor("#2979FF")
+            val inactiveColor = android.graphics.Color.parseColor("#3A3A48")
+            
+            btnFit?.setBackgroundColor(if (currentScaleMode == "fit") activeColor else inactiveColor)
+            btnFill?.setBackgroundColor(if (currentScaleMode == "fill") activeColor else inactiveColor)
+            btnStretch?.setBackgroundColor(if (currentScaleMode == "stretch") activeColor else inactiveColor)
+        } catch (e: IllegalArgumentException) {
+            android.util.Log.e("FloatingOverlay", "Invalid color format: ${e.message}", e)
+        }
     }
 
     private fun nudgeOffset(deltaX: Float, deltaY: Float) {
@@ -385,20 +407,25 @@ class FloatingOverlayService : Service() {
             }
             editor.apply()
             
-            // Make file world-readable for Xposed
             try {
-                val prefsFile = java.io.File(applicationInfo.dataDir, 
-                    "shared_prefs/virtucam_config.xml")
-                if (prefsFile.exists()) {
+                val prefsPath = "shared_prefs/virtucam_config.xml"
+                val prefsFile = java.io.File(applicationInfo.dataDir, prefsPath).canonicalFile
+                val dataDir = java.io.File(applicationInfo.dataDir).canonicalFile
+                
+                if (prefsFile.startsWith(dataDir) && prefsFile.exists()) {
                     prefsFile.setReadable(true, false)
                 }
+            } catch (e: SecurityException) {
+                android.util.Log.w("FloatingOverlay", "Permission denied: ${e.message}", e)
+            } catch (e: java.io.IOException) {
+                android.util.Log.w("FloatingOverlay", "IO error: ${e.message}", e)
             } catch (e: Exception) {
-                val errorMessage = e.message ?: "Unknown error"
-                android.util.Log.w("FloatingOverlay", "Could not set prefs readable: $errorMessage")
+                android.util.Log.w("FloatingOverlay", "Could not set prefs readable: ${e.message}", e)
             }
+        } catch (e: ClassCastException) {
+            android.util.Log.e("FloatingOverlay", "Type mismatch: ${e.message}", e)
         } catch (e: Exception) {
-            val errorMessage = e.message ?: "Unknown error"
-            android.util.Log.e("FloatingOverlay", "Failed to write prefs: $errorMessage")
+            android.util.Log.e("FloatingOverlay", "Failed to write prefs: ${e.message}", e)
         }
     }
 
@@ -418,9 +445,10 @@ class FloatingOverlayService : Service() {
             floatingView = null
             bubbleIcon = null
             panelView = null
+        } catch (e: IllegalArgumentException) {
+            android.util.Log.e("FloatingOverlay", "View not attached: ${e.message}", e)
         } catch (e: Exception) {
-            val errorMessage = e.message ?: "Unknown error"
-            android.util.Log.e("FloatingOverlay", "Error removing view: $errorMessage")
+            android.util.Log.e("FloatingOverlay", "Error removing view: ${e.message}", e)
         }
     }
 }

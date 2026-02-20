@@ -137,6 +137,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private MediaCodec videoCodec;
     // THREAD SAFETY FIX: Use AtomicReference to avoid blocking in frame access
     private final AtomicReference<Bitmap> currentVideoFrame = new AtomicReference<>(null);
+    private final Object videoFrameLock = new Object();
 
     private long lastConfigReload = 0;
     private static final long CONFIG_RELOAD_INTERVAL = 5000;
@@ -380,7 +381,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     log("Config loaded via XSharedPreferences");
                 }
             } catch (Exception e) {
-                log("XSharedPreferences failed: " + e);
+                log("XSharedPreferences failed: " + e.getMessage());
             }
             
             // Strategy B: Fallback to JSON config if XSharedPreferences failed
@@ -441,7 +442,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         }
                     }
                 } catch (Exception e) {
-                    log("JSON fallback failed: " + e);
+                    log("JSON fallback failed: " + e.getMessage());
                 }
             }
             
@@ -728,7 +729,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                                 return method.invoke(originalListener, args);
                             } catch (java.lang.reflect.InvocationTargetException e) {
                                 Throwable cause = e.getCause();
-                                log("ImageReader listener invocation failed: " + (cause != null ? cause : e));
+                                log("ImageReader listener invocation failed: " + (cause != null ? cause.getMessage() : e.getMessage()));
                                 throw cause != null ? cause : e;
                             }
                         }
@@ -791,7 +792,9 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
         // PERFORMANCE FIX: Return to pool instead of recycling
         // THREAD SAFETY FIX: Check against AtomicReference value
         synchronized (frameLock) {
-            if (frame == cachedFrame || frame == currentVideoFrame.get()) return;
+            synchronized (videoFrameLock) {
+                if (frame == cachedFrame || frame == currentVideoFrame.get()) return;
+            }
         }
         returnBitmapToPool(frame);
     }
@@ -1097,14 +1100,14 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                                         }
                                     }
                                 } catch (Exception e) {
-                                    log("Camera1 takePicture injection failed: " + e);
+                                    log("Camera1 takePicture injection failed: " + e.getMessage());
                                 }
                             }
                             try {
                                 return method.invoke(originalCallback, args);
                             } catch (java.lang.reflect.InvocationTargetException e) {
                                 Throwable cause = e.getCause();
-                                log("PictureCallback invocation failed: " + (cause != null ? cause : e));
+                                log("PictureCallback invocation failed: " + (cause != null ? cause.getMessage() : e.getMessage()));
                                 throw cause != null ? cause : e;
                             }
                         }
@@ -1153,14 +1156,14 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                                         }
                                     }
                                 } catch (Exception e) {
-                                    log("PreviewCallback injection error: " + e);
+                                    log("PreviewCallback injection error: " + e.getMessage());
                                 }
                             }
                             try {
                                 return method.invoke(originalCallback, args);
                             } catch (java.lang.reflect.InvocationTargetException e) {
                                 Throwable cause = e.getCause();
-                                log("PreviewCallback invocation failed: " + (cause != null ? cause : e));
+                                log("PreviewCallback invocation failed: " + (cause != null ? cause.getMessage() : e.getMessage()));
                                 throw cause != null ? cause : e;
                             }
                         }
@@ -1189,11 +1192,13 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             // THREAD SAFETY FIX: Non-blocking frame swap using AtomicReference
             Bitmap latest = videoFrameQueue.poll();
             if (latest != null) {
-                Bitmap old = cachedFrame;
-                cachedFrame = latest;
-                currentVideoFrame.set(latest);
-                if (old != null && old != latest) {
-                    old.recycle();
+                synchronized (videoFrameLock) {
+                    Bitmap old = cachedFrame;
+                    cachedFrame = latest;
+                    currentVideoFrame.set(latest);
+                    if (old != null && old != latest) {
+                        old.recycle();
+                    }
                 }
             }
             if (cachedFrame != null) return;
@@ -1212,7 +1217,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             return;
         }
 
-        String path = mediaSourcePath.toLowerCase();
+        String path = mediaSourcePath.toLowerCase(java.util.Locale.ROOT);
         boolean video = path.endsWith(".mp4") || path.endsWith(".avi")
                 || path.endsWith(".mov") || path.endsWith(".mkv")
                 || path.endsWith(".webm");
@@ -1265,7 +1270,11 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
                 currentVideoFrame.set(cachedFrame);
             } finally {
-                try { retriever.release(); } catch (Exception ignored) {}
+                try { 
+                    retriever.release(); 
+                } catch (Exception e) {
+                    log("MediaMetadataRetriever release failed: " + e.getMessage());
+                }
             }
 
             // Start async decoder
@@ -1417,11 +1426,11 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             log("Video decoder error: " + e);
         } finally {
             if (codec != null) {
-                try { codec.stop(); } catch (Exception ignored) {}
-                try { codec.release(); } catch (Exception ignored) {}
+                try { codec.stop(); } catch (Exception e) { log("Codec stop error: " + e.getMessage()); }
+                try { codec.release(); } catch (Exception e) { log("Codec release error: " + e.getMessage()); }
             }
             if (extractor != null) {
-                try { extractor.release(); } catch (Exception ignored) {}
+                try { extractor.release(); } catch (Exception e) { log("Extractor release error: " + e.getMessage()); }
             }
             synchronized (videoLock) {
                 videoExtractor = null;
@@ -1514,9 +1523,9 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
                 // Use integer math: multiply by 1024 and shift right by 10
                 // 1.164 ≈ 1192/1024, 1.596 ≈ 1634/1024, 0.813 ≈ 833/1024, 0.391 ≈ 400/1024, 2.018 ≈ 2066/1024
-                int R = (1192 * Y + 1634 * V) >> 10;
-                int G = (1192 * Y - 833 * V - 400 * U) >> 10;
-                int B = (1192 * Y + 2066 * U) >> 10;
+                int R = (1192 * Y + 1634 * V) >>> 10;
+                int G = (1192 * Y - 833 * V - 400 * U) >>> 10;
+                int B = (1192 * Y + 2066 * U) >>> 10;
 
                 R = Math.max(0, Math.min(255, R));
                 G = Math.max(0, Math.min(255, G));
@@ -1634,7 +1643,9 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
         
         // Don't pool if it's the cached frame or current video frame
         synchronized (frameLock) {
-            if (bitmap == cachedFrame || bitmap == currentVideoFrame.get()) return;
+            synchronized (videoFrameLock) {
+                if (bitmap == cachedFrame || bitmap == currentVideoFrame.get()) return;
+            }
         }
         
         // Limit pool size to prevent memory bloat
@@ -1705,12 +1716,12 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 int B = pixel & 0xFF;
 
                 // Use lookup tables instead of multiplication
-                int Y = ((Y_R_TABLE[R] + Y_G_TABLE[G] + Y_B_TABLE[B] + 128) >> 8) + 16;
+                int Y = ((Y_R_TABLE[R] + Y_G_TABLE[G] + Y_B_TABLE[B] + 128) >>> 8) + 16;
                 nv21[yIndex++] = (byte) Math.max(0, Math.min(255, Y));
 
                 if ((j & 1) == 0 && (i & 1) == 0 && uvIndex < nv21.length - 1) {
-                    int V = ((V_R_TABLE[R] + V_G_TABLE[G] + V_B_TABLE[B] + 128) >> 8) + 128;
-                    int U = ((U_R_TABLE[R] + U_G_TABLE[G] + U_B_TABLE[B] + 128) >> 8) + 128;
+                    int V = ((V_R_TABLE[R] + V_G_TABLE[G] + V_B_TABLE[B] + 128) >>> 8) + 128;
+                    int U = ((U_R_TABLE[R] + U_G_TABLE[G] + U_B_TABLE[B] + 128) >>> 8) + 128;
                     nv21[uvIndex++] = (byte) Math.max(0, Math.min(255, V));
                     nv21[uvIndex++] = (byte) Math.max(0, Math.min(255, U));
                 }

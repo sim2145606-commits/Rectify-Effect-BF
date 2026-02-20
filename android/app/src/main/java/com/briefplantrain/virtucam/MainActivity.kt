@@ -25,7 +25,12 @@ class MainActivity : ReactActivity() {
       throw RuntimeException("Failed to initialize splash screen", e)
     }
     // @generated end expo-splashscreen
-    super.onCreate(null)
+    try {
+      super.onCreate(null)
+    } catch (e: Exception) {
+      android.util.Log.e("MainActivity", "Failed to initialize activity: ${e.message}", e)
+      finish()
+    }
   }
 
   /**
