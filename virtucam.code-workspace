@@ -142,7 +142,15 @@
     // ===========================
     // 🎨 QUALITY OF LIFE
     // ===========================
-    "files.autoSave": "onFocusChange"
+    "files.autoSave": "onFocusChange",
+    
+    // Disable ErrorLens beeping
+    "errorLens.enabledDiagnosticLevels": ["error", "warning", "info", "hint"],
+    "errorLens.enableSound": false,
+    "accessibility.signals.terminalBell": {
+      "sound": "off"
+    },
+    "terminal.integrated.enableVisualBell": false
   },
   
   "extensions": {
