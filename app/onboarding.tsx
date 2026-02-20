@@ -44,14 +44,14 @@ export default function OnboardingScreen() {
   }, []);
 
   useEffect(() => {
-    checkPerms();
+    void checkPerms();
   }, [checkPerms]);
 
   // Re-check permissions when app becomes active (user returns from settings)
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
       if (appState.match(/inactive|background/) && nextAppState === 'active') {
-        checkPerms();
+        void checkPerms();
       }
       setAppState(nextAppState);
     });
@@ -86,7 +86,7 @@ export default function OnboardingScreen() {
 
   const handleProceed = async () => {
     if (permissions && areAllPermissionsGranted(permissions)) {
-      await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
+      AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true').catch(() => {});
       router.replace('/(tabs)');
     }
   };

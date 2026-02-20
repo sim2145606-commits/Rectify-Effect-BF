@@ -37,7 +37,7 @@ export function useSystemStatus(autoRefreshMs: number = 0) {
 
       // Then run fresh check
       if (mounted) {
-        await runCheck();
+        void runCheck();
         setInitialized(true);
       }
     };

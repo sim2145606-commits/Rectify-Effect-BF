@@ -99,7 +99,6 @@ export default function SpanScalePanel({
 }
 
 function ScaleModeCard({
-  mode,
   label,
   description,
   icon,

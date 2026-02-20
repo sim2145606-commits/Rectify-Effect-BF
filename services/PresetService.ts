@@ -50,7 +50,7 @@ export async function fetchPresets(): Promise<LocalPreset[]> {
 }
 
 async function saveAllPresets(presets: LocalPreset[]): Promise<void> {
-  await AsyncStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
+  AsyncStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets)).catch(() => {});
 }
 
 export async function savePreset(config: PresetConfig): Promise<LocalPreset> {
@@ -105,7 +105,10 @@ export async function renamePreset(
     const presets = await fetchPresets();
     const preset = presets.find(p => p.id === presetId);
 
-    if (!preset) throw new Error('Preset not found');
+    if (!preset) {
+      logger.error('Preset not found', 'PresetService');
+      return;
+    }
 
     preset.name = newName;
     if (newDescription !== undefined) {

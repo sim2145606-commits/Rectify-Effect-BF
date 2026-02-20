@@ -49,7 +49,7 @@ export async function runDiagnostics(
     let granted = false;
     if (Platform.OS === 'android' && Number(Platform.Version) >= 30) {
       if (VirtuCamSettings?.checkStoragePermission) {
-        granted = await VirtuCamSettings.checkStoragePermission();
+        granted = VirtuCamSettings.checkStoragePermission();
       }
     } else {
       granted = await PermissionsAndroid.check(
@@ -79,7 +79,7 @@ export async function runDiagnostics(
   try {
     let granted = false;
     if (VirtuCamSettings?.checkAllFilesAccess) {
-      granted = await VirtuCamSettings.checkAllFilesAccess();
+      granted = VirtuCamSettings.checkAllFilesAccess();
     }
     const result: DiagnosticCheckResult = {
       name: 'All Files Access',

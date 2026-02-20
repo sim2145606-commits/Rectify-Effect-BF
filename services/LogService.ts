@@ -3,8 +3,6 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getSystemInfo } from './SystemVerification';
 
-const { VirtuCamSettings } = NativeModules;
-
 export type LogEntry = {
   timestamp: number;
   message: string;

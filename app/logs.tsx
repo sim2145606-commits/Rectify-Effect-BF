@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -68,10 +68,10 @@ export default function LogsScreen() {
 
   useEffect(() => {
     loadLogs();
-    const unsubscribe = logger.subscribe(() => {
+    const subscription = logger.subscribe(() => {
       loadLogs();
     });
-    return unsubscribe;
+    return () => subscription();
   }, [loadLogs]);
 
   useEffect(() => {

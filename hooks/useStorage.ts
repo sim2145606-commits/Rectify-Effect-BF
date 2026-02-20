@@ -36,14 +36,7 @@ export function useStorage<T>(key: string, defaultValue: T) {
       setValue(prev => {
         const resolved =
           typeof newValue === 'function' ? (newValue as (prev: T) => T)(prev) : newValue;
-        AsyncStorage.setItem(key, JSON.stringify(resolved)).catch((err: unknown) => {
-          const sanitizedKey = String(key).replace(/[\r\n]/g, '');
-          const errorMsg =
-            err instanceof Error
-              ? err.message.replace(/[\r\n]/g, '')
-              : String(err).replace(/[\r\n]/g, '');
-          console.error(`Failed to save value for key "${sanitizedKey}": ${errorMsg}`);
-        });
+        return await AsyncStorage.setItem(key, JSON.stringify(resolved));
         return resolved;
       });
     },

@@ -276,7 +276,7 @@ export default function SettingsScreen() {
         setInstalledPackages(packageNames);
       }
     };
-    checkInstalledApps();
+    void checkInstalledApps();
   }, [packageNames]);
 
   // Load cloud verified apps - removed as we're using local presets now
@@ -470,7 +470,7 @@ export default function SettingsScreen() {
         }
         // Wait a brief moment for the OS to register the permission change, then re-check
         setTimeout(() => {
-          refreshSystemStatus();
+          void refreshSystemStatus();
         }, 500);
         success();
       } catch {
@@ -484,7 +484,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
-        refreshSystemStatus();
+        void refreshSystemStatus();
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
@@ -1941,7 +1941,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   aboutDivider: {
-    height: StyleSheet.hairlineWidth,
+    height: 1,
     backgroundColor: Colors.border,
     marginVertical: Spacing.md,
   },

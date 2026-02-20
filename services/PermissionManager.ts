@@ -1,4 +1,4 @@
-import { Platform, Linking, NativeModules, PermissionsAndroid } from 'react-native';
+import { Platform, Linking, NativeModules } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
 

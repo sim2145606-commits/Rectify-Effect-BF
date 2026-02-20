@@ -39,3 +39,4 @@ local.properties
 # Amazon Q / Roo
 .roo/
 .roomodes
+project-problems.json

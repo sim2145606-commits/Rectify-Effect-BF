@@ -65,12 +65,12 @@ export default function PresetsScreen() {
   }, []);
 
   useEffect(() => {
-    loadPresets();
+    void loadPresets();
   }, [loadPresets]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    loadPresets();
+    void loadPresets();
   }, [loadPresets]);
 
   const handleSavePreset = useCallback(async () => {

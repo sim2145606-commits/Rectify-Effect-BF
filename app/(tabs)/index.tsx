@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -27,7 +27,7 @@ import {
   type SystemCheckStatus,
   type SystemInfo,
 } from '@/services/SystemVerification';
-import { syncAllSettings, getBridgeStatus, verifyBridge, readBridgeConfig } from '@/services/ConfigBridge';
+import { syncAllSettings, getBridgeStatus, readBridgeConfig } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
@@ -46,7 +46,7 @@ export default function Dashboard() {
   const { status: systemStatus, isChecking, refresh: refreshSystemStatus } = useSystemStatus(30000);
   const [bridgeVersion, setBridgeVersion] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
-  const [bridgePath, setBridgePath] = useState<string | null>(null);
+  const [, setBridgePath] = useState<string | null>(null);
   const [bridgeReadable, setBridgeReadable] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loadingSystemInfo, setLoadingSystemInfo] = useState(false);
@@ -89,7 +89,7 @@ export default function Dashboard() {
         // Silent
       }
     };
-    doSync();
+    void doSync();
   }, [hookEnabled, frontCamera, backCamera, selectedMedia]);
 
   // Load system info on mount
@@ -100,7 +100,7 @@ export default function Dashboard() {
       setSystemInfo(info);
       setLoadingSystemInfo(false);
     };
-    loadInfo();
+    void loadInfo();
   }, []);
 
   useEffect(() => {

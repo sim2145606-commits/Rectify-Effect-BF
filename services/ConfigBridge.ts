@@ -83,15 +83,9 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
   try {
     const config = await VirtuCamSettings.readConfig();
 
-    let targetPackages: string[] = [];
-    try {
-      targetPackages = config.targetPackages
-        ? config.targetPackages.split(',').filter((p: string) => p.length > 0)
-        : [];
-    } catch (err: unknown) {
-      logger.error('Failed to parse targetPackages', 'ConfigBridge', err);
-      targetPackages = [];
-    }
+    let targetPackages: string[] = config.targetPackages
+      ? config.targetPackages.split(',').filter((p: string) => p.length > 0)
+      : [];
 
     return {
       ...defaultConfig,

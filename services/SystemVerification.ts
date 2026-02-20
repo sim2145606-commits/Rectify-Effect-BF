@@ -1,7 +1,11 @@
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type Ionicons from '@expo/vector-icons/Ionicons';
+import type { ComponentProps } from 'react';
 import { Colors, STORAGE_KEYS } from '@/constants/theme';
 import { logger } from './LogService';
+
+type IoniconsName = ComponentProps<typeof Ionicons>['name'];
 
 const { VirtuCamSettings } = NativeModules;
 
@@ -73,7 +77,7 @@ export function getStatusColor(status: SystemCheckStatus): string {
   }
 }
 
-export function getStatusIcon(status: SystemCheckStatus): string {
+export function getStatusIcon(status: SystemCheckStatus): IoniconsName {
   switch (status) {
     case 'ok':
       return 'checkmark-circle';
@@ -237,7 +241,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     // Check storage permission with fallback
     if (VirtuCamSettings && VirtuCamSettings.checkStoragePermission) {
       try {
-        let storageGranted = await VirtuCamSettings.checkStoragePermission();
+        let storageGranted = VirtuCamSettings.checkStoragePermission();
 
         if (!storageGranted && Platform.OS === 'android') {
           try {
@@ -273,7 +277,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     } else {
       if (VirtuCamSettings && VirtuCamSettings.checkAllFilesAccess) {
         try {
-          const allFilesGranted = await VirtuCamSettings.checkAllFilesAccess();
+          const allFilesGranted = VirtuCamSettings.checkAllFilesAccess();
           result.storagePermission = {
             label: 'Storage Permission',
             detail: allFilesGranted ? 'All files access granted' : 'Grant storage access',
@@ -386,7 +390,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
   ].every(check => check.status === 'ok');
 
   try {
-    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(result));
+    AsyncStorage.setItem(CACHE_KEY, JSON.stringify(result)).catch(() => {});
   } catch {
     // Cache failures are non-fatal
   }

@@ -150,7 +150,8 @@
     "accessibility.signals.terminalBell": {
       "sound": "off"
     },
-    "terminal.integrated.enableVisualBell": false
+    "terminal.integrated.enableVisualBell": false,
+    "qodana.projectId": "6Pk6w"
   },
   
   "extensions": {
