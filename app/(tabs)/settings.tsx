@@ -25,7 +25,7 @@ import Animated, {
   withSpring,
   withTiming,
   Easing,
-  Layout,
+  LinearTransition,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -788,7 +788,7 @@ export default function SettingsScreen() {
         {/* App List */}
         <Animated.View entering={FadeInDown.delay(400).duration(500)}>
           {filteredApps.map(app => (
-            <Animated.View key={app.id} layout={Layout.springify()}>
+            <Animated.View key={app.id} layout={LinearTransition.springify()}>
               <AppTargetRow
                 app={app}
                 targetMode={targetMode}

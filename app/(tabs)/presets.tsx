@@ -17,7 +17,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  Layout,
+  LinearTransition,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -358,7 +358,7 @@ export default function PresetsScreen() {
               key={preset.id}
               entering={FadeInDown.delay(100 * index).duration(400)}
               exiting={FadeOut.duration(200)}
-              layout={Layout.springify()}
+              layout={LinearTransition.springify()}
             >
               <PresetCard
                 preset={preset}
