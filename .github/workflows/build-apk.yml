@@ -21,6 +21,14 @@ on:
       - master
   workflow_dispatch: # allows manual trigger from GitHub UI
 
+# gradle/actions/setup-gradle@v3 needs actions:write to persist the
+# Gradle home cache between runs. Without this every build re-downloads
+# all dependencies from scratch, adding 5-10 minutes per run and
+# causing intermittent HTTP 400/503 cache-save failures.
+permissions:
+  contents: read
+  actions: write
+
 jobs:
 
   # ─────────────────────────────────────────────
@@ -122,7 +130,7 @@ jobs:
       #   KEY_PASSWORD          → your key password
       #
       # If you don't have a keystore yet, this step will be skipped automatically
-      # and assembleRelease will produce an unsigned APK (fine for testing).
+      # and assembleRelease will produce an APK signed with the debug keystore.
       - name: Decode keystore from secret
         if: env.KEYSTORE_BASE64 != ''
         env:
