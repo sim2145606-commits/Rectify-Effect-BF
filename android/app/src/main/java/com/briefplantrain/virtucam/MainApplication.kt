@@ -8,8 +8,9 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactPackage
 import com.facebook.react.ReactHost
-import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
+import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 
 import expo.modules.ApplicationLifecycleDispatcher
@@ -18,20 +19,22 @@ import expo.modules.ReactNativeHostWrapper
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost = ReactNativeHostWrapper(
-      this,
-      object : DefaultReactNativeHost(this) {
-        override fun getPackages(): List<ReactPackage> =
-            PackageList(this).packages.apply {
-              // Packages that cannot be autolinked yet can be added manually here, for example:
-              // add(MyReactNativePackage())
-              add(VirtuCamSettingsPackage())
-            }
+        this,
+        object : DefaultReactNativeHost(this) {
+          override fun getPackages(): List<ReactPackage> {
+            val packages = PackageList(this).packages
+            // Packages that cannot be autolinked yet can be added manually here, for example:
+            // packages.add(new MyReactNativePackage());
+            packages.add(VirtuCamSettingsPackage())
+            return packages
+          }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
 
           override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
 
           override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
+          override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED
       }
   )
 
@@ -43,8 +46,11 @@ class MainApplication : Application(), ReactApplication {
     android.util.Log.d("VirtuCam", "🚀 Application starting...")
     android.util.Log.d("VirtuCam", "BuildConfig.DEBUG = ${BuildConfig.DEBUG}")
     android.util.Log.d("VirtuCam", "BuildConfig.IS_NEW_ARCHITECTURE_ENABLED = ${BuildConfig.IS_NEW_ARCHITECTURE_ENABLED}")
-    // Initialize SoLoader for React Native
-    SoLoader.init(this, false)
+    SoLoader.init(this, OpenSourceMergedSoMapping)
+    if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+      // If you opted-in for the New Architecture, we load the native entry point for this app.
+      load()
+    }
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
     android.util.Log.d("VirtuCam", "✅ Application initialized successfully")
   }
