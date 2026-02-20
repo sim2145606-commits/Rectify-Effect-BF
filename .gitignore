@@ -35,3 +35,7 @@ build/
 
 # Local config
 local.properties
+
+# Amazon Q / Roo
+.roo/
+.roomodes
