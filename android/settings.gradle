@@ -1,4 +1,8 @@
 pluginManagement {
+    def reactAndroidProjectPath = file("../node_modules/@react-native/gradle-plugin")
+    if (reactAndroidProjectPath.exists()) {
+        includeBuild(reactAndroidProjectPath)
+    }
     repositories {
         gradlePluginPortal()
         google()
