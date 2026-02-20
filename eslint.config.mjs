@@ -20,7 +20,18 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.node,
+        // React Native / Expo globals
         __DEV__: 'readonly',
+        global: 'readonly',
+        // Timer globals (explicitly declared for Qodana/ESLint compatibility)
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setImmediate: 'readonly',
+        clearImmediate: 'readonly',
+        // Console (explicitly declared for safety)
+        console: 'readonly',
       },
     },
     plugins: {
@@ -42,6 +53,12 @@ export default [
       sourceType: 'commonjs',
       globals: {
         ...globals.node,
+        // Explicit CommonJS module-scope globals
+        module: 'writable',
+        exports: 'writable',
+        require: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
       },
     },
   },
