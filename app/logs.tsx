@@ -151,8 +151,11 @@ export default function LogsScreen() {
         if (result.success) {
           setSystemLogs(result.logs);
         }
-      } catch (error) {
-        console.error('Failed to load system logs:', error);
+      } catch (error: unknown) {
+        if (__DEV__) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('Failed to load system logs:', message);
+        }
       }
     }
 
@@ -347,7 +350,7 @@ export default function LogsScreen() {
                 <Text style={styles.logTime}>{new Date(log.timestamp).toLocaleTimeString()}</Text>
               </View>
               <Text style={styles.logMessage}>{log.message}</Text>
-              {log.details && (
+              {log.details !== undefined && (
                 <View style={styles.logDetails}>
                   <Text style={styles.logDetailsText}>
                     {typeof log.details === 'string'

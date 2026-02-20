@@ -266,8 +266,11 @@ export default function StudioScreen() {
 
     try {
       await VirtuCamSettings.requestOverlayPermission();
-    } catch (e) {
-      console.warn('Failed to request overlay permission:', e);
+    } catch (err: unknown) {
+      if (__DEV__) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn('Failed to request overlay permission:', message);
+      }
     }
   }, []);
 
@@ -304,12 +307,18 @@ export default function StudioScreen() {
         if (!value) {
           try {
             await VirtuCamSettings.stopFloatingOverlay();
-          } catch (e) {
-            console.warn('Failed to stop overlay:', e);
+          } catch (err: unknown) {
+            if (__DEV__) {
+              const message = err instanceof Error ? err.message : String(err);
+              console.warn('Failed to stop overlay:', message);
+            }
           }
         }
-      } catch (e) {
-        console.error('Error toggling floating overlay:', e);
+      } catch (err: unknown) {
+        if (__DEV__) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('Error toggling floating overlay:', message);
+        }
         Alert.alert('Error', 'Failed to toggle floating overlay. Please try again.');
       }
     },
@@ -333,8 +342,11 @@ export default function StudioScreen() {
           // App coming to foreground → stop floating overlay
           await VirtuCamSettings.stopFloatingOverlay();
         }
-      } catch (e) {
-        console.warn('AppState overlay control error:', e);
+      } catch (err: unknown) {
+        if (__DEV__) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn('AppState overlay control error:', message);
+        }
       }
     };
 

@@ -10,7 +10,7 @@ import Animated, {
   FadeIn,
 } from 'react-native-reanimated';
 import { Image } from 'expo-image';
-import { Video } from 'expo-av';
+import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
@@ -111,13 +111,7 @@ export default function HUDViewfinder({
                       ],
                     },
                   ]}
-                  resizeMode={
-                    scaleMode === 'fill'
-                      ? 'cover'
-                      : scaleMode === 'stretch'
-                        ? 'stretch'
-                        : 'contain'
-                  }
+                  resizeMode={ResizeMode.COVER}
                   shouldPlay
                   isLooping
                   isMuted

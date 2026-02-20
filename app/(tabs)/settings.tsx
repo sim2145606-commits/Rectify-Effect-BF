@@ -1712,7 +1712,6 @@ const styles = StyleSheet.create({
   addButton: {
     borderColor: Colors.accent + '40',
     backgroundColor: Colors.accent + '10',
-    marginLeft: 'auto',
   },
   addAppCard: {
     marginBottom: Spacing.lg,
