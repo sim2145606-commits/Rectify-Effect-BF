@@ -33,7 +33,7 @@ class MainApplication : Application(), ReactApplication {
   }
 
   override val reactHost: ReactHost
-    get() = getReactNativeHost().reactHost
+    get() = reactNativeHost.reactHost
 
   override fun onCreate() {
     super.onCreate()
