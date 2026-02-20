@@ -262,34 +262,38 @@ export async function requestCameraPermission(): Promise<PermissionStatus> {
 
 /**
  * Request all files access permission
+ * FIXED: Use correct URI format for Android 11+ MANAGE_EXTERNAL_STORAGE
  */
 export async function requestAllFilesAccess(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   try {
-    // Try to open the specific All Files Access settings page for this app
+    // Android 11+ (API 30+): Open All Files Access settings for this specific app
     await IntentLauncher.startActivityAsync(
-      IntentLauncher.ActivityAction.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+      'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION',
       {
         data: 'package:com.briefplantrain.virtucam',
       }
     );
-  } catch {
+  } catch (error) {
+    console.log('Failed to open specific All Files Access settings, trying fallback:', error);
     try {
-      // Fallback: Open general All Files Access settings
+      // Fallback 1: Open general All Files Access settings list
       await IntentLauncher.startActivityAsync(
-        IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION
+        'android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION'
       );
-    } catch {
+    } catch (error2) {
+      console.log('Failed to open general All Files Access settings, trying app settings:', error2);
       try {
-        // Fallback: Open app settings
+        // Fallback 2: Open app settings
         await IntentLauncher.startActivityAsync(
           IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
           {
             data: 'package:com.briefplantrain.virtucam',
           }
         );
-      } catch {
+      } catch (error3) {
+        console.log('Failed to open app settings, using final fallback:', error3);
         // Final fallback
         await Linking.openSettings();
       }

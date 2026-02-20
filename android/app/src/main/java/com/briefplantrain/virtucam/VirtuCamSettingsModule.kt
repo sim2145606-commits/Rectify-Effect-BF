@@ -456,16 +456,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
             }
             
-            // If module is active, the Xposed framework MUST be active
-            // (we can't detect XposedBridge from our own process, but if module loaded, framework works)
-            val xposedActive = moduleActive || lsposedExists
-            result.putBoolean("xposedActive", xposedActive)
-            
+            // FIXED: Only mark as active if module is actually active, not just LSPosed installed
+            // The module must be enabled in LSPosed AND have hooked at least one app
+            result.putBoolean("xposedActive", moduleActive)
             result.putBoolean("moduleActive", moduleActive)
             result.putString("detectionMethod", detectionMethod)
             
             android.util.Log.d("VirtuCamSettings",
-                "Detection results: xposedActive=$xposedActive, lsposedInstalled=$lsposedExists, " +
+                "Detection results: xposedActive=$moduleActive, lsposedInstalled=$lsposedExists, " +
                 "moduleActive=$moduleActive, method=$detectionMethod, path=$detectedPath")
             
             promise.resolve(result)
