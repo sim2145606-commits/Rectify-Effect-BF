@@ -195,6 +195,7 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.multidex:multidex:2.0.1'
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 
     // Xposed API (provided, not packaged in APK)
     compileOnly 'de.robv.android.xposed:api:82'

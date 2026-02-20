@@ -10,6 +10,8 @@ import android.os.IBinder
 import android.view.*
 import android.widget.*
 import androidx.core.app.NotificationCompat
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
 import kotlin.math.roundToInt
 
 class FloatingOverlayService : Service() {
