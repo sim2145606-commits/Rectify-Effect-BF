@@ -1,5 +1,6 @@
 pluginManagement {
-    includeBuild("../node_modules/@react-native/gradle-plugin")
+    def reactNativeDir = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
+    includeBuild(new File(reactNativeDir, "react-native-gradle-plugin"))
     repositories {
         gradlePluginPortal()
         google()
