@@ -310,7 +310,7 @@ export async function requestOverlayPermission(): Promise<void> {
   try {
     // Open overlay permission settings for this specific app
     await IntentLauncher.startActivityAsync(
-      IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION,
+      'android.settings.action.MANAGE_OVERLAY_PERMISSION',
       {
         data: 'package:com.briefplantrain.virtucam',
       }

@@ -1054,9 +1054,7 @@ export default function SettingsScreen() {
                 onPress={handleResetToDefaults}
                 disabled={isResetting}
                 icon={
-                  isResetting ? (
-                    <ActivityIndicator size="small" color={Colors.textPrimary} />
-                  ) : (
+                  isResetting ? undefined : (
                     <Ionicons name="refresh" size={16} color={Colors.textPrimary} />
                   )
                 }
@@ -1093,7 +1091,7 @@ function AppDetailModal({
   isCloudVerified: boolean;
   compatData?: { compatibility: number; notes: string[] };
   onClose: () => void;
-  onLaunch: () => void;
+  onLaunch?: () => void;
   targetMode: TargetMode;
 }) {
   const compatPct = compatData?.compatibility ?? 85;
@@ -1207,7 +1205,7 @@ function AppDetailModal({
           )}
 
           {/* Action */}
-          {app.enabled && (
+          {app.enabled && onLaunch && (
             <View style={modalStyles.actionRow}>
               <GlowButton
                 label="INJECT & LAUNCH"

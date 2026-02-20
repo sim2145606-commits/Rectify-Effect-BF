@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, NativeModules } from 'react-native';
 import { Redirect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, STORAGE_KEYS } from '@/constants/theme';
+import { diagnoseNativeModule } from '@/services/NativeModuleDiagnostics';
 
 export default function Index() {
   const [isLoading, setIsLoading] = useState(true);
@@ -10,13 +11,13 @@ export default function Index() {
 
   useEffect(() => {
     // Diagnostic: Check if native module is available on startup
-    import('@/services/NativeModuleDiagnostics').then(({ diagnoseNativeModule }) => {
-      const diag = diagnoseNativeModule();
-      console.log('🔍 Native Module Diagnostic:', diag);
-      if (!diag.nativeModuleExists) {
-        console.error('⚠️ CRITICAL: Native module not loaded! App will not function correctly.');
-      }
-    });
+    const diag = diagnoseNativeModule();
+    console.log('🔍 Native Module Diagnostic:', diag);
+    console.log('🔍 Available Modules:', Object.keys(NativeModules));
+    console.log('🔍 Total Modules:', Object.keys(NativeModules).length);
+    if (!diag.nativeModuleExists) {
+      console.error('⚠️ CRITICAL: Native module not loaded! App will not function correctly.');
+    }
 
     AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETE)
       .then(value => {

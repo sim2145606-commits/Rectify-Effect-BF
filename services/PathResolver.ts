@@ -33,7 +33,7 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
         return {
           ...defaultResult,
           absolutePath: uri.replace('file://', ''),
-          fileSize: info.size,
+          fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
           isAccessible: true,
         };
       }
@@ -60,7 +60,7 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
       return {
         ...defaultResult,
         absolutePath: info.uri.replace('file://', ''),
-        fileSize: info.size,
+        fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
         isAccessible: true,
       };
     }
@@ -89,7 +89,7 @@ async function resolveContentUri(uri: string): Promise<ResolvedPath> {
       fileName,
       fileExtension: extractExtension(fileName),
       mimeType: guessMimeType(fileName),
-      fileSize: info.size,
+      fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
       isAccessible: true,
     };
   } catch {
@@ -116,7 +116,7 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
         fileName: asset.filename,
         fileExtension: extractExtension(asset.filename),
         mimeType: guessMimeType(asset.filename),
-        fileSize: info.size,
+        fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
         isAccessible: true,
       };
     }
@@ -155,7 +155,7 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
       fileName,
       fileExtension: ext,
       mimeType: result.headers?.['content-type'] || guessMimeType(fileName),
-      fileSize: info.size,
+      fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
       isAccessible: true,
     };
   } catch {
