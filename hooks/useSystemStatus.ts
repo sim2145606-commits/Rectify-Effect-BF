@@ -42,7 +42,7 @@ export function useSystemStatus(autoRefreshMs: number = 0) {
       }
     };
 
-    init();
+    void init();
 
     return () => {
       mounted = false;
