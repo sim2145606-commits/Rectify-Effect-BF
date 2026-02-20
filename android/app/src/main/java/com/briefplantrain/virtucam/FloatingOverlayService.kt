@@ -170,7 +170,8 @@ class FloatingOverlayService : Service() {
             setupBubbleClick()
 
         } catch (e: Exception) {
-            android.util.Log.e("FloatingOverlay", "Failed to create bubble: ${e.message}")
+            val errorMessage = e.message ?: "Unknown error"
+            android.util.Log.e("FloatingOverlay", "Failed to create bubble: $errorMessage")
             stopSelf()
         }
     }
@@ -262,7 +263,8 @@ class FloatingOverlayService : Service() {
             setupPanelControls()
 
         } catch (e: Exception) {
-            android.util.Log.e("FloatingOverlay", "Failed to expand panel: ${e.message}")
+            val errorMessage = e.message ?: "Unknown error"
+            android.util.Log.e("FloatingOverlay", "Failed to expand panel: $errorMessage")
         }
     }
 
@@ -393,10 +395,12 @@ class FloatingOverlayService : Service() {
                     prefsFile.setReadable(true, false)
                 }
             } catch (e: Exception) {
-                android.util.Log.w("FloatingOverlay", "Could not set prefs readable: ${e.message}")
+                val errorMessage = e.message ?: "Unknown error"
+                android.util.Log.w("FloatingOverlay", "Could not set prefs readable: $errorMessage")
             }
         } catch (e: Exception) {
-            android.util.Log.e("FloatingOverlay", "Failed to write prefs: ${e.message}")
+            val errorMessage = e.message ?: "Unknown error"
+            android.util.Log.e("FloatingOverlay", "Failed to write prefs: $errorMessage")
         }
     }
 

@@ -165,13 +165,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
                 
                 val fallbackFile = File("/data/local/tmp/virtucam_config.json")
-                // Validate file path to prevent directory traversal
-                if (!fallbackFile.canonicalPath.startsWith("/data/local/tmp/")) {
+                // Validate file path to prevent directory traversal (CWE-434)
+                if (!fallbackFile.canonicalPath.startsWith("/data/local/tmp/") || 
+                    fallbackFile.canonicalPath != "/data/local/tmp/virtucam_config.json") {
                     throw SecurityException("Invalid file path")
-                }
-                // Validate file extension to prevent unsafe file types (CWE-434)
-                if (!fallbackFile.name.endsWith(".json")) {
-                    throw SecurityException("Invalid file extension")
                 }
                 FileWriter(fallbackFile).use { writer ->
                     writer.write(fallbackConfig.toString())
@@ -284,9 +281,12 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check for KernelSU
             val ksudFile = File("/data/adb/ksud")
-            // Validate path to prevent directory traversal (CWE-434)
-            if (!ksudFile.canonicalPath.startsWith("/data/adb/") || 
-                ksudFile.path.contains("..")) {
+            // Validate path and extension to prevent unsafe file access (CWE-434)
+            val isValidKsudFile = ksudFile.canonicalPath == "/data/adb/ksud" &&
+                                  ksudFile.name == "ksud" &&
+                                  ksudFile.extension.isEmpty()
+            
+            if (!isValidKsudFile) {
                 android.util.Log.w("VirtuCamSettings", "Invalid KernelSU path")
             } else if (ksudFile.exists()) {
                 val ksuVersion = executeCommand("/data/adb/ksud -V")
@@ -298,9 +298,12 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check for APatch
             val apatchFile = File("/data/adb/apatch")
-            // Validate path to prevent directory traversal (CWE-434)
-            if (!apatchFile.canonicalPath.startsWith("/data/adb/") || 
-                apatchFile.path.contains("..")) {
+            // Validate path and extension to prevent unsafe file access (CWE-434)
+            val isValidApatchFile = apatchFile.canonicalPath == "/data/adb/apatch" &&
+                                    apatchFile.name == "apatch" &&
+                                    apatchFile.extension.isEmpty()
+            
+            if (!isValidApatchFile) {
                 android.util.Log.w("VirtuCamSettings", "Invalid APatch path")
             } else if (apatchFile.exists()) {
                 result.putString("solution", "APatch")
@@ -439,9 +442,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             // The marker file persists until reboot (it's in /data/local/tmp)
             // No time-based validation needed - if it exists, module has loaded at least once since boot
             val markerFile = File("/data/local/tmp/virtucam_module_active")
-            // Validate file path and name to prevent unsafe file access (CWE-434)
-            val isValidPath = markerFile.canonicalPath.startsWith("/data/local/tmp/") && 
-                markerFile.name == "virtucam_module_active"
+            // Validate file path, name, and extension to prevent unsafe file access (CWE-434)
+            val expectedPath = "/data/local/tmp/virtucam_module_active"
+            val isValidPath = markerFile.canonicalPath == expectedPath &&
+                              markerFile.name == "virtucam_module_active" &&
+                              markerFile.extension.isEmpty()
             
             if (!isValidPath) {
                 android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
@@ -814,9 +819,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check marker file
             val markerFile = File("/data/local/tmp/virtucam_module_active")
-            // Validate file path and name to prevent unsafe file access (CWE-434)
-            if (!markerFile.canonicalPath.startsWith("/data/local/tmp/") || 
-                markerFile.name != "virtucam_module_active") {
+            // Validate file path, name, and extension to prevent unsafe file access (CWE-434)
+            val expectedPath = "/data/local/tmp/virtucam_module_active"
+            val isValidMarkerFile = markerFile.canonicalPath == expectedPath &&
+                                    markerFile.name == "virtucam_module_active" &&
+                                    markerFile.extension.isEmpty()
+            
+            if (!isValidMarkerFile) {
                 result.putString("markerFileAge", "invalid path")
                 result.putBoolean("markerFileExists", false)
             } else if (markerFile.exists()) {
@@ -976,9 +985,20 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      * Execute a root command and return output
      * PERFORMANCE FIX: This is called from background threads in writeConfig
      * to avoid blocking the UI thread with root operations
+     * SECURITY: Command is validated to prevent code injection (CWE-94)
      */
     private fun executeRootCommand(command: String): String {
         return try {
+            // Validate command to prevent code injection
+            if (command.contains(";") || command.contains("|") || 
+                command.contains("&") || command.contains("\n") || 
+                command.contains("\r") || command.contains("`") || 
+                command.contains("$(") || command.contains(">") || 
+                command.contains("<")) {
+                android.util.Log.w("VirtuCamSettings", "Blocked potentially unsafe command")
+                return ""
+            }
+            
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val output = reader.readText()

@@ -135,7 +135,9 @@ export default function PresetsScreen() {
               await deletePreset(preset.id);
               success();
               await loadPresets();
-            } catch {
+            } catch (error) {
+              const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+              console.error(`Failed to delete preset: ${errorMsg}`);
               Alert.alert('Error', 'Failed to delete preset.');
             }
           },
@@ -167,7 +169,9 @@ export default function PresetsScreen() {
       setRenameText('');
       setRenameDesc('');
       await loadPresets();
-    } catch {
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+      console.error(`Failed to rename preset: ${errorMsg}`);
       warning();
       Alert.alert('Error', 'Failed to rename preset.');
     }

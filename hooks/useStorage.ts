@@ -20,7 +20,10 @@ export function useStorage<T>(key: string, defaultValue: T) {
         }
         setLoaded(true);
       })
-      .catch(() => {
+      .catch((error) => {
+        const sanitizedKey = String(key).replace(/[\r\n]/g, '');
+        const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+        console.error(`Failed to load value for key "${sanitizedKey}": ${errorMsg}`);
         setLoaded(true);
       });
   }, [key]);
@@ -30,7 +33,11 @@ export function useStorage<T>(key: string, defaultValue: T) {
       setValue(prev => {
         const resolved =
           typeof newValue === 'function' ? (newValue as (prev: T) => T)(prev) : newValue;
-        AsyncStorage.setItem(key, JSON.stringify(resolved)).catch(() => {});
+        AsyncStorage.setItem(key, JSON.stringify(resolved)).catch((error) => {
+          const sanitizedKey = String(key).replace(/[\r\n]/g, '');
+          const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+          console.error(`Failed to save value for key "${sanitizedKey}": ${errorMsg}`);
+        });
         return resolved;
       });
     },
