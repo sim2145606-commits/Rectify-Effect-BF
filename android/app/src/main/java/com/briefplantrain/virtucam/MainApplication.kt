@@ -12,28 +12,36 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
+import expo.modules.ApplicationLifecycleDispatcher
+import expo.modules.ReactNativeHostWrapper
 
 class MainApplication : Application(), ReactApplication {
 
-  override val reactNativeHost: ReactNativeHost = object : DefaultReactNativeHost(this) {
-    override fun getPackages(): List<ReactPackage> {
-      val packages = PackageList(this).packages
-      // Packages that cannot be autolinked yet can be added manually here, for example:
-      // packages.add(new MyReactNativePackage());
-      packages.add(VirtuCamSettingsPackage())
-      return packages
-    }
+  override val reactNativeHost: ReactNativeHost =
+      ReactNativeHostWrapper(
+          this,
+          object : DefaultReactNativeHost(this) {
+            override fun getPackages(): List<ReactPackage> {
+              val packages = PackageList(this).packages
+              // Packages that cannot be autolinked yet can be added manually here.
+              packages.add(VirtuCamSettingsPackage())
+              return packages
+            }
 
-    override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
+            override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
 
-    override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
+            override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
 
-    override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
-    override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED
-  }
+            override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
+            override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED
+          })
 
+  // ReactNativeHostWrapper.createReactHost() is the correct Expo SDK 52 way to
+  // provide the ReactHost required by the ReactApplication interface.
+  // The previous `reactNativeHost.reactHost` did not compile because
+  // ReactNativeHost (the declared type) has no reactHost property.
   override val reactHost: ReactHost
-    get() = reactNativeHost.reactHost
+    get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
   override fun onCreate() {
     super.onCreate()
@@ -45,6 +53,12 @@ class MainApplication : Application(), ReactApplication {
       // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
     }
+    ApplicationLifecycleDispatcher.onApplicationCreate(this)
     android.util.Log.d("VirtuCam", "✅ Application initialized successfully")
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    ApplicationLifecycleDispatcher.onConfigurationChanged(this, newConfig)
   }
 }
