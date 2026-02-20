@@ -27,12 +27,12 @@ export type BridgeConfig = {
  * Write configuration to SharedPreferences (world-readable for Xposed)
  */
 export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<void> {
-  try {
-    if (!VirtuCamSettings) {
-      console.warn('VirtuCamSettings native module not available');
-      throw new Error('Native module not available');
-    }
+  if (!VirtuCamSettings) {
+    console.warn('VirtuCamSettings native module not available');
+    throw new Error('Native module not available');
+  }
 
+  try {
     await VirtuCamSettings.writeConfig({
       enabled: config.enabled ?? false,
       mediaSourcePath: config.mediaSourcePath ?? null,
@@ -74,12 +74,12 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
     targetPackages: [],
   };
 
-  try {
-    if (!VirtuCamSettings) {
-      console.warn('VirtuCamSettings native module not available');
-      return defaultConfig;
-    }
+  if (!VirtuCamSettings) {
+    console.warn('VirtuCamSettings native module not available');
+    return defaultConfig;
+  }
 
+  try {
     const config = await VirtuCamSettings.readConfig();
 
     // Parse targetPackages string to array
@@ -106,10 +106,11 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
  * Get the path to the SharedPreferences file (for debugging)
  */
 export async function getConfigPath(): Promise<string | null> {
+  if (!VirtuCamSettings) {
+    return null;
+  }
+  
   try {
-    if (!VirtuCamSettings) {
-      return null;
-    }
     return await VirtuCamSettings.getConfigPath();
   } catch (error) {
     console.error('ConfigBridge: Failed to get config path', error);
@@ -151,9 +152,13 @@ export async function syncAllSettings(): Promise<void> {
     const front = frontCamera === 'true';
     const back = backCamera === 'true';
     let cameraTarget: CameraTarget = 'none';
-    if (front && back) cameraTarget = 'both';
-    else if (front) cameraTarget = 'front';
-    else if (back) cameraTarget = 'back';
+    if (front && back) {
+      cameraTarget = 'both';
+    } else if (front) {
+      cameraTarget = 'front';
+    } else if (back) {
+      cameraTarget = 'back';
+    }
 
     // Build config
     const config: Partial<BridgeConfig> = {
@@ -222,14 +227,14 @@ export async function verifyBridge(): Promise<{
   error?: string;
   details?: any;
 }> {
-  try {
-    if (!VirtuCamSettings) {
-      return {
-        success: false,
-        error: 'Native module not available',
-      };
-    }
+  if (!VirtuCamSettings) {
+    return {
+      success: false,
+      error: 'Native module not available',
+    };
+  }
 
+  try {
     // Try to write and read back a test config
     const testConfig: Partial<BridgeConfig> = {
       enabled: false,

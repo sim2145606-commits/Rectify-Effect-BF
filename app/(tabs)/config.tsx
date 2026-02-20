@@ -259,6 +259,11 @@ export default function StudioScreen() {
 
   // Request overlay permission
   const requestOverlayPermission = useCallback(async () => {
+    if (!VirtuCamSettings) {
+      Alert.alert('Error', 'Native module not available');
+      return;
+    }
+
     try {
       await VirtuCamSettings.requestOverlayPermission();
     } catch (e) {
@@ -269,6 +274,11 @@ export default function StudioScreen() {
   // Handle floating overlay toggle
   const handleFloatingToggle = useCallback(
     async (value: boolean) => {
+      if (!VirtuCamSettings) {
+        Alert.alert('Error', 'Native module not available');
+        return;
+      }
+
       try {
         // 1. Check overlay permission FIRST
         if (value) {
@@ -308,6 +318,10 @@ export default function StudioScreen() {
 
   // AppState listener to auto-start/stop the overlay service
   useEffect(() => {
+    if (!VirtuCamSettings) {
+      return;
+    }
+
     const handleAppState = async (nextState: string) => {
       if (!floatingBubbleEnabled) return;
 

@@ -62,7 +62,7 @@ export async function savePreset(config: PresetConfig): Promise<LocalPreset> {
   try {
     const presets = await fetchPresets();
 
-    const id = `preset_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const id = `preset_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     const now = new Date().toISOString();
 
     const newPreset: LocalPreset = {
