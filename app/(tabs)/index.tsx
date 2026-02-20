@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -62,6 +62,20 @@ export default function Dashboard() {
   const masterScale = useSharedValue(1);
   const scanLineY = useSharedValue(0);
 
+  const applyBridgeConfig = useCallback(async () => {
+    try {
+      const config = await readBridgeConfig();
+      if (config) {
+        setBridgeHookEnabled(config.enabled || false);
+        setBridgeMediaPath(config.mediaSourcePath || null);
+        setBridgeCameraTarget(config.cameraTarget || 'front');
+        setBridgeTargetAppsCount(config.targetPackages?.length || 0);
+      }
+    } catch {
+      // Silent - config read may fail
+    }
+  }, []);
+
   // Sync bridge config whenever key settings change
   useEffect(() => {
     const doSync = async () => {
@@ -72,25 +86,13 @@ export default function Dashboard() {
         setBridgePath(bridgeSt.path);
         setBridgeReadable(bridgeSt.readable);
         setLastSyncTime(new Date().toLocaleTimeString());
-        
-        // Load additional bridge config details
-        try {
-          const config = await readBridgeConfig();
-          if (config) {
-            setBridgeHookEnabled(config.enabled || false);
-            setBridgeMediaPath(config.mediaSourcePath || null);
-            setBridgeCameraTarget(config.cameraTarget || 'front');
-            setBridgeTargetAppsCount(config.targetPackages?.length || 0);
-          }
-        } catch {
-          // Silent - config read may fail
-        }
+        await applyBridgeConfig();
       } catch {
         // Silent
       }
     };
     void doSync();
-  }, [hookEnabled, frontCamera, backCamera, selectedMedia]);
+  }, [hookEnabled, frontCamera, backCamera, selectedMedia, applyBridgeConfig]);
 
   // Load system info on mount
   useEffect(() => {
@@ -164,26 +166,14 @@ export default function Dashboard() {
     setBridgePath(bridgeSt.path);
     setBridgeReadable(bridgeSt.readable);
     setLastSyncTime(new Date().toLocaleTimeString());
-
-    // Refresh bridge config details
-    try {
-      const config = await readBridgeConfig();
-      if (config) {
-        setBridgeHookEnabled(config.enabled || false);
-        setBridgeMediaPath(config.mediaSourcePath || null);
-        setBridgeCameraTarget(config.cameraTarget || 'front');
-        setBridgeTargetAppsCount(config.targetPackages?.length || 0);
-      }
-    } catch {
-      // Silent
-    }
+    await applyBridgeConfig();
 
     // Refresh system info
     setLoadingSystemInfo(true);
     const info = await getSystemInfo();
     setSystemInfo(info);
     setLoadingSystemInfo(false);
-  }, [mediumImpact, refreshSystemStatus]);
+  }, [mediumImpact, refreshSystemStatus, applyBridgeConfig]);
 
   // Pull-to-refresh handler
   const onRefresh = useCallback(async () => {
