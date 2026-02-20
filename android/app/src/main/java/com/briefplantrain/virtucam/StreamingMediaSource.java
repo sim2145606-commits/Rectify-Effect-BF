@@ -40,6 +40,7 @@ public class StreamingMediaSource {
     private Handler decoderHandler;
     private Surface decodeSurface;
     private SurfaceTexture decodeSurfaceTexture;
+    private android.media.MediaPlayer mediaPlayer;
 
     // Frame callback interface
     public interface FrameCallback {
@@ -135,17 +136,17 @@ public class StreamingMediaSource {
             decodeSurface = new Surface(decodeSurfaceTexture);
 
             // Use Android MediaPlayer for RTSP/HTTP streams
-            android.media.MediaPlayer player = new android.media.MediaPlayer();
-            player.setDataSource(context, Uri.parse(streamUrl));
-            player.setSurface(decodeSurface);
-            player.setLooping(true);
+            mediaPlayer = new android.media.MediaPlayer();
+            mediaPlayer.setDataSource(context, Uri.parse(streamUrl));
+            mediaPlayer.setSurface(decodeSurface);
+            mediaPlayer.setLooping(true);
 
-            player.setOnPreparedListener(mp -> {
+            mediaPlayer.setOnPreparedListener(mp -> {
                 mp.start();
                 XposedBridge.log(TAG + ": Stream playing: " + streamUrl);
             });
 
-            player.setOnErrorListener((mp, what, extra) -> {
+            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
                 XposedBridge.log(TAG + ": Stream error: what=" + what + " extra=" + extra);
                 if (frameCallback != null) {
                     frameCallback.onError("MediaPlayer error: " + what);
@@ -153,13 +154,13 @@ public class StreamingMediaSource {
                 return true;
             });
 
-            player.setOnCompletionListener(mp -> {
+            mediaPlayer.setOnCompletionListener(mp -> {
                 if (frameCallback != null) {
                     frameCallback.onStreamEnd();
                 }
             });
 
-            player.prepareAsync();
+            mediaPlayer.prepareAsync();
 
         } catch (Exception e) {
             XposedBridge.log(TAG + ": initializePlayer failed: " + e);
@@ -171,6 +172,11 @@ public class StreamingMediaSource {
 
     public void stop() {
         isPlaying = false;
+        if (mediaPlayer != null) {
+            try { mediaPlayer.stop(); } catch (Exception ignored) {}
+            try { mediaPlayer.release(); } catch (Exception ignored) {}
+            mediaPlayer = null;
+        }
         if (decodeSurface != null) {
             decodeSurface.release();
             decodeSurface = null;

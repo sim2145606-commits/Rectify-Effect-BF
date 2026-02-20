@@ -141,7 +141,6 @@ class FloatingOverlayService : Service() {
     private fun createFloatingBubble() {
         try {
             val layoutInflater = LayoutInflater.from(this)
-            @Suppress("XXE_VULNERABILITY")
             bubbleIcon = layoutInflater.inflate(R.layout.floating_bubble_icon, null)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -200,7 +199,7 @@ class FloatingOverlayService : Service() {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
                         
-                        if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+                        if (kotlin.math.abs(deltaX) > 10 || kotlin.math.abs(deltaY) > 10) {
                             hasMoved = true
                         }
                         
@@ -236,7 +235,6 @@ class FloatingOverlayService : Service() {
             removeFloatingView()
             
             val layoutInflater = LayoutInflater.from(this)
-            @Suppress("XXE_VULNERABILITY")
             panelView = layoutInflater.inflate(R.layout.floating_panel, null)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

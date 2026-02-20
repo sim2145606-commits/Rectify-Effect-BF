@@ -6,7 +6,6 @@ package com.briefplantrain.virtucam;
  */
 public class NativeEncoder {
 
-    private static final String NATIVE_LIBRARY_NAME = "virtucam-native";
     private static boolean nativeAvailable = false;
 
     static {

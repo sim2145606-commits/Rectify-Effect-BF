@@ -17,10 +17,10 @@ public class HookConfig {
     public volatile boolean isStreamingMode = false;
 
     public boolean shouldHookCamera(int facing) {
-        // 0 = back, 1 = front
+        // Camera2 CameraCharacteristics.LENS_FACING: 0 = FRONT, 1 = BACK
         if ("both".equals(cameraTarget)) return true;
-        if ("front".equals(cameraTarget) && facing == 1) return true;
-        if ("back".equals(cameraTarget) && facing == 0) return true;
+        if ("front".equals(cameraTarget) && facing == 0) return true;
+        if ("back".equals(cameraTarget) && facing == 1) return true;
         return false;
     }
 }

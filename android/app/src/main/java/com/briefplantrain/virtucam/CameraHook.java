@@ -27,7 +27,6 @@ import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileReader;
-import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -395,14 +394,14 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                             log("Config file too large: " + fileSize + " bytes");
                         } else {
                             StringBuilder jsonBuilder = new StringBuilder();
-                            BufferedReader reader = new BufferedReader(new FileReader(fallbackFile));
-                            String line;
-                            int lineCount = 0;
-                            while ((line = reader.readLine()) != null && lineCount++ < 1000) {
-                                jsonBuilder.append(line);
+                            try (BufferedReader reader = new BufferedReader(new FileReader(fallbackFile))) {
+                                String line;
+                                int lineCount = 0;
+                                while ((line = reader.readLine()) != null && lineCount++ < 1000) {
+                                    jsonBuilder.append(line);
+                                }
                             }
-                            reader.close();
-                        
+
                         JSONObject json = new JSONObject(jsonBuilder.toString());
                         
                         enabled = json.optBoolean("enabled", false);
@@ -1461,10 +1460,6 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 try { sliceHeight = outputFormat.getInteger("slice-height"); } catch (Exception ignored) {}
                 if (stride <= 0) stride = width;
                 if (sliceHeight <= 0) sliceHeight = height;
-
-                // Check color format
-                int colorFormat = 0;
-                try { colorFormat = outputFormat.getInteger(MediaFormat.KEY_COLOR_FORMAT); } catch (Exception ignored) {}
 
                 outputBuffer.position(info.offset);
                 outputBuffer.limit(info.offset + info.size);

@@ -23,9 +23,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
     
     companion object {
-        // Marker file timeout: Module remains active until device reboot
-        // (marker file is in /data/local/tmp which is cleared on reboot)
-        private val MARKER_FILE_TIMEOUT_MS = TimeUnit.HOURS.toMillis(24)
+        // intentionally empty — no shared constants needed at this time
     }
 
     override fun getName(): String {
@@ -242,9 +240,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         // Run on background thread to avoid blocking UI
         Thread {
             try {
-                val process = Runtime.getRuntime().exec("su -c id")
-                val reader = BufferedReader(InputStreamReader(process.inputStream))
-                val output = reader.readText()
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+                val output: String
+                // Consume both streams to prevent blocking (CWE-400)
+                BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                    output = reader.readText()
+                }
+                // Drain error stream to prevent process blocking
+                BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
                 val exitCode = process.waitFor()
                 
                 val result = Arguments.createMap()
@@ -699,7 +702,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun verifyConfigReadable(promise: Promise) {
         try {
-            val prefsFile = File(reactApplicationContext.applicationInfo.dataDir, 
+            val prefsFile = File(reactApplicationContext.applicationInfo.dataDir,
                 "shared_prefs/virtucam_config.xml")
             
             val result = Arguments.createMap()
@@ -707,8 +710,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("readable", prefsFile.canRead())
             result.putString("path", prefsFile.absolutePath)
             
-            // Try to read permissions
-            val permissions = executeCommand("ls -l ${prefsFile.absolutePath}")
+            // Escape path to prevent shell injection (CWE-78)
+            val permissions = executeCommand("ls -l ${escapeShellArg(prefsFile.absolutePath)}")
             result.putString("permissions", permissions.trim())
             
             promise.resolve(result)
@@ -966,47 +969,52 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Execute a shell command and return output
+     * Execute a shell command and return output.
+     * Uses sh -c to correctly handle commands with spaces, pipes, and redirects.
      */
     private fun executeCommand(command: String): String {
         return try {
-            val parts = command.split(" ")
-            val process = Runtime.getRuntime().exec(parts.toTypedArray())
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val output = reader.readText()
-            process.waitFor()
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val output: String
+            // Consume both streams to prevent blocking (CWE-400)
+            BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                output = reader.readText()
+            }
+            BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
+            process.waitFor(5, TimeUnit.SECONDS)
             output
         } catch (e: Exception) {
             ""
         }
     }
-    
+
     /**
-     * Execute a root command and return output
-     * PERFORMANCE FIX: This is called from background threads in writeConfig
-     * to avoid blocking the UI thread with root operations
-     * SECURITY: Command is validated to prevent code injection (CWE-94)
+     * Execute a root command and return output.
+     * Passes the full shell command string to su -c via sh -c so that
+     * shell operators (|, &&, ||, ;) work correctly in compound commands.
+     * SECURITY: All dynamic values embedded in commands must be escaped
+     * with escapeShellArg() before being passed here.
      */
     private fun executeRootCommand(command: String): String {
         return try {
-            // Validate command to prevent code injection
-            if (command.contains(";") || command.contains("|") || 
-                command.contains("&") || command.contains("\n") || 
-                command.contains("\r") || command.contains("`") || 
-                command.contains("$(") || command.contains(">") || 
-                command.contains("<")) {
-                android.util.Log.w("VirtuCamSettings", "Blocked potentially unsafe command")
+            // Block null bytes and newlines which could break the exec array boundary
+            if (command.contains('\u0000') || command.contains('\n') || command.contains('\r')) {
+                android.util.Log.w("VirtuCamSettings", "Blocked command with illegal characters")
                 return ""
             }
-            
+
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val output = reader.readText()
+            val output: String
+            // Consume both streams to prevent blocking (CWE-400)
+            BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                output = reader.readText()
+            }
+            BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
             // Add timeout to prevent indefinite blocking
             val completed = process.waitFor(5, TimeUnit.SECONDS)
             if (!completed) {
                 process.destroy()
-                android.util.Log.w("VirtuCamSettings", "Root command timed out: $command")
+                android.util.Log.w("VirtuCamSettings", "Root command timed out")
                 return ""
             }
             output
