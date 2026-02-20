@@ -4,6 +4,7 @@
 import js from '@eslint/js';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
+import globals from 'globals';
 
 export default [
   js.configs.recommended,
@@ -15,6 +16,11 @@ export default [
         ecmaVersion: 'latest',
         sourceType: 'module',
         ecmaFeatures: { jsx: true },
+      },
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        __DEV__: 'readonly',
       },
     },
     plugins: {
@@ -29,10 +35,27 @@ export default [
     },
   },
   {
+    // CommonJS config files at project root — need Node.js globals + commonjs sourceType
+    files: ['babel.config.js', 'metro.config.js', 'react-native.config.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
+    // All other JS/JSX files (ES modules)
     files: ['**/*.js', '**/*.jsx'],
+    ignores: ['babel.config.js', 'metro.config.js', 'react-native.config.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
     },
   },
   {
