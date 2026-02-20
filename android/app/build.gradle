@@ -4,8 +4,6 @@ plugins {
     id("com.facebook.react")
 }
 
-apply from: new File(["node", "--print", "require.resolve('expo-modules-core/package.json')"].execute(null, rootDir).text.trim(), "../android/gradle-plugin.gradle")
-
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
