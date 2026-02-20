@@ -65,13 +65,14 @@ export async function runDiagnostics(
     checks.push(result);
     onProgress?.(result, checks.length - 1);
   } catch {
-    checks.push({
+    const result: DiagnosticCheckResult = {
       name: 'Storage Permission',
       description: 'READ_EXTERNAL_STORAGE',
       status: 'fail',
       detail: 'Check failed',
-    });
-    onProgress?.(checks[checks.length - 1], checks.length - 1);
+    };
+    checks.push(result);
+    onProgress?.(result, checks.length - 1);
   }
 
   // 3. All Files Access (MANAGE_EXTERNAL_STORAGE)
@@ -89,13 +90,14 @@ export async function runDiagnostics(
     checks.push(result);
     onProgress?.(result, checks.length - 1);
   } catch {
-    checks.push({
+    const result: DiagnosticCheckResult = {
       name: 'All Files Access',
       description: 'MANAGE_EXTERNAL_STORAGE',
       status: 'warn',
       detail: 'Native module unavailable',
-    });
-    onProgress?.(checks[checks.length - 1], checks.length - 1);
+    };
+    checks.push(result);
+    onProgress?.(result, checks.length - 1);
   }
 
   // 4. Overlay Permission
@@ -113,13 +115,14 @@ export async function runDiagnostics(
     checks.push(result);
     onProgress?.(result, checks.length - 1);
   } catch {
-    checks.push({
+    const result: DiagnosticCheckResult = {
       name: 'Overlay Permission',
       description: 'SYSTEM_ALERT_WINDOW',
       status: 'warn',
       detail: 'Native module unavailable',
-    });
-    onProgress?.(checks[checks.length - 1], checks.length - 1);
+    };
+    checks.push(result);
+    onProgress?.(result, checks.length - 1);
   }
 
   // 5. Root Access
@@ -138,13 +141,14 @@ export async function runDiagnostics(
     checks.push(r);
     onProgress?.(r, checks.length - 1);
   } catch {
-    checks.push({
+    const r: DiagnosticCheckResult = {
       name: 'Root Access',
       description: 'su binary check',
       status: 'fail',
       detail: 'Check failed',
-    });
-    onProgress?.(checks[checks.length - 1], checks.length - 1);
+    };
+    checks.push(r);
+    onProgress?.(r, checks.length - 1);
   }
 
   // 6. Xposed Framework
@@ -163,13 +167,14 @@ export async function runDiagnostics(
     checks.push(r);
     onProgress?.(r, checks.length - 1);
   } catch {
-    checks.push({
+    const r: DiagnosticCheckResult = {
       name: 'Xposed Framework',
       description: 'Framework detection',
       status: 'fail',
       detail: 'Check failed',
-    });
-    onProgress?.(checks[checks.length - 1], checks.length - 1);
+    };
+    checks.push(r);
+    onProgress?.(r, checks.length - 1);
   }
 
   // 7. Module Active
@@ -188,24 +193,19 @@ export async function runDiagnostics(
     checks.push(r);
     onProgress?.(r, checks.length - 1);
   } catch {
-    checks.push({
+    const r: DiagnosticCheckResult = {
       name: 'VirtuCam Module',
       description: 'Module status',
       status: 'fail',
       detail: 'Check failed',
-    });
-    onProgress?.(checks[checks.length - 1], checks.length - 1);
+    };
+    checks.push(r);
+    onProgress?.(r, checks.length - 1);
   }
 
   const passCount = checks.filter(c => c.status === 'pass').length;
   const failCount = checks.filter(c => c.status === 'fail').length;
   const warnCount = checks.filter(c => c.status === 'warn').length;
 
-  return {
-    checks,
-    passCount,
-    failCount,
-    warnCount,
-    timestamp: Date.now(),
-  };
+  return { checks, passCount, failCount, warnCount, timestamp: Date.now() };
 }

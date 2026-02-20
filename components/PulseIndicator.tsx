@@ -1,5 +1,12 @@
-import React, { useEffect, useRef, useMemo } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, StyleSheet } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 type Props = {
   active: boolean;
@@ -8,57 +15,47 @@ type Props = {
 };
 
 export default function PulseIndicator({ active, color = '#00D4FF', size = 10 }: Props) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const opacity = useRef(new Animated.Value(0.8)).current;
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(0.8);
 
   useEffect(() => {
     if (!active) {
-      scale.setValue(1);
-      opacity.setValue(0.6);
+      scale.value = withTiming(1, { duration: 200 });
+      opacity.value = withTiming(0.6, { duration: 200 });
       return;
     }
 
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scale, { toValue: 1.25, duration: 800, useNativeDriver: true }),
-        Animated.timing(scale, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ])
+    scale.value = withRepeat(
+      withSequence(
+        withTiming(1.25, { duration: 800 }),
+        withTiming(1, { duration: 800 })
+      ),
+      -1,
+      true
     );
 
-    const fade = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.4, duration: 800, useNativeDriver: true }),
-      ])
+    opacity.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 800 }),
+        withTiming(0.4, { duration: 800 })
+      ),
+      -1,
+      true
     );
+  }, [active, scale, opacity]);
 
-    loop.start();
-    fade.start();
-
-    return () => {
-      loop.stop();
-      fade.stop();
-    };
-  }, [active, opacity, scale]);
-
-  const dotStyle = useMemo(
-    () => [
-      styles.dot,
-      {
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: color,
-        transform: [{ scale }],
-        opacity,
-      },
-    ],
-    [size, color, scale, opacity]
-  );
+  const animStyle = useAnimatedStyle(() => ({
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    backgroundColor: color,
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
 
   return (
     <View style={styles.container}>
-      <Animated.View style={dotStyle} />
+      <Animated.View style={animStyle} />
     </View>
   );
 }
@@ -68,5 +65,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  dot: {},
 });

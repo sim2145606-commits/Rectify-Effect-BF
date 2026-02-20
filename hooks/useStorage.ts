@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export function useStorage<T>(key: string, defaultValue: T) {
   const [value, setValue] = useState<T>(defaultValue);
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem(key)
@@ -11,20 +10,24 @@ export function useStorage<T>(key: string, defaultValue: T) {
         if (stored !== null) {
           try {
             setValue(JSON.parse(stored));
-          } catch (error) {
+          } catch (err: unknown) {
             const sanitizedKey = String(key).replace(/[\r\n]/g, '');
-            const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+            const errorMsg =
+              err instanceof Error
+                ? err.message.replace(/[\r\n]/g, '')
+                : String(err).replace(/[\r\n]/g, '');
             console.error(`Failed to parse stored value for key "${sanitizedKey}": ${errorMsg}`);
             setValue(stored as unknown as T);
           }
         }
-        setLoaded(true);
       })
-      .catch((error) => {
+      .catch((err: unknown) => {
         const sanitizedKey = String(key).replace(/[\r\n]/g, '');
-        const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+        const errorMsg =
+          err instanceof Error
+            ? err.message.replace(/[\r\n]/g, '')
+            : String(err).replace(/[\r\n]/g, '');
         console.error(`Failed to load value for key "${sanitizedKey}": ${errorMsg}`);
-        setLoaded(true);
       });
   }, [key]);
 
@@ -33,9 +36,12 @@ export function useStorage<T>(key: string, defaultValue: T) {
       setValue(prev => {
         const resolved =
           typeof newValue === 'function' ? (newValue as (prev: T) => T)(prev) : newValue;
-        AsyncStorage.setItem(key, JSON.stringify(resolved)).catch((error) => {
+        AsyncStorage.setItem(key, JSON.stringify(resolved)).catch((err: unknown) => {
           const sanitizedKey = String(key).replace(/[\r\n]/g, '');
-          const errorMsg = error instanceof Error ? error.message.replace(/[\r\n]/g, '') : String(error).replace(/[\r\n]/g, '');
+          const errorMsg =
+            err instanceof Error
+              ? err.message.replace(/[\r\n]/g, '')
+              : String(err).replace(/[\r\n]/g, '');
           console.error(`Failed to save value for key "${sanitizedKey}": ${errorMsg}`);
         });
         return resolved;
@@ -44,5 +50,5 @@ export function useStorage<T>(key: string, defaultValue: T) {
     [key]
   );
 
-  return [value, updateValue, loaded] as const;
+  return [value, updateValue] as const;
 }

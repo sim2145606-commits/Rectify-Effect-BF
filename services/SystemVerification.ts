@@ -1,6 +1,7 @@
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, STORAGE_KEYS } from '@/constants/theme';
+import { logger } from './LogService';
 
 const { VirtuCamSettings } = NativeModules;
 
@@ -49,41 +50,13 @@ const CACHE_KEY = STORAGE_KEYS.SYSTEM_STATUS;
 export const INITIAL_SYSTEM_STATE: SystemVerificationState = {
   overallReady: false,
   lastChecked: 0,
-  rootAccess: {
-    label: 'Root Access',
-    detail: 'Checking...',
-    status: 'loading',
-  },
-  xposedFramework: {
-    label: 'LSPosed / Xposed',
-    detail: 'Checking...',
-    status: 'loading',
-  },
-  moduleActive: {
-    label: 'VirtuCam Module',
-    detail: 'Checking...',
-    status: 'loading',
-  },
-  storagePermission: {
-    label: 'Storage Permission',
-    detail: 'Checking...',
-    status: 'loading',
-  },
-  allFilesAccess: {
-    label: 'All Files Access',
-    detail: 'Checking...',
-    status: 'loading',
-  },
-  cameraPermission: {
-    label: 'Camera Permission',
-    detail: 'Checking...',
-    status: 'loading',
-  },
-  overlayPermission: {
-    label: 'Overlay Permission',
-    detail: 'Checking...',
-    status: 'loading',
-  },
+  rootAccess: { label: 'Root Access', detail: 'Checking...', status: 'loading' },
+  xposedFramework: { label: 'LSPosed / Xposed', detail: 'Checking...', status: 'loading' },
+  moduleActive: { label: 'VirtuCam Module', detail: 'Checking...', status: 'loading' },
+  storagePermission: { label: 'Storage Permission', detail: 'Checking...', status: 'loading' },
+  allFilesAccess: { label: 'All Files Access', detail: 'Checking...', status: 'loading' },
+  cameraPermission: { label: 'Camera Permission', detail: 'Checking...', status: 'loading' },
+  overlayPermission: { label: 'Overlay Permission', detail: 'Checking...', status: 'loading' },
 };
 
 export function getStatusColor(status: SystemCheckStatus): string {
@@ -129,11 +102,7 @@ export async function getCachedSystemStatus(): Promise<SystemVerificationState |
  */
 export async function runFullSystemCheck(): Promise<SystemVerificationState> {
   const result: SystemVerificationState = {
-    rootAccess: {
-      label: 'Root Access',
-      detail: 'Checking root access...',
-      status: 'loading',
-    },
+    rootAccess: { label: 'Root Access', detail: 'Checking root access...', status: 'loading' },
     xposedFramework: {
       label: 'LSPosed / Xposed',
       detail: 'Checking framework...',
@@ -186,7 +155,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'error',
           };
         }
-      } catch (error: any) {
+      } catch {
         result.rootAccess = {
           label: 'Root Access',
           detail: 'Root check failed',
@@ -206,7 +175,6 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       try {
         const xposedResult = await VirtuCamSettings.checkXposedStatus();
 
-        // If module is active, framework MUST be active (module can't load without framework)
         if (xposedResult.moduleActive) {
           result.xposedFramework = {
             label: 'LSPosed / Xposed',
@@ -219,11 +187,10 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'ok',
           };
         } else if (xposedResult.lsposedInstalled) {
-          // Framework is installed but module needs activation
           result.xposedFramework = {
             label: 'LSPosed / Xposed',
             detail: 'Framework installed',
-            status: 'ok', // Framework IS installed, just module needs activation
+            status: 'ok',
           };
           result.moduleActive = {
             label: 'VirtuCam Module',
@@ -231,7 +198,6 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'warning',
           };
         } else {
-          // No LSPosed found at all
           result.xposedFramework = {
             label: 'LSPosed / Xposed',
             detail: 'Not installed',
@@ -243,7 +209,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'error',
           };
         }
-      } catch (error: any) {
+      } catch {
         result.xposedFramework = {
           label: 'LSPosed / Xposed',
           detail: 'Check failed',
@@ -273,14 +239,15 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       try {
         let storageGranted = await VirtuCamSettings.checkStoragePermission();
 
-        // Fallback: if native module check fails, try RN's built-in check
         if (!storageGranted && Platform.OS === 'android') {
           try {
             const rnCheck = await PermissionsAndroid.check(
               PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
             );
             if (rnCheck) storageGranted = true;
-          } catch {}
+          } catch {
+            // silent fallback failure
+          }
         }
 
         if (storageGranted) {
@@ -296,7 +263,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'error',
           };
         }
-      } catch (error: any) {
+      } catch {
         result.storagePermission = {
           label: 'Storage Permission',
           detail: 'Permission check failed',
@@ -304,7 +271,6 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         };
       }
     } else {
-      // If checkStoragePermission is not available, use checkAllFilesAccess as fallback
       if (VirtuCamSettings && VirtuCamSettings.checkAllFilesAccess) {
         try {
           const allFilesGranted = await VirtuCamSettings.checkAllFilesAccess();
@@ -346,7 +312,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'warning',
           };
         }
-      } catch (error: any) {
+      } catch {
         result.allFilesAccess = {
           label: 'All Files Access',
           detail: 'Permission check failed',
@@ -370,7 +336,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           detail: cameraGranted ? 'Camera access granted' : 'Camera permission required',
           status: cameraGranted ? 'ok' : 'error',
         };
-      } catch (error: any) {
+      } catch {
         result.cameraPermission = {
           label: 'Camera Permission',
           detail: 'Check failed',
@@ -392,9 +358,9 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         result.overlayPermission = {
           label: 'Overlay Permission',
           detail: overlayGranted ? 'Overlay access granted' : 'Overlay permission not granted',
-          status: overlayGranted ? 'ok' : 'warning', // Warning, not critical
+          status: overlayGranted ? 'ok' : 'warning',
         };
-      } catch (error: any) {
+      } catch {
         result.overlayPermission = {
           label: 'Overlay Permission',
           detail: 'Check failed',
@@ -408,11 +374,10 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         status: 'warning',
       };
     }
-  } catch (error) {
-    console.error('System check error:', error);
+  } catch (err: unknown) {
+    logger.error('System check error', 'SystemVerification', err);
   }
 
-  // Determine overall readiness
   result.overallReady = [
     result.rootAccess,
     result.xposedFramework,
@@ -420,7 +385,6 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     result.storagePermission,
   ].every(check => check.status === 'ok');
 
-  // Cache the result
   try {
     await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(result));
   } catch {
@@ -441,7 +405,6 @@ export async function getSystemInfo(): Promise<SystemInfo | null> {
 
     const info = await VirtuCamSettings.getSystemInfo();
 
-    // Get root solution
     let rootSolution = 'None';
     let rootVersion = '';
     if (VirtuCamSettings.detectRootSolution) {
@@ -473,8 +436,8 @@ export async function getSystemInfo(): Promise<SystemInfo | null> {
       rootSolution,
       rootVersion,
     };
-  } catch (error) {
-    console.error('Failed to get system info:', error);
+  } catch (err: unknown) {
+    logger.error('Failed to get system info', 'SystemVerification', err);
     return null;
   }
 }

@@ -7,7 +7,6 @@ type LaunchResult = {
 
 /**
  * Attempts to launch a target application by package name.
- * In the Expo dev client we fall back to an informational message so bundling never fails.
  */
 export async function launchTargetApp(
   packageName: string,
@@ -17,7 +16,6 @@ export async function launchTargetApp(
     return { success: false, message: 'Target launching is only supported on Android devices.' };
   }
 
-  // Try to open the app using an intent URI; if it fails, return a friendly message.
   const intentUri = `intent://#Intent;package=${packageName};end`;
   try {
     const canOpen = await Linking.canOpenURL(intentUri);

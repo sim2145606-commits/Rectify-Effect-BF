@@ -202,7 +202,7 @@ function PermissionItem({
   onPress?: () => void;
   buttonLabel?: string;
 }) {
-  const getStatusColor = () => {
+  const getStatusColor = (): string => {
     switch (status) {
       case 'granted':
         return Colors.success;
@@ -217,7 +217,7 @@ function PermissionItem({
     }
   };
 
-  const getStatusIcon = () => {
+  const getStatusIcon = (): keyof typeof Ionicons.glyphMap => {
     switch (status) {
       case 'granted':
         return 'checkmark-circle';
@@ -245,7 +245,7 @@ function PermissionItem({
           <Text style={styles.permissionLabel}>{label}</Text>
           <Text style={[styles.permissionDetail, { color: statusColor }]}>{detail}</Text>
         </View>
-        <Ionicons name={statusIcon as any} size={24} color={statusColor} />
+        <Ionicons name={statusIcon} size={24} color={statusColor} />
       </View>
 
       {onPress && buttonLabel && (

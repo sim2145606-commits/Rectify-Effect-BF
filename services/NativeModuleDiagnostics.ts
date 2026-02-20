@@ -2,7 +2,6 @@ import { NativeModules, Platform } from 'react-native';
 
 /**
  * Diagnostic utility to check native module availability
- * Use this to verify the module is properly loaded
  */
 export function diagnoseNativeModule() {
   const diagnostics = {
@@ -17,30 +16,35 @@ export function diagnoseNativeModule() {
 
     if (!VirtuCamSettings) {
       diagnostics.error = 'VirtuCamSettings module not found in NativeModules';
-      console.error('❌ Native module not loaded!');
-      const moduleNames = Object.keys(NativeModules);
-      console.error('Available modules:', moduleNames);
-      console.error('Total modules:', moduleNames.length);
-      console.error('First 10 modules:', moduleNames.slice(0, 10));
-      console.error('VirtuCamSettings in list?', moduleNames.includes('VirtuCamSettings'));
+      if (__DEV__) {
+        const moduleNames = Object.keys(NativeModules);
+        console.error('❌ Native module not loaded!');
+        console.error('Available modules:', moduleNames);
+        console.error('Total modules:', moduleNames.length);
+        console.error('First 10 modules:', moduleNames.slice(0, 10));
+        console.error('VirtuCamSettings in list?', moduleNames.includes('VirtuCamSettings'));
+      }
       return diagnostics;
     }
 
     diagnostics.nativeModuleExists = true;
 
-    // List all available methods
     const methods = Object.keys(VirtuCamSettings).filter(
       key => typeof VirtuCamSettings[key] === 'function'
     );
     diagnostics.availableMethods = methods;
 
-    console.log('✅ Native module loaded successfully!');
-    console.log('Available methods:', methods);
+    if (__DEV__) {
+      console.log('✅ Native module loaded successfully!');
+      console.log('Available methods:', methods);
+    }
 
     return diagnostics;
-  } catch (error) {
-    diagnostics.error = error instanceof Error ? error.message : String(error);
-    console.error('❌ Error checking native module:', error);
+  } catch (err: unknown) {
+    diagnostics.error = err instanceof Error ? err.message : String(err);
+    if (__DEV__) {
+      console.error('❌ Error checking native module:', err);
+    }
     return diagnostics;
   }
 }
@@ -48,46 +52,41 @@ export function diagnoseNativeModule() {
 /**
  * Test native module functionality
  */
-export async function testNativeModule() {
+export async function testNativeModule(): Promise<boolean> {
   const { VirtuCamSettings } = NativeModules;
 
   if (!VirtuCamSettings) {
-    console.error('❌ Cannot test - native module not available');
+    if (__DEV__) console.error('❌ Cannot test - native module not available');
     return false;
   }
 
-  console.log('🧪 Testing native module methods...');
+  if (__DEV__) console.log('🧪 Testing native module methods...');
 
   try {
-    // Test 1: Check root access
-    console.log('Test 1: checkRootAccess()');
+    if (__DEV__) console.log('Test 1: checkRootAccess()');
     const rootResult = await VirtuCamSettings.checkRootAccess();
-    console.log('  Result:', rootResult);
+    if (__DEV__) console.log('  Result:', rootResult);
 
-    // Test 2: Check Xposed status
-    console.log('Test 2: checkXposedStatus()');
+    if (__DEV__) console.log('Test 2: checkXposedStatus()');
     const xposedResult = await VirtuCamSettings.checkXposedStatus();
-    console.log('  Result:', xposedResult);
+    if (__DEV__) console.log('  Result:', xposedResult);
 
-    // Test 3: Check all files access
-    console.log('Test 3: checkAllFilesAccess()');
+    if (__DEV__) console.log('Test 3: checkAllFilesAccess()');
     const allFilesResult = await VirtuCamSettings.checkAllFilesAccess();
-    console.log('  Result:', allFilesResult);
+    if (__DEV__) console.log('  Result:', allFilesResult);
 
-    // Test 4: Check overlay permission
-    console.log('Test 4: checkOverlayPermission()');
+    if (__DEV__) console.log('Test 4: checkOverlayPermission()');
     const overlayResult = await VirtuCamSettings.checkOverlayPermission();
-    console.log('  Result:', overlayResult);
+    if (__DEV__) console.log('  Result:', overlayResult);
 
-    // Test 5: Get system info
-    console.log('Test 5: getSystemInfo()');
+    if (__DEV__) console.log('Test 5: getSystemInfo()');
     const systemInfo = await VirtuCamSettings.getSystemInfo();
-    console.log('  Result:', systemInfo);
+    if (__DEV__) console.log('  Result:', systemInfo);
 
-    console.log('✅ All tests completed successfully!');
+    if (__DEV__) console.log('✅ All tests completed successfully!');
     return true;
-  } catch (error) {
-    console.error('❌ Test failed:', error);
+  } catch (err: unknown) {
+    if (__DEV__) console.error('❌ Test failed:', err);
     return false;
   }
 }
@@ -102,7 +101,7 @@ export function getBuildInfo() {
     hasNativeModule: !!VirtuCamSettings,
     platform: Platform.OS,
     platformVersion: Platform.Version,
-    isHermes: !!(global as any).HermesInternal,
-    isTurboModuleEnabled: !!(global as any).__turboModuleProxy,
+    isHermes: !!(global as Record<string, unknown>).HermesInternal,
+    isTurboModuleEnabled: !!(global as Record<string, unknown>).__turboModuleProxy,
   };
 }

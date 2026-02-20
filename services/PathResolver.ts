@@ -26,7 +26,6 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
   };
 
   try {
-    // Check if it's already a file:// path
     if (uri.startsWith('file://')) {
       const info = await FileSystem.getInfoAsync(uri);
       if (info.exists) {
@@ -39,22 +38,18 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
       }
     }
 
-    // Handle content:// URIs (Android)
     if (uri.startsWith('content://') && Platform.OS === 'android') {
       return await resolveContentUri(uri);
     }
 
-    // Handle ph:// URIs (iOS Photos)
     if (uri.startsWith('ph://')) {
       return await resolvePhotoUri(uri);
     }
 
-    // Handle regular http/https URLs (already cached by expo-image-picker)
     if (uri.startsWith('http')) {
       return await downloadAndResolve(uri);
     }
 
-    // Try to get info about the URI directly
     const info = await FileSystem.getInfoAsync(uri);
     if (info.exists) {
       return {
@@ -73,14 +68,10 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
 
 async function resolveContentUri(uri: string): Promise<ResolvedPath> {
   try {
-    // Copy the file to our cache directory for reliable access
     const fileName = `vc_media_${Date.now()}.${extractExtension(uri) || 'jpg'}`;
     const destPath = `${FileSystem.cacheDirectory}${fileName}`;
 
-    await FileSystem.copyAsync({
-      from: uri,
-      to: destPath,
-    });
+    await FileSystem.copyAsync({ from: uri, to: destPath });
 
     const info = await FileSystem.getInfoAsync(destPath);
 
@@ -172,7 +163,6 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
 
 /**
  * Save an AI-enhanced image to a temporary system directory
- * that the camera hook can read from
  */
 export async function saveEnhancedMedia(
   sourceUri: string,
@@ -228,7 +218,7 @@ function extractExtension(uri: string): string {
   const lastSlash = uri.lastIndexOf('/');
   const lastDot = uri.lastIndexOf('.');
   const queryIndex = uri.indexOf('?', lastSlash);
-  
+
   if (lastDot > lastSlash && (queryIndex === -1 || lastDot < queryIndex)) {
     const end = queryIndex === -1 ? uri.length : queryIndex;
     return uri.substring(lastDot + 1, end).toLowerCase();

@@ -186,7 +186,6 @@ const styles = StyleSheet.create({
     color: Colors.electricBlue,
     fontSize: FontSize.xs,
     fontWeight: '700',
-    fontVariant: ['tabular-nums'],
   },
   panel: {
     backgroundColor: Colors.surface,

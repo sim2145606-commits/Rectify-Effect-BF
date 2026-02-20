@@ -1,6 +1,7 @@
 import { NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
+import { logger } from './LogService';
 
 const { VirtuCamSettings } = NativeModules;
 
@@ -28,7 +29,7 @@ export type BridgeConfig = {
  */
 export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<void> {
   if (!VirtuCamSettings) {
-    console.warn('VirtuCamSettings native module not available');
+    logger.warn('VirtuCamSettings native module not available', 'ConfigBridge');
     throw new Error('Native module not available');
   }
 
@@ -48,9 +49,9 @@ export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<
       targetMode: config.targetMode ?? 'whitelist',
       targetPackages: config.targetPackages ?? [],
     });
-  } catch (error) {
-    console.error('ConfigBridge: Failed to write config', error);
-    throw error;
+  } catch (err: unknown) {
+    logger.error('Failed to write config', 'ConfigBridge', err);
+    throw err;
   }
 }
 
@@ -75,21 +76,20 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
   };
 
   if (!VirtuCamSettings) {
-    console.warn('VirtuCamSettings native module not available');
+    logger.warn('VirtuCamSettings native module not available', 'ConfigBridge');
     return defaultConfig;
   }
 
   try {
     const config = await VirtuCamSettings.readConfig();
 
-    // Parse targetPackages string to array with error handling
     let targetPackages: string[] = [];
     try {
       targetPackages = config.targetPackages
         ? config.targetPackages.split(',').filter((p: string) => p.length > 0)
         : [];
-    } catch (error) {
-      console.error('ConfigBridge: Failed to parse targetPackages', error);
+    } catch (err: unknown) {
+      logger.error('Failed to parse targetPackages', 'ConfigBridge', err);
       targetPackages = [];
     }
 
@@ -102,8 +102,8 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
       offsetY: config.offsetY ?? 0.0,
       targetPackages,
     };
-  } catch (error) {
-    console.error('ConfigBridge: Failed to read config', error);
+  } catch (err: unknown) {
+    logger.error('Failed to read config', 'ConfigBridge', err);
     return defaultConfig;
   }
 }
@@ -115,11 +115,11 @@ export async function getConfigPath(): Promise<string | null> {
   if (!VirtuCamSettings) {
     return null;
   }
-  
+
   try {
     return await VirtuCamSettings.getConfigPath();
-  } catch (error) {
-    console.error('ConfigBridge: Failed to get config path', error);
+  } catch (err: unknown) {
+    logger.error('Failed to get config path', 'ConfigBridge', err);
     return null;
   }
 }
@@ -129,7 +129,6 @@ export async function getConfigPath(): Promise<string | null> {
  */
 export async function syncAllSettings(): Promise<void> {
   try {
-    // Read current settings from AsyncStorage
     const [
       enabled,
       mediaPath,
@@ -154,7 +153,6 @@ export async function syncAllSettings(): Promise<void> {
       AsyncStorage.getItem(STORAGE_KEYS.OFFSET_Y),
     ]);
 
-    // Determine camera target
     const front = frontCamera === 'true';
     const back = backCamera === 'true';
     let cameraTarget: CameraTarget = 'none';
@@ -166,7 +164,6 @@ export async function syncAllSettings(): Promise<void> {
       cameraTarget = 'back';
     }
 
-    // Build config
     const config: Partial<BridgeConfig> = {
       enabled: enabled === 'true',
       mediaSourcePath: mediaPath,
@@ -180,9 +177,9 @@ export async function syncAllSettings(): Promise<void> {
     };
 
     await writeBridgeConfig(config);
-  } catch (error) {
-    console.error('ConfigBridge: Failed to sync settings', error);
-    throw error;
+  } catch (err: unknown) {
+    logger.error('Failed to sync settings', 'ConfigBridge', err);
+    throw err;
   }
 }
 
@@ -198,7 +195,6 @@ export async function getBridgeStatus(): Promise<{
   try {
     const path = await getConfigPath();
 
-    // Verify config is readable
     let readable = false;
     if (VirtuCamSettings && VirtuCamSettings.verifyConfigReadable) {
       try {
@@ -212,7 +208,7 @@ export async function getBridgeStatus(): Promise<{
     return {
       available: !!VirtuCamSettings,
       path,
-      version: Date.now(), // Use timestamp as version
+      version: Date.now(),
       readable,
     };
   } catch {
@@ -231,7 +227,7 @@ export async function getBridgeStatus(): Promise<{
 export async function verifyBridge(): Promise<{
   success: boolean;
   error?: string;
-  details?: any;
+  details?: Record<string, unknown>;
 }> {
   if (!VirtuCamSettings) {
     return {
@@ -241,7 +237,6 @@ export async function verifyBridge(): Promise<{
   }
 
   try {
-    // Try to write and read back a test config
     const testConfig: Partial<BridgeConfig> = {
       enabled: false,
       cameraTarget: 'front',
@@ -257,17 +252,17 @@ export async function verifyBridge(): Promise<{
       };
     }
 
-    // Verify file is readable
     const readableStatus = await VirtuCamSettings.verifyConfigReadable();
 
     return {
       success: readableStatus.exists && readableStatus.readable,
-      details: readableStatus,
+      details: readableStatus as Record<string, unknown>,
     };
-  } catch (error: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
     return {
       success: false,
-      error: error.message || 'Unknown error',
+      error: message,
     };
   }
 }

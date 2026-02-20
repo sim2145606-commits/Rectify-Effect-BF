@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -44,26 +44,27 @@ export default function LogsScreen() {
     }
   }, [searchQuery, filterLevel]);
 
-  const applyFilters = (logList: LogEntry[], query: string, level: LogEntry['level'] | 'all') => {
-    let filtered = logList;
+  const applyFilters = useCallback(
+    (logList: LogEntry[], query: string, level: LogEntry['level'] | 'all') => {
+      let filtered = logList;
 
-    // Filter by level
-    if (level !== 'all') {
-      filtered = filtered.filter(log => log.level === level);
-    }
+      if (level !== 'all') {
+        filtered = filtered.filter(log => log.level === level);
+      }
 
-    // Filter by search query
-    if (query.trim()) {
-      const lowerQuery = query.toLowerCase();
-      filtered = filtered.filter(
-        log =>
-          log.message.toLowerCase().includes(lowerQuery) ||
-          log.source?.toLowerCase().includes(lowerQuery)
-      );
-    }
+      if (query.trim()) {
+        const lowerQuery = query.toLowerCase();
+        filtered = filtered.filter(
+          log =>
+            log.message.toLowerCase().includes(lowerQuery) ||
+            log.source?.toLowerCase().includes(lowerQuery)
+        );
+      }
 
-    setFilteredLogs(filtered);
-  };
+      setFilteredLogs(filtered);
+    },
+    []
+  );
 
   useEffect(() => {
     loadLogs();
@@ -84,8 +85,9 @@ export default function LogsScreen() {
       Alert.alert('Success', `Logs exported successfully!\n\nSaved to: ${filePath}`, [
         { text: 'OK' },
       ]);
-    } catch (error: any) {
-      Alert.alert('Error', `Failed to export logs: ${error.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      Alert.alert('Error', `Failed to export logs: ${message}`);
     } finally {
       setIsExporting(false);
     }
@@ -96,21 +98,27 @@ export default function LogsScreen() {
       const logText = await logger.formatLogsAsText();
       await Clipboard.setStringAsync(logText);
       Alert.alert('Success', 'All logs copied to clipboard!');
-    } catch (error: any) {
-      Alert.alert('Error', `Failed to copy logs: ${error.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      Alert.alert('Error', `Failed to copy logs: ${message}`);
     }
   };
 
   const handleCopyLog = async (log: LogEntry) => {
     try {
       const date = new Date(log.timestamp);
+      const detailsStr =
+        log.details !== undefined
+          ? `\nDetails: ${JSON.stringify(log.details, null, 2)}`
+          : '';
       const logText = `[${date.toLocaleString()}] [${log.level.toUpperCase()}]${
         log.source ? ` [${log.source}]` : ''
-      }\n${log.message}${log.details ? `\nDetails: ${JSON.stringify(log.details, null, 2)}` : ''}`;
+      }\n${log.message}${detailsStr}`;
       await Clipboard.setStringAsync(logText);
       Alert.alert('Success', 'Log entry copied to clipboard!');
-    } catch (error: any) {
-      Alert.alert('Error', `Failed to copy log: ${error.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      Alert.alert('Error', `Failed to copy log: ${message}`);
     }
   };
 
@@ -151,7 +159,7 @@ export default function LogsScreen() {
     setIsRefreshing(false);
   };
 
-  const getLevelColor = (level: LogEntry['level']) => {
+  const getLevelColor = (level: LogEntry['level']): string => {
     switch (level) {
       case 'error':
         return Colors.danger;
@@ -167,7 +175,7 @@ export default function LogsScreen() {
     }
   };
 
-  const getLevelIcon = (level: LogEntry['level']) => {
+  const getLevelIcon = (level: LogEntry['level']): keyof typeof Ionicons.glyphMap => {
     switch (level) {
       case 'error':
         return 'close-circle';
@@ -323,7 +331,7 @@ export default function LogsScreen() {
               <View style={styles.logHeader}>
                 <View style={styles.logHeaderLeft}>
                   <Ionicons
-                    name={getLevelIcon(log.level) as any}
+                    name={getLevelIcon(log.level)}
                     size={16}
                     color={getLevelColor(log.level)}
                   />

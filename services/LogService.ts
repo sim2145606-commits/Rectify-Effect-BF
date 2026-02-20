@@ -9,13 +9,13 @@ export type LogEntry = {
   timestamp: number;
   message: string;
   level: 'info' | 'warn' | 'error' | 'success' | 'debug';
-  source?: string; // Source of the log (e.g., 'ConfigBridge', 'PermissionManager')
-  details?: any; // Additional details (error stack, data, etc.)
+  source?: string;
+  details?: unknown;
 };
 
 type LogListener = (entry: LogEntry) => void;
 
-const MAX_LOGS = 1000; // Keep last 1000 logs in memory
+const MAX_LOGS = 1000;
 
 class LogService {
   private listeners: Set<LogListener> = new Set();
@@ -23,16 +23,19 @@ class LogService {
 
   subscribe(listener: LogListener): () => void {
     this.listeners.add(listener);
-    // Provide the new listener with all existing logs
     this.logs.forEach(log => listener(log));
     return () => this.listeners.delete(listener);
   }
 
-  log(message: string, level: LogEntry['level'] = 'info', source?: string, details?: any) {
-    // Sanitize inputs to prevent log injection (CWE-117)
+  log(
+    message: string,
+    level: LogEntry['level'] = 'info',
+    source?: string,
+    details?: unknown
+  ) {
     const sanitizedMessage = message.replace(/[\r\n]/g, ' ');
     const sanitizedSource = source?.replace(/[\r\n]/g, ' ');
-    
+
     const entry: LogEntry = {
       timestamp: Date.now(),
       message: sanitizedMessage,
@@ -43,49 +46,50 @@ class LogService {
 
     this.logs.push(entry);
 
-    // Keep only last MAX_LOGS entries
     if (this.logs.length > MAX_LOGS) {
       this.logs = this.logs.slice(-MAX_LOGS);
     }
 
     this.listeners.forEach(listener => listener(entry));
 
-    // Also log to console for debugging
     const consoleMsg = `[${level.toUpperCase()}]${sanitizedSource ? ` [${sanitizedSource}]` : ''} ${sanitizedMessage}`;
-    // Sanitize details to prevent log injection
-    const sanitizedDetails = typeof details === 'string' ? details.replace(/[\r\n]/g, ' ') : details;
-    switch (level) {
-      case 'error':
-        console.error(consoleMsg, sanitizedDetails || '');
-        break;
-      case 'warn':
-        console.warn(consoleMsg, sanitizedDetails || '');
-        break;
-      case 'debug':
-        console.debug(consoleMsg, sanitizedDetails || '');
-        break;
-      default:
-        console.log(consoleMsg, sanitizedDetails || '');
+    const sanitizedDetails =
+      typeof details === 'string' ? details.replace(/[\r\n]/g, ' ') : details;
+
+    if (__DEV__) {
+      switch (level) {
+        case 'error':
+          console.error(consoleMsg, sanitizedDetails ?? '');
+          break;
+        case 'warn':
+          console.warn(consoleMsg, sanitizedDetails ?? '');
+          break;
+        case 'debug':
+          console.debug(consoleMsg, sanitizedDetails ?? '');
+          break;
+        default:
+          console.log(consoleMsg, sanitizedDetails ?? '');
+      }
     }
   }
 
-  info(message: string, source?: string, details?: any) {
+  info(message: string, source?: string, details?: unknown) {
     this.log(message, 'info', source, details);
   }
 
-  warn(message: string, source?: string, details?: any) {
+  warn(message: string, source?: string, details?: unknown) {
     this.log(message, 'warn', source, details);
   }
 
-  error(message: string, source?: string, details?: any) {
+  error(message: string, source?: string, details?: unknown) {
     this.log(message, 'error', source, details);
   }
 
-  success(message: string, source?: string, details?: any) {
+  success(message: string, source?: string, details?: unknown) {
     this.log(message, 'success', source, details);
   }
 
-  debug(message: string, source?: string, details?: any) {
+  debug(message: string, source?: string, details?: unknown) {
     this.log(message, 'debug', source, details);
   }
 
@@ -101,24 +105,16 @@ class LogService {
     return this.logs.length;
   }
 
-  /**
-   * Format logs as text with system information
-   */
   async formatLogsAsText(): Promise<string> {
     const lines: string[] = [];
 
-    // Header
     lines.push('='.repeat(60));
     lines.push('VirtuCam Diagnostic Log');
     lines.push('='.repeat(60));
     lines.push('');
-
-    // Timestamp
     lines.push(`Generated: ${new Date().toISOString()}`);
     lines.push(`Local Time: ${new Date().toLocaleString()}`);
     lines.push('');
-
-    // System Information
     lines.push('-'.repeat(60));
     lines.push('SYSTEM INFORMATION');
     lines.push('-'.repeat(60));
@@ -139,21 +135,17 @@ class LogService {
         lines.push(`Max Memory: ${systemInfo.maxMemory}`);
         lines.push(`Root Solution: ${systemInfo.rootSolution} ${systemInfo.rootVersion}`);
       }
-    } catch (error) {
+    } catch {
       lines.push('Failed to retrieve system information');
     }
 
     lines.push('');
-
-    // App Information
     lines.push('-'.repeat(60));
     lines.push('APP INFORMATION');
     lines.push('-'.repeat(60));
     lines.push(`Platform: ${Platform.OS} ${Platform.Version}`);
     lines.push(`Total Logs: ${this.logs.length}`);
     lines.push('');
-
-    // Logs
     lines.push('-'.repeat(60));
     lines.push('APPLICATION LOGS');
     lines.push('-'.repeat(60));
@@ -171,7 +163,7 @@ class LogService {
         lines.push(`[${index + 1}] ${timeStr} ${levelStr} ${sourceStr}`);
         lines.push(`    ${entry.message}`);
 
-        if (entry.details) {
+        if (entry.details !== undefined) {
           try {
             const detailsStr =
               typeof entry.details === 'string'
@@ -187,7 +179,6 @@ class LogService {
       });
     }
 
-    // Footer
     lines.push('='.repeat(60));
     lines.push('End of Log');
     lines.push('='.repeat(60));
@@ -195,9 +186,6 @@ class LogService {
     return lines.join('\n');
   }
 
-  /**
-   * Export logs to a file and optionally share
-   */
   async exportLogs(share: boolean = false): Promise<string> {
     try {
       const logText = await this.formatLogsAsText();
@@ -219,43 +207,29 @@ class LogService {
       }
 
       return filePath;
-    } catch (error: any) {
-      this.error(`Failed to export logs: ${error.message}`, 'LogService', error);
-      throw error;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      this.error(`Failed to export logs: ${message}`, 'LogService', err);
+      throw err;
     }
   }
 
-  /**
-   * Get logs filtered by level
-   */
   getLogsByLevel(level: LogEntry['level']): LogEntry[] {
     return this.logs.filter(log => log.level === level);
   }
 
-  /**
-   * Get logs filtered by source
-   */
   getLogsBySource(source: string): LogEntry[] {
     return this.logs.filter(log => log.source === source);
   }
 
-  /**
-   * Get logs within a time range
-   */
   getLogsByTimeRange(startTime: number, endTime: number): LogEntry[] {
     return this.logs.filter(log => log.timestamp >= startTime && log.timestamp <= endTime);
   }
 
-  /**
-   * Get error count
-   */
   getErrorCount(): number {
     return this.logs.filter(log => log.level === 'error').length;
   }
 
-  /**
-   * Get warning count
-   */
   getWarningCount(): number {
     return this.logs.filter(log => log.level === 'warn').length;
   }
@@ -263,5 +237,4 @@ class LogService {
 
 export const logger = new LogService();
 
-// Log app startup
 logger.info('VirtuCam application started', 'App');

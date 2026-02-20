@@ -10,7 +10,7 @@ import Animated, {
   FadeIn,
 } from 'react-native-reanimated';
 import { Image } from 'expo-image';
-import { Video, ResizeMode } from 'expo-av';
+import { Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
@@ -113,10 +113,10 @@ export default function HUDViewfinder({
                   ]}
                   resizeMode={
                     scaleMode === 'fill'
-                      ? ResizeMode.COVER
+                      ? 'cover'
                       : scaleMode === 'stretch'
-                        ? ResizeMode.STRETCH
-                        : ResizeMode.CONTAIN
+                        ? 'stretch'
+                        : 'contain'
                   }
                   shouldPlay
                   isLooping
@@ -415,7 +415,6 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary,
     fontSize: 9,
     fontWeight: '600',
-    fontVariant: ['tabular-nums'],
   },
   hudBottom: {
     position: 'absolute',
@@ -448,7 +447,6 @@ const styles = StyleSheet.create({
     color: Colors.electricBlue,
     fontSize: 9,
     fontWeight: '800',
-    fontVariant: ['tabular-nums'],
   },
   // AI Processing
   aiProcessingOverlay: {

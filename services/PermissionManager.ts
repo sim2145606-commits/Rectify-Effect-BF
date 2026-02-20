@@ -1,7 +1,6 @@
-import { Platform, Linking, AppState, NativeModules, PermissionsAndroid } from 'react-native';
+import { Platform, Linking, NativeModules, PermissionsAndroid } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
 
 const { VirtuCamSettings } = NativeModules;
 
@@ -27,21 +26,13 @@ export type AllPermissionsState = {
 export async function checkRootAccess(): Promise<PermissionCheckResult> {
   try {
     if (!VirtuCamSettings) {
-      return {
-        status: 'denied',
-        detail: 'Native module not available',
-        canRequest: false,
-      };
+      return { status: 'denied', detail: 'Native module not available', canRequest: false };
     }
 
     const result = await VirtuCamSettings.checkRootAccess();
 
     if (result.granted) {
-      return {
-        status: 'granted',
-        detail: 'Root access confirmed',
-        canRequest: false,
-      };
+      return { status: 'granted', detail: 'Root access confirmed', canRequest: false };
     } else {
       return {
         status: 'denied',
@@ -49,12 +40,8 @@ export async function checkRootAccess(): Promise<PermissionCheckResult> {
         canRequest: false,
       };
     }
-  } catch (error) {
-    return {
-      status: 'denied',
-      detail: 'Root check failed',
-      canRequest: false,
-    };
+  } catch {
+    return { status: 'denied', detail: 'Root check failed', canRequest: false };
   }
 }
 
@@ -64,21 +51,13 @@ export async function checkRootAccess(): Promise<PermissionCheckResult> {
 export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
   try {
     if (!VirtuCamSettings) {
-      return {
-        status: 'denied',
-        detail: 'Native module not available',
-        canRequest: false,
-      };
+      return { status: 'denied', detail: 'Native module not available', canRequest: false };
     }
 
     const result = await VirtuCamSettings.checkXposedStatus();
 
     if (result.moduleActive) {
-      return {
-        status: 'granted',
-        detail: 'Module active in LSPosed',
-        canRequest: false,
-      };
+      return { status: 'granted', detail: 'Module active in LSPosed', canRequest: false };
     } else if (result.lsposedInstalled) {
       return {
         status: 'denied',
@@ -86,18 +65,10 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
         canRequest: true,
       };
     } else {
-      return {
-        status: 'denied',
-        detail: 'LSPosed not installed',
-        canRequest: false,
-      };
+      return { status: 'denied', detail: 'LSPosed not installed', canRequest: false };
     }
-  } catch (error) {
-    return {
-      status: 'denied',
-      detail: 'LSPosed check failed',
-      canRequest: false,
-    };
+  } catch {
+    return { status: 'denied', detail: 'LSPosed check failed', canRequest: false };
   }
 }
 
@@ -107,42 +78,22 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
 export async function checkAllFilesAccess(): Promise<PermissionCheckResult> {
   try {
     if (Platform.OS !== 'android') {
-      return {
-        status: 'granted',
-        detail: 'Not required on this platform',
-        canRequest: false,
-      };
+      return { status: 'granted', detail: 'Not required on this platform', canRequest: false };
     }
 
     if (!VirtuCamSettings) {
-      return {
-        status: 'denied',
-        detail: 'Native module not available',
-        canRequest: false,
-      };
+      return { status: 'denied', detail: 'Native module not available', canRequest: false };
     }
 
     const granted = await VirtuCamSettings.checkAllFilesAccess();
 
     if (granted) {
-      return {
-        status: 'granted',
-        detail: 'All files access granted',
-        canRequest: false,
-      };
+      return { status: 'granted', detail: 'All files access granted', canRequest: false };
     } else {
-      return {
-        status: 'denied',
-        detail: 'Grant in system settings',
-        canRequest: true,
-      };
+      return { status: 'denied', detail: 'Grant in system settings', canRequest: true };
     }
-  } catch (error) {
-    return {
-      status: 'denied',
-      detail: 'Permission check failed',
-      canRequest: true,
-    };
+  } catch {
+    return { status: 'denied', detail: 'Permission check failed', canRequest: true };
   }
 }
 
@@ -154,30 +105,14 @@ export async function checkCameraPermission(): Promise<PermissionCheckResult> {
     const { status } = await ImagePicker.getCameraPermissionsAsync();
 
     if (status === 'granted') {
-      return {
-        status: 'granted',
-        detail: 'Camera access granted',
-        canRequest: false,
-      };
+      return { status: 'granted', detail: 'Camera access granted', canRequest: false };
     } else if (status === 'denied') {
-      return {
-        status: 'denied',
-        detail: 'Camera access denied',
-        canRequest: true,
-      };
+      return { status: 'denied', detail: 'Camera access denied', canRequest: true };
     } else {
-      return {
-        status: 'pending',
-        detail: 'Camera permission required',
-        canRequest: true,
-      };
+      return { status: 'pending', detail: 'Camera permission required', canRequest: true };
     }
-  } catch (error) {
-    return {
-      status: 'denied',
-      detail: 'Permission check failed',
-      canRequest: true,
-    };
+  } catch {
+    return { status: 'denied', detail: 'Permission check failed', canRequest: true };
   }
 }
 
@@ -187,42 +122,22 @@ export async function checkCameraPermission(): Promise<PermissionCheckResult> {
 export async function checkOverlayPermission(): Promise<PermissionCheckResult> {
   try {
     if (Platform.OS !== 'android') {
-      return {
-        status: 'granted',
-        detail: 'Not required on this platform',
-        canRequest: false,
-      };
+      return { status: 'granted', detail: 'Not required on this platform', canRequest: false };
     }
 
     if (!VirtuCamSettings) {
-      return {
-        status: 'denied',
-        detail: 'Native module not available',
-        canRequest: false,
-      };
+      return { status: 'denied', detail: 'Native module not available', canRequest: false };
     }
 
     const granted = await VirtuCamSettings.checkOverlayPermission();
 
     if (granted) {
-      return {
-        status: 'granted',
-        detail: 'Overlay permission granted',
-        canRequest: false,
-      };
+      return { status: 'granted', detail: 'Overlay permission granted', canRequest: false };
     } else {
-      return {
-        status: 'pending',
-        detail: 'Overlay permission required',
-        canRequest: true,
-      };
+      return { status: 'pending', detail: 'Overlay permission required', canRequest: true };
     }
-  } catch (error) {
-    return {
-      status: 'pending',
-      detail: 'Permission check failed',
-      canRequest: true,
-    };
+  } catch {
+    return { status: 'pending', detail: 'Permission check failed', canRequest: true };
   }
 }
 
@@ -239,13 +154,7 @@ export async function checkAllPermissions(): Promise<AllPermissionsState> {
       checkOverlayPermission(),
     ]);
 
-  return {
-    rootAccess,
-    lsposedModule,
-    allFilesAccess,
-    cameraPermission,
-    overlayPermission,
-  };
+  return { rootAccess, lsposedModule, allFilesAccess, cameraPermission, overlayPermission };
 }
 
 /**
@@ -255,46 +164,34 @@ export async function requestCameraPermission(): Promise<PermissionStatus> {
   try {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     return status === 'granted' ? 'granted' : 'denied';
-  } catch (error) {
+  } catch {
     return 'denied';
   }
 }
 
 /**
  * Request all files access permission
- * FIXED: Use correct URI format for Android 11+ MANAGE_EXTERNAL_STORAGE
  */
 export async function requestAllFilesAccess(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   try {
-    // Android 11+ (API 30+): Open All Files Access settings for this specific app
     await IntentLauncher.startActivityAsync(
       'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION',
-      {
-        data: 'package:com.briefplantrain.virtucam',
-      }
+      { data: 'package:com.briefplantrain.virtucam' }
     );
-  } catch (error) {
-    console.log('Failed to open specific All Files Access settings, trying fallback:', error);
+  } catch {
     try {
-      // Fallback 1: Open general All Files Access settings list
       await IntentLauncher.startActivityAsync(
         'android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION'
       );
-    } catch (error2) {
-      console.log('Failed to open general All Files Access settings, trying app settings:', error2);
+    } catch {
       try {
-        // Fallback 2: Open app settings
         await IntentLauncher.startActivityAsync(
           IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
-          {
-            data: 'package:com.briefplantrain.virtucam',
-          }
+          { data: 'package:com.briefplantrain.virtucam' }
         );
-      } catch (error3) {
-        console.log('Failed to open app settings, using final fallback:', error3);
-        // Final fallback
+      } catch {
         await Linking.openSettings();
       }
     }
@@ -308,21 +205,15 @@ export async function requestOverlayPermission(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   try {
-    // Open overlay permission settings for this specific app
     await IntentLauncher.startActivityAsync(
       'android.settings.action.MANAGE_OVERLAY_PERMISSION',
-      {
-        data: 'package:com.briefplantrain.virtucam',
-      }
+      { data: 'package:com.briefplantrain.virtucam' }
     );
   } catch {
     try {
-      // Fallback: Open app settings
       await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
-        {
-          data: 'package:com.briefplantrain.virtucam',
-        }
+        { data: 'package:com.briefplantrain.virtucam' }
       );
     } catch {
       await Linking.openSettings();
@@ -342,30 +233,26 @@ export async function openLSPosedManager(): Promise<void> {
       return;
     }
 
-    // Detect which manager to open
     const managerInfo = await VirtuCamSettings.detectLSPosedManager();
 
     if (managerInfo.packageName && !managerInfo.isParasitic) {
-      // Try to open standalone LSPosed Manager
       try {
         await Linking.openURL(`package:${managerInfo.packageName}`);
         return;
       } catch {
-        // Fall through to next attempt
+        // Fall through
       }
     }
 
     if (managerInfo.packageName && managerInfo.isParasitic) {
-      // Open KernelSU or Magisk manager for parasitic LSPosed
       try {
         await Linking.openURL(`package:${managerInfo.packageName}`);
         return;
       } catch {
-        // Fall through to next attempt
+        // Fall through
       }
     }
 
-    // Fallback: Try common LSPosed Manager packages
     const lsposedPackages = [
       'org.lsposed.manager',
       'io.github.lsposed.manager',
@@ -382,10 +269,8 @@ export async function openLSPosedManager(): Promise<void> {
       }
     }
 
-    // Final fallback to app settings
     await Linking.openSettings();
-  } catch (error) {
-    // Silent fail or open settings
+  } catch {
     try {
       await Linking.openSettings();
     } catch {
@@ -402,9 +287,7 @@ export async function openAppSettings(): Promise<void> {
     if (Platform.OS === 'android') {
       await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
-        {
-          data: 'package:com.briefplantrain.virtucam',
-        }
+        { data: 'package:com.briefplantrain.virtucam' }
       );
     } else {
       await Linking.openSettings();

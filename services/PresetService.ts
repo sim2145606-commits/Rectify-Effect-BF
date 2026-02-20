@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
+import { logger } from './LogService';
 
 export type LocalPreset = {
   id: string;
@@ -34,34 +35,27 @@ export type PresetConfig = {
 
 const PRESETS_STORAGE_KEY = 'virtucam_local_presets';
 
-// Fetch all presets from local storage
 export async function fetchPresets(): Promise<LocalPreset[]> {
   try {
     const presetsJson = await AsyncStorage.getItem(PRESETS_STORAGE_KEY);
-    if (!presetsJson) {
-      return [];
-    }
+    if (!presetsJson) return [];
     const presets = JSON.parse(presetsJson) as LocalPreset[];
-    // Sort by updated_at descending
     return presets.sort(
       (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     );
-  } catch (err) {
-    console.error('Failed to fetch presets:', err);
+  } catch (err: unknown) {
+    logger.error('Failed to fetch presets', 'PresetService', err);
     return [];
   }
 }
 
-// Save all presets to storage
 async function saveAllPresets(presets: LocalPreset[]): Promise<void> {
   await AsyncStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
 }
 
-// Save a new preset
 export async function savePreset(config: PresetConfig): Promise<LocalPreset> {
   try {
     const presets = await fetchPresets();
-
     const id = `preset_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     const now = new Date().toISOString();
 
@@ -84,27 +78,24 @@ export async function savePreset(config: PresetConfig): Promise<LocalPreset> {
 
     presets.push(newPreset);
     await saveAllPresets(presets);
-
     return newPreset;
-  } catch (err) {
-    console.error('Failed to save preset:', err);
+  } catch (err: unknown) {
+    logger.error('Failed to save preset', 'PresetService', err);
     throw new Error('Failed to save preset to local storage');
   }
 }
 
-// Delete a preset
 export async function deletePreset(presetId: string): Promise<void> {
   try {
     const presets = await fetchPresets();
     const filtered = presets.filter(p => p.id !== presetId);
     await saveAllPresets(filtered);
-  } catch (err) {
-    console.error('Failed to delete preset:', err);
+  } catch (err: unknown) {
+    logger.error('Failed to delete preset', 'PresetService', err);
     throw new Error('Failed to delete preset');
   }
 }
 
-// Rename a preset
 export async function renamePreset(
   presetId: string,
   newName: string,
@@ -114,9 +105,7 @@ export async function renamePreset(
     const presets = await fetchPresets();
     const preset = presets.find(p => p.id === presetId);
 
-    if (!preset) {
-      throw new Error('Preset not found');
-    }
+    if (!preset) throw new Error('Preset not found');
 
     preset.name = newName;
     if (newDescription !== undefined) {
@@ -125,13 +114,12 @@ export async function renamePreset(
     preset.updated_at = new Date().toISOString();
 
     await saveAllPresets(presets);
-  } catch (err) {
-    console.error('Failed to rename preset:', err);
+  } catch (err: unknown) {
+    logger.error('Failed to rename preset', 'PresetService', err);
     throw new Error('Failed to rename preset');
   }
 }
 
-// Apply a preset (load its settings into AsyncStorage)
 export async function applyPreset(preset: LocalPreset): Promise<void> {
   try {
     const pairs: [string, string][] = [
@@ -150,13 +138,12 @@ export async function applyPreset(preset: LocalPreset): Promise<void> {
     }
 
     await AsyncStorage.multiSet(pairs);
-  } catch (err) {
-    console.error('Failed to apply preset:', err);
+  } catch (err: unknown) {
+    logger.error('Failed to apply preset', 'PresetService', err);
     throw new Error('Failed to apply preset');
   }
 }
 
-// Capture current configuration
 export async function captureCurrentConfig(): Promise<Omit<PresetConfig, 'name'>> {
   try {
     const keys = [
@@ -197,8 +184,8 @@ export async function captureCurrentConfig(): Promise<Omit<PresetConfig, 'name'>
       offset_y: parseJson(values[STORAGE_KEYS.OFFSET_Y], 0),
       media_uri: parseJson(values[STORAGE_KEYS.SELECTED_MEDIA], null),
     };
-  } catch (err) {
-    console.error('Failed to capture config:', err);
+  } catch (err: unknown) {
+    logger.error('Failed to capture config', 'PresetService', err);
     throw new Error('Failed to capture current configuration');
   }
 }
