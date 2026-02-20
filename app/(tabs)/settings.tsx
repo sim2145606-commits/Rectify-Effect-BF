@@ -13,6 +13,7 @@ import {
   Modal,
   Linking,
   AppState,
+  NativeModules,
   type AppStateStatus,
 } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
@@ -49,6 +50,8 @@ import { getStatusColor } from '@/services/SystemVerification';
 import { resetToDefaults } from '@/services/ResetService';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
+
+const { VirtuCamSettings } = NativeModules;
 
 type TargetApp = {
   id: string;
@@ -264,7 +267,6 @@ export default function SettingsScreen() {
   useEffect(() => {
     const checkInstalledApps = async () => {
       try {
-        const { VirtuCamSettings } = require('react-native').NativeModules;
         if (VirtuCamSettings && VirtuCamSettings.getInstalledPackages) {
           const installed = await VirtuCamSettings.getInstalledPackages(packageNames);
           setInstalledPackages(installed || []);
@@ -586,9 +588,9 @@ export default function SettingsScreen() {
                   result.error || 'Failed to reset settings. Please try again.'
                 );
               }
-            } catch (error) {
+            } catch (err: unknown) {
               warning();
-              Alert.alert('Reset Error', error instanceof Error ? error.message : 'An unexpected error occurred.');
+              Alert.alert('Reset Error', err instanceof Error ? err.message : 'An unexpected error occurred.');
             } finally {
               setIsResetting(false);
             }

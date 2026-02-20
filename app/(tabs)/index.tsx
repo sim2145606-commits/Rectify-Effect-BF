@@ -639,7 +639,7 @@ function SystemCheckCard({
         <View style={[styles.checkIconCircle, { backgroundColor: color + '15' }]}>
           <Ionicons name={icon} size={16} color={color} />
         </View>
-        <Ionicons name={statusIcon as keyof typeof Ionicons.glyphMap} size={16} color={color} />
+        <Ionicons name={statusIcon} size={16} color={color} />
       </View>
       <Text style={styles.checkLabel}>{label}</Text>
       <Text style={[styles.checkDetail, { color }]}>{detail}</Text>
@@ -852,7 +852,6 @@ const styles = StyleSheet.create({
   masterButtonInactive: {
     backgroundColor: Colors.surfaceLight,
     borderColor: Colors.border,
-    borderStyle: 'dashed',
   },
   masterButtonLabel: {
     color: Colors.textSecondary,

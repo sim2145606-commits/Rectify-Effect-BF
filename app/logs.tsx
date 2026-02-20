@@ -35,9 +35,9 @@ export default function LogsScreen() {
       const allLogs = logger.getLogs();
       setLogs(allLogs);
       applyFilters(allLogs, searchQuery, filterLevel);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Failed to load logs:', errorMessage);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      if (__DEV__) console.error('Failed to load logs:', errorMessage);
       Alert.alert('Error', `Failed to load logs: ${errorMessage}`);
       setLogs([]);
       setFilteredLogs([]);
