@@ -117,7 +117,8 @@ public class StreamingMediaSource {
                 initializePlayer(context);
 
             } catch (Exception e) {
-                XposedBridge.log(TAG + ": Stream start failed: " + e.getMessage());
+                XposedBridge.log(TAG + ": Stream start failed: " + e);
+                isPlaying = false;
                 if (frameCallback != null) {
                     frameCallback.onError("Stream start failed: " + e.getMessage());
                 }
@@ -161,7 +162,10 @@ public class StreamingMediaSource {
             player.prepareAsync();
 
         } catch (Exception e) {
-            XposedBridge.log(TAG + ": initializePlayer failed: " + e.getMessage());
+            XposedBridge.log(TAG + ": initializePlayer failed: " + e);
+            if (frameCallback != null) {
+                frameCallback.onError("Player initialization failed: " + e.getMessage());
+            }
         }
     }
 

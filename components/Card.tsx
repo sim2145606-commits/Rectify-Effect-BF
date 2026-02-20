@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
 import { Colors, BorderRadius, Spacing } from '@/constants/theme';
 
@@ -10,22 +10,24 @@ type Props = {
 };
 
 export default function Card({ children, style, glow, glowColor }: Props) {
+  const glowStyle = useMemo(
+    () =>
+      glow
+        ? {
+            borderColor: glowColor || Colors.accentGlow,
+            borderWidth: 1,
+            shadowColor: glowColor || Colors.accent,
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.3,
+            shadowRadius: 12,
+            elevation: 8,
+          }
+        : null,
+    [glow, glowColor]
+  );
+
   return (
-    <View
-      style={[
-        styles.card,
-        glow && {
-          borderColor: glowColor || Colors.accentGlow,
-          borderWidth: 1,
-          shadowColor: glowColor || Colors.accent,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.3,
-          shadowRadius: 12,
-          elevation: 8,
-        },
-        style,
-      ]}
-    >
+    <View style={[styles.card, glowStyle, style]}>
       {children}
     </View>
   );

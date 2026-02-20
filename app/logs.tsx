@@ -31,9 +31,16 @@ export default function LogsScreen() {
   const [systemLogs, setSystemLogs] = useState<string>('');
 
   const loadLogs = useCallback(() => {
-    const allLogs = logger.getLogs();
-    setLogs(allLogs);
-    applyFilters(allLogs, searchQuery, filterLevel);
+    try {
+      const allLogs = logger.getLogs();
+      setLogs(allLogs);
+      applyFilters(allLogs, searchQuery, filterLevel);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to load logs:', errorMessage);
+      setLogs([]);
+      setFilteredLogs([]);
+    }
   }, [searchQuery, filterLevel]);
 
   const applyFilters = (logList: LogEntry[], query: string, level: LogEntry['level'] | 'all') => {

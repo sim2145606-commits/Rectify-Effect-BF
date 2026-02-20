@@ -120,9 +120,9 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private static final int MAX_POOL_SIZE = 8;
 
     // Thread-local YUV buffers to avoid races
-    private final ThreadLocal<int[]> threadLocalArgbBuffer = new ThreadLocal<>();
-    private final ThreadLocal<byte[]> threadLocalYuvBuffer = new ThreadLocal<>();
-    private final ThreadLocal<int[]> threadLocalBufferDims = new ThreadLocal<>();
+    private final ThreadLocal<int[]> threadLocalArgbBuffer = ThreadLocal.withInitial(() -> null);
+    private final ThreadLocal<byte[]> threadLocalYuvBuffer = ThreadLocal.withInitial(() -> null);
+    private final ThreadLocal<int[]> threadLocalBufferDims = ThreadLocal.withInitial(() -> null);
 
     // Video frame decoding
     private final Object videoLock = new Object();
@@ -140,7 +140,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private final AtomicReference<Bitmap> currentVideoFrame = new AtomicReference<>(null);
 
     private long lastConfigReload = 0;
-    private static final long CONFIG_RELOAD_INTERVAL = 3000;
+    private static final long CONFIG_RELOAD_INTERVAL = 5000;
 
     // Frame processing thread
     private HandlerThread frameProcessThread;
@@ -229,7 +229,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             enabled = prefs.getBoolean("enabled", false);
             log("Zygote pre-config — enabled: " + enabled);
         } catch (Throwable t) {
-            log("Zygote config preload failed: " + t.getMessage());
+            log("Zygote config preload failed: " + t);
         }
     }
 
@@ -308,7 +308,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             markerFile.setLastModified(System.currentTimeMillis());
             log("Module active marker created/updated");
         } catch (Exception e) {
-            log("Failed to create module active marker: " + e.getMessage());
+            log("Failed to create module active marker: " + e);
         }
     }
 
@@ -373,7 +373,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     log("Config loaded via XSharedPreferences");
                 }
             } catch (Exception e) {
-                log("XSharedPreferences failed: " + e.getMessage());
+                log("XSharedPreferences failed: " + e);
             }
             
             // Strategy B: Fallback to JSON config if XSharedPreferences failed
@@ -381,13 +381,19 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 try {
                     File fallbackFile = new File("/data/local/tmp/virtucam_config.json");
                     if (fallbackFile.exists() && fallbackFile.canRead()) {
-                        StringBuilder jsonBuilder = new StringBuilder();
-                        BufferedReader reader = new BufferedReader(new FileReader(fallbackFile));
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            jsonBuilder.append(line);
-                        }
-                        reader.close();
+                        // Prevent DoS by limiting file size (CWE-400)
+                        long fileSize = fallbackFile.length();
+                        if (fileSize > 1024 * 1024) { // 1MB limit
+                            log("Config file too large: " + fileSize + " bytes");
+                        } else {
+                            StringBuilder jsonBuilder = new StringBuilder();
+                            BufferedReader reader = new BufferedReader(new FileReader(fallbackFile));
+                            String line;
+                            int lineCount = 0;
+                            while ((line = reader.readLine()) != null && lineCount++ < 1000) {
+                                jsonBuilder.append(line);
+                            }
+                            reader.close();
                         
                         JSONObject json = new JSONObject(jsonBuilder.toString());
                         
@@ -425,16 +431,17 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         mediaSourcePath = newMediaPath;
                         configLoaded = true;
                         log("Config loaded via JSON fallback (enabled=" + enabled + ")");
+                        }
                     }
                 } catch (Exception e) {
-                    log("JSON fallback failed: " + e.getMessage());
+                    log("JSON fallback failed: " + e);
                 }
             }
             
             lastConfigReload = System.currentTimeMillis();
 
         } catch (Exception e) {
-            log("Failed to load preferences: " + e.getMessage());
+            log("Failed to load preferences: " + e);
         }
     }
 
@@ -595,7 +602,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
             log("Camera2 API hooks installed");
         } catch (Exception e) {
-            log("Failed to hook Camera2 API: " + e.getMessage());
+            log("Failed to hook Camera2 API: " + e);
         }
     }
 
@@ -665,7 +672,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
             hookedOnOpenedClasses.add(declaringClass);
         } catch (Exception e) {
-            log("Failed to hook onOpened: " + e.getMessage());
+            log("Failed to hook onOpened: " + e);
         }
     }
 
@@ -710,12 +717,18 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                             if ("onImageAvailable".equals(method.getName())) {
                                 reloadPreferencesIfNeeded();
                             }
-                            return method.invoke(originalListener, args);
+                            try {
+                                return method.invoke(originalListener, args);
+                            } catch (java.lang.reflect.InvocationTargetException e) {
+                                Throwable cause = e.getCause();
+                                log("ImageReader listener invocation failed: " + (cause != null ? cause : e));
+                                throw cause != null ? cause : e;
+                            }
                         }
                     }
             );
         } catch (Exception e) {
-            log("Failed to create wrapped listener: " + e.getMessage());
+            log("Failed to create wrapped listener: " + e);
             return originalListener;
         }
     }
@@ -757,13 +770,13 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     buf.rewind();
                     buf.put(jpegData, 0, Math.min(jpegData.length, buf.remaining()));
                 } catch (Exception e) {
-                    log("JPEG plane write failed: " + e.getMessage());
+                    log("JPEG plane write failed: " + e);
                 }
             }
 
             recycleTempFrame(frame);
         } catch (Exception e) {
-            log("replaceImageData error: " + e.getMessage());
+            log("replaceImageData error: " + e);
         }
     }
 
@@ -804,7 +817,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 }
             }
         } catch (Exception e) {
-            log("writeYPlane error: " + e.getMessage());
+            log("writeYPlane error: " + e);
         }
     }
 
@@ -903,7 +916,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 }
             }
         } catch (Exception e) {
-            log("writeUVPlanes error: " + e.getMessage());
+            log("writeUVPlanes error: " + e);
         }
     }
 
@@ -966,7 +979,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
             log("Camera1 API hooks installed");
         } catch (Exception e) {
-            log("Failed to hook Camera1 API: " + e.getMessage());
+            log("Failed to hook Camera1 API: " + e);
         }
     }
     
@@ -1026,7 +1039,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             
             log("Camera1 takePicture hooks installed");
         } catch (Exception e) {
-            log("Failed to hook Camera1 takePicture: " + e.getMessage());
+            log("Failed to hook Camera1 takePicture: " + e);
         }
     }
     
@@ -1077,15 +1090,21 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                                         }
                                     }
                                 } catch (Exception e) {
-                                    log("Camera1 takePicture injection failed: " + e.getMessage());
+                                    log("Camera1 takePicture injection failed: " + e);
                                 }
                             }
-                            return method.invoke(originalCallback, args);
+                            try {
+                                return method.invoke(originalCallback, args);
+                            } catch (java.lang.reflect.InvocationTargetException e) {
+                                Throwable cause = e.getCause();
+                                log("PictureCallback invocation failed: " + (cause != null ? cause : e));
+                                throw cause != null ? cause : e;
+                            }
                         }
                     }
             );
         } catch (Exception e) {
-            log("Failed to create wrapped PictureCallback: " + e.getMessage());
+            log("Failed to create wrapped PictureCallback: " + e);
             return originalCallback;
         }
     }
@@ -1127,15 +1146,21 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                                         }
                                     }
                                 } catch (Exception e) {
-                                    log("PreviewCallback injection error: " + e.getMessage());
+                                    log("PreviewCallback injection error: " + e);
                                 }
                             }
-                            return method.invoke(originalCallback, args);
+                            try {
+                                return method.invoke(originalCallback, args);
+                            } catch (java.lang.reflect.InvocationTargetException e) {
+                                Throwable cause = e.getCause();
+                                log("PreviewCallback invocation failed: " + (cause != null ? cause : e));
+                                throw cause != null ? cause : e;
+                            }
                         }
                     }
             );
         } catch (Exception e) {
-            log("Failed to create wrapped callback: " + e.getMessage());
+            log("Failed to create wrapped callback: " + e);
             return originalCallback;
         }
     }
@@ -1206,7 +1231,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 log("Image loaded: " + cachedFrame.getWidth() + "x" + cachedFrame.getHeight());
             }
         } catch (Exception e) {
-            log("Image loading failed: " + e.getMessage());
+            log("Image loading failed: " + e);
         }
     }
 
@@ -1244,7 +1269,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         + cachedFrame.getHeight() + ", duration=" + (videoDurationUs / 1000) + "ms");
             }
         } catch (Exception e) {
-            log("Video loading failed: " + e.getMessage());
+            log("Video loading failed: " + e);
             isVideoSource = false;
         }
     }
@@ -1356,7 +1381,12 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     long elapsedUs = (System.currentTimeMillis() - startTimeMs) * 1000;
                     long waitUs = framePtsUs - elapsedUs;
                     if (waitUs > 5000) { // More than 5ms ahead
-                        try { Thread.sleep(waitUs / 1000); } catch (InterruptedException ignored) { break; }
+                        try { 
+                            Thread.sleep(waitUs / 1000); 
+                        } catch (InterruptedException e) { 
+                            Thread.currentThread().interrupt(); // Preserve interruption status
+                            break; 
+                        }
                     }
 
                     // Extract frame as Bitmap
@@ -1377,7 +1407,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 }
             }
         } catch (Exception e) {
-            log("Video decoder error: " + e.getMessage());
+            log("Video decoder error: " + e);
         } finally {
             if (codec != null) {
                 try { codec.stop(); } catch (Exception ignored) {}
@@ -1443,11 +1473,11 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 return bitmap;
 
             } catch (Exception e) {
-                log("Frame extraction format error: " + e.getMessage());
+                log("Frame extraction format error: " + e);
                 return null;
             }
         } catch (Exception e) {
-            log("extractFrameFromCodecOutput error: " + e.getMessage());
+            log("extractFrameFromCodecOutput error: " + e);
             return null;
         }
     }
@@ -1558,7 +1588,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             canvas.drawBitmap(source, matrix, null);
             return output;
         } catch (Exception e) {
-            log("processFrame error: " + e.getMessage());
+            log("processFrame error: " + e);
             try {
                 Bitmap scaled = Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true);
                 if (scaled == source) {
@@ -1641,7 +1671,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     NativeEncoder.rgbToNv21(argbBuf, yuvBuf, width, height);
                     return yuvBuf;
                 } catch (Exception e) {
-                    log("Native YUV encoding failed, falling back to Java: " + e.getMessage());
+                    log("Native YUV encoding failed, falling back to Java: " + e);
                 }
             }
             
@@ -1649,7 +1679,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             encodeNV21(yuvBuf, argbBuf, width, height);
             return yuvBuf;
         } catch (Exception e) {
-            log("YUV conversion failed: " + e.getMessage());
+            log("YUV conversion failed: " + e);
             return null;
         }
     }
@@ -1764,7 +1794,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
             log("CameraCaptureSession hooks installed");
         } catch (Exception e) {
-            log("Failed to hook CameraCaptureSession: " + e.getMessage());
+            log("Failed to hook CameraCaptureSession: " + e);
         }
     }
 
@@ -2054,7 +2084,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     + " canvasMode=" + useCanvasForwarding);
             return mapping;
         } catch (Exception e) {
-            log("Failed to create surface mapping: " + e.getMessage());
+            log("Failed to create surface mapping: " + e);
             return null;
         }
     }
@@ -2185,12 +2215,12 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 mapping.imageWriter.queueInputImage(outputImage);
             } catch (Exception e) {
                 try { outputImage.close(); } catch (Exception ignored) {}
-                log("ImageWriter queue error: " + e.getMessage());
+                log("ImageWriter queue error: " + e);
             }
 
             recycleTempFrame(frame);
         } catch (Exception e) {
-            log("forwardVirtualFrame error: " + e.getMessage());
+            log("forwardVirtualFrame error: " + e);
         }
     }
 
@@ -2249,7 +2279,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                             }
                         });
             } catch (Exception e) {
-                log("Failed to hook onConfigured: " + e.getMessage());
+                log("Failed to hook onConfigured: " + e);
             }
         }
 
@@ -2269,7 +2299,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                             }
                         });
             } catch (Exception e) {
-                log("Failed to hook onClosed: " + e.getMessage());
+                log("Failed to hook onClosed: " + e);
             }
         }
 
@@ -2289,7 +2319,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                             }
                         });
             } catch (Exception e) {
-                log("Failed to hook onConfigureFailed: " + e.getMessage());
+                log("Failed to hook onConfigureFailed: " + e);
             }
         }
 
@@ -2348,7 +2378,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
             log("SurfaceTexture tracking hooks installed");
         } catch (Exception e) {
-            log("Failed to hook SurfaceTexture tracking: " + e.getMessage());
+            log("Failed to hook SurfaceTexture tracking: " + e);
         }
     }
 
@@ -2427,7 +2457,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
             log("CaptureRequest builder hooks installed");
         } catch (Exception e) {
-            log("Failed to hook CaptureRequest builder: " + e.getMessage());
+            log("Failed to hook CaptureRequest builder: " + e);
         }
     }
 
@@ -2461,7 +2491,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
             log("Camera1 surface binding hooks installed");
         } catch (Exception e) {
-            log("Failed to hook Camera1 surface binding: " + e.getMessage());
+            log("Failed to hook Camera1 surface binding: " + e);
         }
     }
 }

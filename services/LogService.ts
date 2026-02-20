@@ -29,11 +29,15 @@ class LogService {
   }
 
   log(message: string, level: LogEntry['level'] = 'info', source?: string, details?: any) {
+    // Sanitize inputs to prevent log injection (CWE-117)
+    const sanitizedMessage = message.replace(/[\r\n]/g, ' ');
+    const sanitizedSource = source?.replace(/[\r\n]/g, ' ');
+    
     const entry: LogEntry = {
       timestamp: Date.now(),
-      message,
+      message: sanitizedMessage,
       level,
-      source,
+      source: sanitizedSource,
       details,
     };
 
@@ -47,19 +51,21 @@ class LogService {
     this.listeners.forEach(listener => listener(entry));
 
     // Also log to console for debugging
-    const consoleMsg = `[${level.toUpperCase()}]${source ? ` [${source}]` : ''} ${message}`;
+    const consoleMsg = `[${level.toUpperCase()}]${sanitizedSource ? ` [${sanitizedSource}]` : ''} ${sanitizedMessage}`;
+    // Sanitize details to prevent log injection
+    const sanitizedDetails = typeof details === 'string' ? details.replace(/[\r\n]/g, ' ') : details;
     switch (level) {
       case 'error':
-        console.error(consoleMsg, details || '');
+        console.error(consoleMsg, sanitizedDetails || '');
         break;
       case 'warn':
-        console.warn(consoleMsg, details || '');
+        console.warn(consoleMsg, sanitizedDetails || '');
         break;
       case 'debug':
-        console.debug(consoleMsg, details || '');
+        console.debug(consoleMsg, sanitizedDetails || '');
         break;
       default:
-        console.log(consoleMsg, details || '');
+        console.log(consoleMsg, sanitizedDetails || '');
     }
   }
 

@@ -33,7 +33,7 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
         return {
           ...defaultResult,
           absolutePath: uri.replace('file://', ''),
-          fileSize: info.exists ? info.size : 0,
+          fileSize: info.size,
           isAccessible: true,
         };
       }
@@ -60,7 +60,7 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
       return {
         ...defaultResult,
         absolutePath: info.uri.replace('file://', ''),
-        fileSize: info.exists ? info.size : 0,
+        fileSize: info.size,
         isAccessible: true,
       };
     }
@@ -89,7 +89,7 @@ async function resolveContentUri(uri: string): Promise<ResolvedPath> {
       fileName,
       fileExtension: extractExtension(fileName),
       mimeType: guessMimeType(fileName),
-      fileSize: info.exists ? info.size : 0,
+      fileSize: info.size,
       isAccessible: true,
     };
   } catch {
@@ -116,7 +116,7 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
         fileName: asset.filename,
         fileExtension: extractExtension(asset.filename),
         mimeType: guessMimeType(asset.filename),
-        fileSize: info.exists ? info.size : 0,
+        fileSize: info.size,
         isAccessible: true,
       };
     }
@@ -155,7 +155,7 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
       fileName,
       fileExtension: ext,
       mimeType: result.headers?.['content-type'] || guessMimeType(fileName),
-      fileSize: info.exists ? info.size : 0,
+      fileSize: info.size,
       isAccessible: true,
     };
   } catch {
@@ -218,23 +218,22 @@ export async function cleanEnhancedCache(): Promise<void> {
 }
 
 function extractFileName(uri: string): string {
-  try {
-    const parts = uri.split('/');
-    const last = parts[parts.length - 1];
-    return last.split('?')[0] || 'unknown';
-  } catch {
-    return 'unknown';
-  }
+  const parts = uri.split('/');
+  const last = parts[parts.length - 1];
+  const questionMarkIndex = last.indexOf('?');
+  return questionMarkIndex !== -1 ? last.substring(0, questionMarkIndex) : last || 'unknown';
 }
 
 function extractExtension(uri: string): string {
-  try {
-    const fileName = extractFileName(uri);
-    const parts = fileName.split('.');
-    return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
-  } catch {
-    return '';
+  const lastSlash = uri.lastIndexOf('/');
+  const lastDot = uri.lastIndexOf('.');
+  const queryIndex = uri.indexOf('?', lastSlash);
+  
+  if (lastDot > lastSlash && (queryIndex === -1 || lastDot < queryIndex)) {
+    const end = queryIndex === -1 ? uri.length : queryIndex;
+    return uri.substring(lastDot + 1, end).toLowerCase();
   }
+  return '';
 }
 
 function guessMimeType(uri: string): string {

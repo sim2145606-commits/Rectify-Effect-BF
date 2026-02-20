@@ -5,25 +5,22 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 
 export default function RootLayout() {
+  const screenOptions = {
+    headerShown: false,
+    contentStyle: { backgroundColor: Colors.background },
+    animation: 'fade' as const,
+  };
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: Colors.background },
-            animation: 'fade',
-          }}
-        >
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="onboarding"
-            options={{ headerShown: false, animation: 'slide_from_right' }}
-          />
-          <Stack.Screen name="logs" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="+not-found" options={{ headerShown: false }} />
+        <Stack screenOptions={screenOptions}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="onboarding" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="logs" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="+not-found" />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

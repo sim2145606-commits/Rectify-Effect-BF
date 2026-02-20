@@ -78,7 +78,7 @@ public class HookStrategyRegistry {
             try {
                 strategy.cleanup();
             } catch (Exception e) {
-                XposedBridge.log(TAG + ": Cleanup failed for " + strategy.getStrategyName());
+                XposedBridge.log(TAG + ": Cleanup failed for " + strategy.getStrategyName() + ": " + e);
             }
         }
     }

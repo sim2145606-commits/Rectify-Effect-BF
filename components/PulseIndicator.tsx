@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 
 type Props = {
@@ -41,14 +41,20 @@ export default function PulseIndicator({ active, color = '#00D4FF', size = 10 }:
     };
   }, [active, opacity, scale]);
 
-  const dotStyle = {
-    width: size,
-    height: size,
-    borderRadius: size / 2,
-    backgroundColor: color,
-    transform: [{ scale }],
-    opacity,
-  };
+  const dotStyle = useMemo(
+    () => [
+      styles.dot,
+      {
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: color,
+        transform: [{ scale }],
+        opacity,
+      },
+    ],
+    [size, color, scale, opacity]
+  );
 
   return (
     <View style={styles.container}>
@@ -61,5 +67,8 @@ const styles = StyleSheet.create({
   container: {
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  dot: {
+    // Base styles for the dot
   },
 });

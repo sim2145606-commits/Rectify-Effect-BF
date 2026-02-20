@@ -112,9 +112,7 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
           {/* Nudge buttons */}
           <View style={styles.nudgeControls}>
             <View style={styles.nudgeRow}>
-              <View style={styles.nudgeSpacer} />
               <NudgeButton icon="chevron-up" onPress={() => handleNudge(0, -10)} />
-              <View style={styles.nudgeSpacer} />
             </View>
             <View style={styles.nudgeRow}>
               <NudgeButton icon="chevron-left" onPress={() => handleNudge(-10, 0)} />
@@ -124,9 +122,7 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
               <NudgeButton icon="chevron-right" onPress={() => handleNudge(10, 0)} />
             </View>
             <View style={styles.nudgeRow}>
-              <View style={styles.nudgeSpacer} />
               <NudgeButton icon="chevron-down" onPress={() => handleNudge(0, 10)} />
-              <View style={styles.nudgeSpacer} />
             </View>
             <Text style={styles.nudgeHint}>
               {offsetX === 0 && offsetY === 0 ? 'Centered' : `${offsetX}, ${offsetY}`}
@@ -284,10 +280,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.xs,
     alignItems: 'center',
-  },
-  nudgeSpacer: {
-    width: 32,
-    height: 32,
+    justifyContent: 'center',
   },
   nudgeButton: {
     width: 32,

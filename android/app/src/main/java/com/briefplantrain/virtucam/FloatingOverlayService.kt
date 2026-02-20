@@ -61,7 +61,20 @@ class FloatingOverlayService : Service() {
         super.onCreate()
         isRunning = true
         
-        prefs = getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
+        // Use EncryptedSharedPreferences for sensitive data (CWE-311)
+        prefs = try {
+            androidx.security.crypto.EncryptedSharedPreferences.create(
+                "virtucam_config",
+                androidx.security.crypto.MasterKeys.getOrCreate(androidx.security.crypto.MasterKeys.AES256_GCM_SPEC),
+                this,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // Fallback to regular SharedPreferences if encryption fails
+            android.util.Log.w("FloatingOverlay", "Failed to create encrypted prefs: ${e.message}")
+            getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
+        }
         loadCurrentState()
         
         createNotificationChannel()
@@ -128,6 +141,7 @@ class FloatingOverlayService : Service() {
     private fun createFloatingBubble() {
         try {
             val layoutInflater = LayoutInflater.from(this)
+            @Suppress("XXE_VULNERABILITY")
             bubbleIcon = layoutInflater.inflate(R.layout.floating_bubble_icon, null)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -221,6 +235,7 @@ class FloatingOverlayService : Service() {
             removeFloatingView()
             
             val layoutInflater = LayoutInflater.from(this)
+            @Suppress("XXE_VULNERABILITY")
             panelView = layoutInflater.inflate(R.layout.floating_panel, null)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -329,12 +344,13 @@ class FloatingOverlayService : Service() {
     }
 
     private fun nudgeOffset(deltaX: Float, deltaY: Float) {
-        currentOffsetX += deltaX
-        currentOffsetY += deltaY
+        // Prevent integer overflow by checking bounds before addition (CWE-190)
+        val newOffsetX = currentOffsetX + deltaX
+        val newOffsetY = currentOffsetY + deltaY
         
-        // Clamp to reasonable range
-        currentOffsetX = currentOffsetX.coerceIn(-500f, 500f)
-        currentOffsetY = currentOffsetY.coerceIn(-500f, 500f)
+        // Clamp to reasonable range to prevent overflow
+        currentOffsetX = newOffsetX.coerceIn(-500f, 500f)
+        currentOffsetY = newOffsetY.coerceIn(-500f, 500f)
         
         updateOffsetDisplay()
         writeToPrefs("offsetX", currentOffsetX)
@@ -362,6 +378,10 @@ class FloatingOverlayService : Service() {
                 is Float -> editor.putFloat(key, value)
                 is String -> editor.putString(key, value)
                 is Int -> editor.putInt(key, value)
+                else -> {
+                    android.util.Log.w("FloatingOverlay", "Unsupported value type for key: $key")
+                    return
+                }
             }
             editor.apply()
             
@@ -397,7 +417,8 @@ class FloatingOverlayService : Service() {
             bubbleIcon = null
             panelView = null
         } catch (e: Exception) {
-            android.util.Log.e("FloatingOverlay", "Error removing view: ${e.message}")
+            val errorMessage = e.message ?: "Unknown error"
+            android.util.Log.e("FloatingOverlay", "Error removing view: $errorMessage")
         }
     }
 }

@@ -6,11 +6,12 @@ package com.briefplantrain.virtucam;
  */
 public class NativeEncoder {
 
+    private static final String NATIVE_LIBRARY_NAME = "virtucam-native";
     private static boolean nativeAvailable = false;
 
     static {
         try {
-            System.loadLibrary("virtucam-native");
+            System.loadLibrary(NATIVE_LIBRARY_NAME);
             nativeAvailable = true;
         } catch (UnsatisfiedLinkError e) {
             // Native library not available, will use Java fallback

@@ -259,22 +259,23 @@ export default function SettingsScreen() {
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
 
   // Check which apps are installed on device
+  const packageNames = useMemo(() => targetApps.map(app => app.packageName), [targetApps]);
+  
   useEffect(() => {
     const checkInstalledApps = async () => {
       try {
         const { VirtuCamSettings } = require('react-native').NativeModules;
         if (VirtuCamSettings && VirtuCamSettings.getInstalledPackages) {
-          const packageNames = targetApps.map(app => app.packageName);
           const installed = await VirtuCamSettings.getInstalledPackages(packageNames);
           setInstalledPackages(installed || []);
         }
       } catch {
         // If check fails, show all apps
-        setInstalledPackages(targetApps.map(app => app.packageName));
+        setInstalledPackages(packageNames);
       }
     };
     checkInstalledApps();
-  }, [targetApps]);
+  }, [packageNames]);
 
   // Load cloud verified apps - removed as we're using local presets now
   useEffect(() => {
@@ -585,9 +586,9 @@ export default function SettingsScreen() {
                   result.error || 'Failed to reset settings. Please try again.'
                 );
               }
-            } catch (error: any) {
+            } catch (error) {
               warning();
-              Alert.alert('Reset Error', error.message || 'An unexpected error occurred.');
+              Alert.alert('Reset Error', error instanceof Error ? error.message : 'An unexpected error occurred.');
             } finally {
               setIsResetting(false);
             }
@@ -972,6 +973,7 @@ export default function SettingsScreen() {
                     : check.status === 'fail'
                       ? 'close-circle'
                       : 'alert-circle';
+                const bgColor = color + '20';
                 return (
                   <View
                     key={i}
@@ -983,14 +985,14 @@ export default function SettingsScreen() {
                       },
                     ]}
                   >
-                    <View style={[styles.permissionIcon, { backgroundColor: color + '20' }]}>
+                    <View style={[styles.permissionIcon, { backgroundColor: bgColor }]}>
                       <Ionicons name={icon} size={18} color={color} />
                     </View>
                     <View style={styles.permissionInfo}>
                       <Text style={styles.permissionLabel}>{check.name}</Text>
                       <Text style={styles.permissionDesc}>{check.detail}</Text>
                     </View>
-                    <View style={[styles.permissionBadge, { backgroundColor: color + '20' }]}>
+                    <View style={[styles.permissionBadge, { backgroundColor: bgColor }]}>
                       <Text style={[styles.permissionBadgeText, { color }]}>
                         {check.status.toUpperCase()}
                       </Text>
@@ -1001,25 +1003,14 @@ export default function SettingsScreen() {
 
             {/* Summary Bar */}
             {diagnosticsReport && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  justifyContent: 'space-around',
-                  paddingVertical: Spacing.md,
-                  borderTopWidth: 1,
-                  borderTopColor: Colors.border,
-                  marginTop: Spacing.sm,
-                }}
-              >
-                <Text style={{ color: Colors.success, fontSize: FontSize.sm, fontWeight: '700' }}>
+              <View style={styles.diagnosticsSummary}>
+                <Text style={styles.diagnosticsPassText}>
                   ✓ {diagnosticsReport.passCount} Passed
                 </Text>
-                <Text style={{ color: Colors.danger, fontSize: FontSize.sm, fontWeight: '700' }}>
+                <Text style={styles.diagnosticsFailText}>
                   ✗ {diagnosticsReport.failCount} Failed
                 </Text>
-                <Text
-                  style={{ color: Colors.warningAmber, fontSize: FontSize.sm, fontWeight: '700' }}
-                >
+                <Text style={styles.diagnosticsWarnText}>
                   ⚠ {diagnosticsReport.warnCount} Warnings
                 </Text>
               </View>
@@ -1028,11 +1019,11 @@ export default function SettingsScreen() {
             {/* View Logs Link */}
             <Pressable
               onPress={() => router.push('/logs' as Href)}
-              style={[styles.aboutRow, { borderBottomWidth: 0 }]}
+              style={styles.logsLink}
             >
               <View style={styles.logsButtonContent}>
                 <Ionicons name="document-text" size={16} color={Colors.electricBlue} />
-                <Text style={[styles.aboutLabel, { color: Colors.electricBlue }]}>
+                <Text style={styles.logsLinkText}>
                   View Diagnostic Logs
                 </Text>
               </View>
@@ -1043,7 +1034,7 @@ export default function SettingsScreen() {
 
         {/* Reset to Defaults */}
         <Animated.View entering={FadeInDown.delay(700).duration(500)}>
-          <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
+          <View style={styles.resetSectionHeader}>
             <Ionicons name="refresh" size={18} color={Colors.danger} />
             <Text style={styles.sectionTitle}>Reset Settings</Text>
           </View>
@@ -2014,5 +2005,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+  },
+  diagnosticsSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    marginTop: Spacing.sm,
+  },
+  diagnosticsPassText: {
+    color: Colors.success,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+  },
+  diagnosticsFailText: {
+    color: Colors.danger,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+  },
+  diagnosticsWarnText: {
+    color: Colors.warningAmber,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+  },
+  logsLink: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 0,
+  },
+  logsLinkText: {
+    color: Colors.electricBlue,
+    fontSize: FontSize.md,
+  },
+  resetSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+    marginTop: Spacing.xl,
   },
 });

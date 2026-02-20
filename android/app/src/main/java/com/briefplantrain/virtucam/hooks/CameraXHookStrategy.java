@@ -51,7 +51,7 @@ public class CameraXHookStrategy {
             hookImageCapture(lpparam);
 
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": CameraX hook setup failed: " + t.getMessage());
+            XposedBridge.log(TAG + ": CameraX hook setup failed: " + t);
         }
     }
 
@@ -112,7 +112,7 @@ public class CameraXHookStrategy {
 
             XposedBridge.log(TAG + ": Hooked Preview.setSurfaceProvider");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": Preview hook failed: " + t.getMessage());
+            XposedBridge.log(TAG + ": Preview hook failed: " + t);
         }
     }
 
@@ -135,11 +135,17 @@ public class CameraXHookStrategy {
                             Object surfaceRequest = args[0];
                             handleSurfaceRequest(surfaceRequest, classLoader);
                         }
-                        return method.invoke(originalProvider, args);
+                        try {
+                            return method.invoke(originalProvider, args);
+                        } catch (java.lang.reflect.InvocationTargetException e) {
+                            Throwable cause = e.getCause();
+                            XposedBridge.log(TAG + ": SurfaceProvider invocation failed: " + (cause != null ? cause : e));
+                            throw cause != null ? cause : e;
+                        }
                     }
                 });
         } catch (Exception e) {
-            XposedBridge.log(TAG + ": Failed to create wrapped provider: " + e.getMessage());
+            XposedBridge.log(TAG + ": Failed to create wrapped provider: " + e);
             return null;
         }
     }
@@ -163,7 +169,7 @@ public class CameraXHookStrategy {
                 "surface replacement will happen in generic Camera2 hooks");
             
         } catch (Exception e) {
-            XposedBridge.log(TAG + ": Error handling surface request: " + e.getMessage());
+            XposedBridge.log(TAG + ": Error handling surface request: " + e);
         }
     }
 
@@ -194,7 +200,7 @@ public class CameraXHookStrategy {
                 XposedBridge.log(TAG + ": Hooked ImageCapture.takePicture");
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": ImageCapture hook failed: " + t.getMessage());
+            XposedBridge.log(TAG + ": ImageCapture hook failed: " + t);
         }
     }
 }

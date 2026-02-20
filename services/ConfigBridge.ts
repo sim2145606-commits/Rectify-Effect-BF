@@ -82,10 +82,16 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
   try {
     const config = await VirtuCamSettings.readConfig();
 
-    // Parse targetPackages string to array
-    const targetPackages = config.targetPackages
-      ? config.targetPackages.split(',').filter((p: string) => p.length > 0)
-      : [];
+    // Parse targetPackages string to array with error handling
+    let targetPackages: string[] = [];
+    try {
+      targetPackages = config.targetPackages
+        ? config.targetPackages.split(',').filter((p: string) => p.length > 0)
+        : [];
+    } catch (error) {
+      console.error('ConfigBridge: Failed to parse targetPackages', error);
+      targetPackages = [];
+    }
 
     return {
       ...defaultConfig,
@@ -196,8 +202,8 @@ export async function getBridgeStatus(): Promise<{
     let readable = false;
     if (VirtuCamSettings && VirtuCamSettings.verifyConfigReadable) {
       try {
-        const verifyResult = await VirtuCamSettings.verifyConfigReadable();
-        readable = verifyResult.readable && verifyResult.exists;
+        const readableStatus = await VirtuCamSettings.verifyConfigReadable();
+        readable = readableStatus.readable && readableStatus.exists;
       } catch {
         readable = false;
       }
@@ -252,11 +258,11 @@ export async function verifyBridge(): Promise<{
     }
 
     // Verify file is readable
-    const verifyResult = await VirtuCamSettings.verifyConfigReadable();
+    const readableStatus = await VirtuCamSettings.verifyConfigReadable();
 
     return {
-      success: verifyResult.exists && verifyResult.readable,
-      details: verifyResult,
+      success: readableStatus.exists && readableStatus.readable,
+      details: readableStatus,
     };
   } catch (error: any) {
     return {

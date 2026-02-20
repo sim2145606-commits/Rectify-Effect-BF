@@ -15,7 +15,7 @@ export default function SectionHeader({ title, subtitle, right }: Props) {
         <Text style={styles.title}>{title}</Text>
         {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
-      {right && <View>{right}</View>}
+      {right}
     </View>
   );
 }

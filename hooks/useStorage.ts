@@ -11,7 +11,8 @@ export function useStorage<T>(key: string, defaultValue: T) {
         if (stored !== null) {
           try {
             setValue(JSON.parse(stored));
-          } catch {
+          } catch (error) {
+            console.error(`Failed to parse stored value for key "${key}":`, error);
             setValue(stored as unknown as T);
           }
         }

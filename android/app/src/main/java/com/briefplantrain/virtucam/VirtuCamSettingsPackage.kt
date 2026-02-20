@@ -9,7 +9,7 @@ class VirtuCamSettingsPackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
         android.util.Log.d("VirtuCamSettings", "📦 Creating native modules...")
         val module = VirtuCamSettingsModule(reactContext)
-        android.util.Log.d("VirtuCamSettings", "📦 Module created: ${module.name}")
+        android.util.Log.d("VirtuCamSettings", "📦 Module created: ${module.name.replace("\n", "").replace("\r", "")}")
         return listOf(module)
     }
 

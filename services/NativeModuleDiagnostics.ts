@@ -18,9 +18,8 @@ export function diagnoseNativeModule() {
     if (!VirtuCamSettings) {
       diagnostics.error = 'VirtuCamSettings module not found in NativeModules';
       console.error('❌ Native module not loaded!');
-      console.error('Available modules:', Object.keys(NativeModules));
-      // Log first 10 modules for debugging
       const moduleNames = Object.keys(NativeModules);
+      console.error('Available modules:', moduleNames);
       console.error('Total modules:', moduleNames.length);
       console.error('First 10 modules:', moduleNames.slice(0, 10));
       console.error('VirtuCamSettings in list?', moduleNames.includes('VirtuCamSettings'));
