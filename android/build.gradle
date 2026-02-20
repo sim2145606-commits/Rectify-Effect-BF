@@ -17,7 +17,6 @@ buildscript {
     dependencies {
         classpath('com.android.tools.build:gradle:8.7.3')
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
-        classpath('expo.modules:gradle-plugin:3.0.0')
     }
 }
 

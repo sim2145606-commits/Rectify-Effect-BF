@@ -2,8 +2,9 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.facebook.react")
-    id("expo.modules.gradle-plugin")
 }
+
+apply from: new File(["node", "--print", "require.resolve('expo-modules-core/package.json')"].execute(null, rootDir).text.trim(), "../android/gradle-plugin.gradle")
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
