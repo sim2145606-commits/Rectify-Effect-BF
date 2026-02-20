@@ -4,8 +4,8 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: "monthly"  # Less frequent
+    open-pull-requests-limit: 5  # Fewer PRs
     versioning-strategy: increase
     labels:
       - "dependencies"
@@ -13,6 +13,9 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]  # Ignore patch updates
 
   # Enable version updates for GitHub Actions
   - package-ecosystem: "github-actions"
