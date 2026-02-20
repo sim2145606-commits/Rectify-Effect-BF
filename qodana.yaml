@@ -4,15 +4,7 @@
 
 version: "1.0"
 linter: jetbrains/qodana-js:2025.3
-<<<<<<< HEAD
-baseline: qodana.sarif.json
 profile:
   name: qodana.recommended
 include:
   - name: CheckDependencyLicenses
-=======
-profile:
-  name: qodana.recommended
-include:
-  - name: CheckDependencyLicenses
->>>>>>> ded7834f173f1454d57c69cee29a7daf2b5d452b
