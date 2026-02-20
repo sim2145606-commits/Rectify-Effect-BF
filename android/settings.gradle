@@ -1,7 +1,17 @@
 pluginManagement {
-    includeBuild(new File(["node", "--print", "require.resolve('@react-native/gradle-plugin/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile().toString())
+    def reactNativeGradlePlugin = new File(["node", "--print", "require.resolve('@react-native/gradle-plugin/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile()
+    includeBuild(reactNativeGradlePlugin)
+    
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
 }
-plugins { id("com.facebook.react.settings") }
+
+plugins { 
+    id("com.facebook.react.settings")
+}
 
 extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   if (System.getenv('EXPO_USE_COMMUNITY_AUTOLINKING') == '1') {
@@ -31,7 +41,6 @@ dependencyResolutionManagement {
   }
 }
 
-apply from: new File(["node", "--print", "require.resolve('expo/package.json')"].execute(null, rootDir).text.trim(), "../scripts/autolinking.gradle");
 useExpoModules()
 
 include ':app'

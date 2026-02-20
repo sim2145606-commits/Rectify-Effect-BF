@@ -22,6 +22,7 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+apply from: new File(["node", "--print", "require.resolve('expo-modules-core/package.json')"].execute(null, rootDir).text.trim(), "../scripts/autolinking.gradle")
 
 allprojects {
     repositories {
