@@ -13,6 +13,8 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <!-- Required alongside foregroundServiceType="specialUse" on Android 14+ (API 34+) -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+  <!-- Required for BootReceiver to restart overlay service after reboot -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -55,5 +57,14 @@
           android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
           android:value="Floating overlay UI providing camera effect controls for VirtuCam"/>
     </service>
+    <!--
+      BootReceiver: restarts FloatingOverlayService after device reboot
+      - exported="false" : only system can trigger BOOT_COMPLETED
+    -->
+    <receiver android:name=".BootReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED"/>
+      </intent-filter>
+    </receiver>
   </application>
 </manifest>

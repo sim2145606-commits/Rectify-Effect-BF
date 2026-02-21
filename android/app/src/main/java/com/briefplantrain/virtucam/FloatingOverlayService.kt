@@ -10,8 +10,7 @@ import android.os.IBinder
 import android.view.*
 import android.widget.*
 import androidx.core.app.NotificationCompat
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+
 import kotlin.math.roundToInt
 
 class FloatingOverlayService : Service() {
@@ -63,21 +62,7 @@ class FloatingOverlayService : Service() {
         super.onCreate()
         isRunning = true
         
-        prefs = try {
-            val masterKey = MasterKey.Builder(this)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                this,
-                "virtucam_config",
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        } catch (e: Exception) {
-            android.util.Log.w("FloatingOverlay", "Failed to create encrypted prefs: ${e.message}", e)
-            getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
-        }
+        prefs = getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
         loadCurrentState()
         
         createNotificationChannel()
@@ -171,8 +156,8 @@ class FloatingOverlayService : Service() {
     }
 
     private fun createFloatingBubble() {
-        if (checkSelfPermission(android.Manifest.permission.SYSTEM_ALERT_WINDOW) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            android.util.Log.w("FloatingOverlay", "Missing SYSTEM_ALERT_WINDOW permission - operation skipped")
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            android.util.Log.w("FloatingOverlay", "Missing overlay permission")
             stopSelf()
             return
         }
@@ -274,8 +259,8 @@ class FloatingOverlayService : Service() {
     private fun expandToPanel() {
         if (isExpanded) return
         
-        if (checkSelfPermission(android.Manifest.permission.SYSTEM_ALERT_WINDOW) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            android.util.Log.w("FloatingOverlay", "Missing SYSTEM_ALERT_WINDOW permission - operation skipped")
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            android.util.Log.w("FloatingOverlay", "Missing overlay permission")
             return
         }
         
@@ -430,19 +415,10 @@ class FloatingOverlayService : Service() {
             editor.apply()
             
             try {
-                val prefsPath = "shared_prefs/virtucam_config.xml"
-                val prefsFile = java.io.File(applicationInfo.dataDir, prefsPath).canonicalFile
-                val dataDir = java.io.File(applicationInfo.dataDir).canonicalFile
-                
-                // FIX: java.io.File has no startsWith(File) method.
-                // Use absolutePath string comparison instead (both are already canonical files).
-                if (prefsFile.absolutePath.startsWith(dataDir.absolutePath) && prefsFile.exists()) {
+                val prefsFile = java.io.File(applicationInfo.dataDir, "shared_prefs/virtucam_config.xml")
+                if (prefsFile.exists()) {
                     prefsFile.setReadable(true, false)
                 }
-            } catch (e: SecurityException) {
-                android.util.Log.w("FloatingOverlay", "Permission denied: ${e.message}", e)
-            } catch (e: java.io.IOException) {
-                android.util.Log.w("FloatingOverlay", "IO error: ${e.message}", e)
             } catch (e: Exception) {
                 android.util.Log.w("FloatingOverlay", "Could not set prefs readable: ${e.message}", e)
             }
