@@ -331,52 +331,48 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 prefs.reload();
 
                 enabled = prefs.getBoolean("enabled", false);
-                
-                // If enabled is true, we successfully read the config
-                if (enabled || prefs.getFile().canRead()) {
-                    String newMediaPath = prefs.getString("mediaSourcePath", null);
-                    cameraTarget = prefs.getString("cameraTarget", "front");
-                    mirrored = prefs.getBoolean("mirrored", false);
-                    rotation = prefs.getInt("rotation", 0);
-                    scaleX = prefs.getFloat("scaleX", 1.0f);
-                    scaleY = prefs.getFloat("scaleY", 1.0f);
-                    offsetX = prefs.getFloat("offsetX", 0.0f);
-                    offsetY = prefs.getFloat("offsetY", 0.0f);
-                    targetMode = prefs.getString("targetMode", "whitelist");
+                String newMediaPath = prefs.getString("mediaSourcePath", null);
+                cameraTarget = prefs.getString("cameraTarget", "front");
+                mirrored = prefs.getBoolean("mirrored", false);
+                rotation = prefs.getInt("rotation", 0);
+                scaleX = prefs.getFloat("scaleX", 1.0f);
+                scaleY = prefs.getFloat("scaleY", 1.0f);
+                offsetX = prefs.getFloat("offsetX", 0.0f);
+                offsetY = prefs.getFloat("offsetY", 0.0f);
+                targetMode = prefs.getString("targetMode", "whitelist");
 
-                    String packagesStr = prefs.getString("targetPackages", "");
-                    if (!packagesStr.isEmpty()) {
-                        targetPackages = new HashSet<>(Arrays.asList(packagesStr.split(",")));
-                    } else {
-                        targetPackages = new HashSet<>();
-                    }
-
-                    // Invalidate frame cache if media source changed
-                    if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
-                        synchronized (frameLock) {
-                            if (cachedFrame != null && cachedFrame != currentVideoFrame.get()) {
-                                cachedFrame.recycle();
-                            }
-                            cachedFrame = null;
-                            cachedMediaPath = null;
-                        }
-                        stopVideoDecoder();
-                    }
-                    mediaSourcePath = newMediaPath;
-                    
-                    // Check if the media source is a streaming URL
-                    isStreamingMode = StreamingMediaSource.isStreamingUrl(mediaSourcePath);
-                    if (isStreamingMode) {
-                        if (streamingSource != null) {
-                            streamingSource.release();
-                        }
-                        streamingSource = new StreamingMediaSource(mediaSourcePath);
-                        log("Streaming mode enabled: " + mediaSourcePath);
-                    }
-                    
-                    configLoaded = true;
-                    log("Config loaded via XSharedPreferences");
+                String packagesStr = prefs.getString("targetPackages", "");
+                if (!packagesStr.isEmpty()) {
+                    targetPackages = new HashSet<>(Arrays.asList(packagesStr.split(",")));
+                } else {
+                    targetPackages = new HashSet<>();
                 }
+
+                // Invalidate frame cache if media source changed
+                if (newMediaPath != null && !newMediaPath.equals(cachedMediaPath)) {
+                    synchronized (frameLock) {
+                        if (cachedFrame != null && cachedFrame != currentVideoFrame.get()) {
+                            cachedFrame.recycle();
+                        }
+                        cachedFrame = null;
+                        cachedMediaPath = null;
+                    }
+                    stopVideoDecoder();
+                }
+                mediaSourcePath = newMediaPath;
+                
+                // Check if the media source is a streaming URL
+                isStreamingMode = StreamingMediaSource.isStreamingUrl(mediaSourcePath);
+                if (isStreamingMode) {
+                    if (streamingSource != null) {
+                        streamingSource.release();
+                    }
+                    streamingSource = new StreamingMediaSource(mediaSourcePath);
+                    log("Streaming mode enabled: " + mediaSourcePath);
+                }
+                
+                configLoaded = true;
+                log("Config loaded via XSharedPreferences");
             } catch (Exception e) {
                 log("XSharedPreferences failed: " + e.getMessage());
             }
@@ -1592,7 +1588,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 matrix.postRotate(rotation, targetWidth / 2f, targetHeight / 2f);
             }
 
-            matrix.postTranslate(offsetX * targetWidth, offsetY * targetHeight);
+            matrix.postTranslate(offsetX, offsetY);
 
             canvas.drawBitmap(source, matrix, null);
             return output;
