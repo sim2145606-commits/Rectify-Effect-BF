@@ -61,6 +61,7 @@ export default function StudioScreen() {
     STORAGE_KEYS.FLOATING_BUBBLE,
     false
   );
+  const [overlayRuntimeState, setOverlayRuntimeState] = useState<'running' | 'stopped' | 'no_permission' | 'unknown'>('unknown');
 
   // Media state
   const [selectedMedia, setSelectedMedia] = useStorage<string | null>(
@@ -100,6 +101,35 @@ export default function StudioScreen() {
       setResolvedPath(null);
     }
   }, [selectedMedia, recentFiles]);
+
+  const refreshOverlayRuntimeState = useCallback(async () => {
+    if (!VirtuCamSettings) {
+      setOverlayRuntimeState('unknown');
+      return;
+    }
+
+    try {
+      const hasPermission = await VirtuCamSettings.checkOverlayPermission();
+      if (!hasPermission) {
+        setOverlayRuntimeState('no_permission');
+        return;
+      }
+
+      const isRunning = await VirtuCamSettings.isOverlayRunning();
+      setOverlayRuntimeState(isRunning ? 'running' : 'stopped');
+    } catch {
+      setOverlayRuntimeState('unknown');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshOverlayRuntimeState();
+    const timer = setInterval(() => {
+      void refreshOverlayRuntimeState();
+    }, 4000);
+
+    return () => clearInterval(timer);
+  }, [refreshOverlayRuntimeState]);
 
   const addToRecent = useCallback(
     (item: MediaItem) => {
@@ -313,16 +343,53 @@ export default function StudioScreen() {
             }
           }
         }
+
+        void refreshOverlayRuntimeState();
       } catch (err: unknown) {
         if (__DEV__) {
           const message = err instanceof Error ? err.message : String(err);
           console.error('Error toggling floating overlay:', message);
         }
-        Alert.alert('Error', 'Failed to toggle floating overlay. Please try again.');
+        const message = err instanceof Error ? err.message : String(err);
+        Alert.alert('Error', `Failed to toggle floating overlay. ${message}`);
       }
     },
-    [setFloatingBubbleEnabled, lightImpact, requestOverlayPermission]
+    [setFloatingBubbleEnabled, lightImpact, requestOverlayPermission, refreshOverlayRuntimeState]
   );
+
+
+  const startOverlayNow = useCallback(async () => {
+    if (!VirtuCamSettings) {
+      Alert.alert('Error', 'Native module not available');
+      return;
+    }
+    try {
+      await VirtuCamSettings.startFloatingOverlay();
+      setFloatingBubbleEnabled(true);
+      lightImpact();
+      void refreshOverlayRuntimeState();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      Alert.alert('Unable to start overlay', message);
+      void refreshOverlayRuntimeState();
+    }
+  }, [setFloatingBubbleEnabled, lightImpact, refreshOverlayRuntimeState]);
+
+  const stopOverlayNow = useCallback(async () => {
+    if (!VirtuCamSettings) {
+      Alert.alert('Error', 'Native module not available');
+      return;
+    }
+    try {
+      await VirtuCamSettings.stopFloatingOverlay();
+      lightImpact();
+      void refreshOverlayRuntimeState();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      Alert.alert('Unable to stop overlay', message);
+      void refreshOverlayRuntimeState();
+    }
+  }, [lightImpact, refreshOverlayRuntimeState]);
 
 
   const renderRecentItem = ({ item }: { item: MediaItem }) => (
@@ -413,12 +480,36 @@ export default function StudioScreen() {
           {/* Status indicator */}
           {floatingBubbleEnabled && (
             <View style={styles.floatingStatus}>
-              <View style={styles.floatingStatusDot} />
+              <View
+                style={[
+                  styles.floatingStatusDot,
+                  overlayRuntimeState === 'running'
+                    ? styles.floatingDotRunning
+                    : overlayRuntimeState === 'no_permission'
+                      ? styles.floatingDotWarning
+                      : styles.floatingDotStopped,
+                ]}
+              />
               <Text style={styles.floatingStatusText}>
-                Overlay will appear when you leave the app
+                {overlayRuntimeState === 'running'
+                  ? 'Overlay is running now'
+                  : overlayRuntimeState === 'stopped'
+                    ? 'Overlay enabled, currently stopped'
+                    : overlayRuntimeState === 'no_permission'
+                      ? 'Overlay permission missing'
+                      : 'Overlay status unknown'}
               </Text>
             </View>
           )}
+
+          <View style={styles.floatingActionRow}>
+            <Pressable style={styles.floatingActionButton} onPress={startOverlayNow}>
+              <Text style={styles.floatingActionButtonText}>Start Now</Text>
+            </Pressable>
+            <Pressable style={styles.floatingActionButton} onPress={stopOverlayNow}>
+              <Text style={styles.floatingActionButtonText}>Stop Now</Text>
+            </Pressable>
+          </View>
         </View>
       </Animated.View>
 
@@ -1111,5 +1202,33 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: FontSize.sm,
     fontStyle: 'italic',
+  },
+  floatingDotRunning: {
+    backgroundColor: Colors.success,
+  },
+  floatingDotStopped: {
+    backgroundColor: Colors.warningAmber,
+  },
+  floatingDotWarning: {
+    backgroundColor: Colors.danger,
+  },
+  floatingActionRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  floatingActionButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.overlay,
+    borderRadius: BorderRadius.sm,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+  },
+  floatingActionButtonText: {
+    color: Colors.textPrimary,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
   },
 });
