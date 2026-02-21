@@ -93,7 +93,7 @@ export default function TabLayout() {
         options={{
           title: 'Settings',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="settings" library="ionicons" color={color} focused={focused} />
+            <TabIcon name="settings-outline" library="ionicons" color={color} focused={focused} />
           ),
         }}
       />

@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -28,6 +28,7 @@ import {
   type SystemInfo,
 } from '@/services/SystemVerification';
 import { syncAllSettings, getBridgeStatus, readBridgeConfig } from '@/services/ConfigBridge';
+import { startFloatingOverlay, stopFloatingOverlay } from '@/services/OverlayService';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
@@ -105,6 +106,22 @@ export default function Dashboard() {
     void loadInfo();
   }, []);
 
+  // Manage overlay lifecycle
+  useEffect(() => {
+    const manageOverlay = async () => {
+      try {
+        if (hookEnabled && systemStatus.overlayPermission?.status === 'ok') {
+          await startFloatingOverlay(true);
+        } else if (!hookEnabled) {
+          await stopFloatingOverlay();
+        }
+      } catch {
+        // Overlay is non-critical — silent fail is acceptable
+      }
+    };
+    void manageOverlay();
+  }, [hookEnabled, systemStatus.overlayPermission?.status]);
+
   useEffect(() => {
     if (hookEnabled) {
       masterGlow.value = withRepeat(
@@ -142,9 +159,15 @@ export default function Dashboard() {
   const allSystemsReady = systemStatus.overallReady;
 
   const handleMasterToggle = useCallback(async () => {
-    // Verify prerequisites before enabling
     if (!hookEnabled && !allSystemsReady) {
       warning();
+      const failed = [
+        systemStatus.rootAccess.status !== 'ok' ? '• Root / KernelSU not detected' : null,
+        systemStatus.xposedFramework.status !== 'ok' ? '• LSPosed framework inactive' : null,
+        systemStatus.moduleActive.status !== 'ok' ? '• VirtuCam module not scoped' : null,
+        systemStatus.storagePermission.status !== 'ok' ? '• Storage permission missing' : null,
+      ].filter(Boolean).join('\n');
+      Alert.alert('Prerequisites Not Met', `Cannot enable hook:\n\n${failed}\n\nOpen Setup to resolve.`);
       return;
     }
 
@@ -155,7 +178,7 @@ export default function Dashboard() {
       setTimeout(() => success(), 200);
     }
     setHookEnabled(!hookEnabled);
-  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning, allSystemsReady]);
+  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning, allSystemsReady, systemStatus]);
 
   const handleRefreshStatus = useCallback(async () => {
     mediumImpact();
@@ -426,8 +449,37 @@ export default function Dashboard() {
           <Text style={styles.sectionTitle}>Config Bridge</Text>
         </View>
         <Card>
+          <View style={[
+            styles.bridgeBanner,
+            { backgroundColor: bridgeReadable && bridgeHookEnabled
+                ? Colors.success + '15'
+                : bridgeReadable
+                  ? Colors.warningAmber + '15'
+                  : Colors.danger + '15' }
+          ]}>
+            <View style={[styles.miniDot, {
+              backgroundColor: bridgeReadable
+                ? (bridgeHookEnabled ? Colors.success : Colors.warningAmber)
+                : Colors.danger,
+              width: 8, height: 8, borderRadius: 4
+            }]} />
+            <Text style={[styles.bridgeBannerText, {
+              color: bridgeReadable
+                ? (bridgeHookEnabled ? Colors.success : Colors.warningAmber)
+                : Colors.danger,
+            }]}>
+              {bridgeReadable && bridgeHookEnabled
+                ? 'BRIDGE ACTIVE — HOOK LIVE'
+                : bridgeReadable
+                  ? 'BRIDGE CONNECTED — HOOK INACTIVE'
+                  : 'BRIDGE OFFLINE'}
+            </Text>
+          </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Bridge Status</Text>
+            <View style={styles.infoRowLeft}>
+              <Ionicons name="link-outline" size={14} color={Colors.textTertiary} />
+              <Text style={styles.infoLabel}>Bridge Status</Text>
+            </View>
             <View style={styles.infoValueRow}>
               <View
                 style={[
@@ -446,7 +498,10 @@ export default function Dashboard() {
             </View>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Hook Status</Text>
+            <View style={styles.infoRowLeft}>
+              <Ionicons name="power-outline" size={14} color={Colors.textTertiary} />
+              <Text style={styles.infoLabel}>Hook Status</Text>
+            </View>
             <View style={styles.infoValueRow}>
               <View
                 style={[
@@ -465,19 +520,26 @@ export default function Dashboard() {
             </View>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Camera Target</Text>
+            <View style={styles.infoRowLeft}>
+              <Ionicons name="camera-outline" size={14} color={Colors.textTertiary} />
+              <Text style={styles.infoLabel}>Camera Target</Text>
+            </View>
             <Text style={styles.infoValue}>
               {bridgeCameraTarget === 'both' ? 'Front & Back' : bridgeCameraTarget === 'front' ? 'Front Only' : 'Back Only'}
             </Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Target Apps</Text>
-            <Text style={styles.infoValue}>
-              {bridgeTargetAppsCount > 0 ? `${bridgeTargetAppsCount} app${bridgeTargetAppsCount > 1 ? 's' : ''}` : 'All apps'}
-            </Text>
+            <View style={styles.infoRowLeft}>
+              <Ionicons name="apps-outline" size={14} color={Colors.textTertiary} />
+              <Text style={styles.infoLabel}>Target Apps</Text>
+            </View>
+            <Text style={styles.infoValue}>Managed by LSPosed</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Active Media</Text>
+            <View style={styles.infoRowLeft}>
+              <Ionicons name="image-outline" size={14} color={Colors.textTertiary} />
+              <Text style={styles.infoLabel}>Active Media</Text>
+            </View>
             <Text
               style={[styles.infoValue, !bridgeMediaPath && { color: Colors.textTertiary }]}
               numberOfLines={1}
@@ -486,12 +548,18 @@ export default function Dashboard() {
             </Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Config Version</Text>
-            <Text style={styles.infoValue}>v{bridgeVersion}</Text>
+            <View style={styles.infoRowLeft}>
+              <Ionicons name="code-slash-outline" size={14} color={Colors.textTertiary} />
+              <Text style={styles.infoLabel}>Config Rev</Text>
+            </View>
+            <Text style={styles.infoValue}>#{bridgeVersion}</Text>
           </View>
           <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.infoLabel}>Last Sync</Text>
-            <Text style={styles.infoValue}>{lastSyncTime}</Text>
+            <View style={styles.infoRowLeft}>
+              <Ionicons name="time-outline" size={14} color={Colors.textTertiary} />
+              <Text style={styles.infoLabel}>Last Sync</Text>
+            </View>
+            <Text style={styles.infoValue}>{lastSyncTime === 'Never' ? 'Syncing...' : lastSyncTime}</Text>
           </View>
         </Card>
       </Animated.View>
@@ -506,83 +574,151 @@ export default function Dashboard() {
         <Card>
           {systemInfo ? (
             <>
+              {/* DEVICE GROUP */}
+              <View style={styles.infoGroupHeader}>
+                <Ionicons name="phone-portrait-outline" size={11} color={Colors.textTertiary} />
+                <Text style={styles.infoGroupLabel}>DEVICE</Text>
+              </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Device</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="hardware-chip-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Device</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.manufacturer} {systemInfo.model}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Brand</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="pricetag-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Brand</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.brand}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Product</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="cube-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Model</Text>
+                </View>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.model}
+                </Text>
+              </View>
+              <View style={styles.infoRow}>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="cube-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Product</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.product}
                 </Text>
               </View>
+
+              <View style={styles.infoGroupSeparator} />
+
+              {/* ANDROID GROUP */}
+              <View style={styles.infoGroupHeader}>
+                <Ionicons name="logo-android" size={11} color={Colors.textTertiary} />
+                <Text style={styles.infoGroupLabel}>ANDROID</Text>
+              </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Android</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="logo-android" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Android</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.androidVersion} (SDK {systemInfo.sdkLevel})
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Build</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="build-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Build</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.buildNumber}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Security</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="shield-checkmark-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Security</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.securityPatch}
                 </Text>
               </View>
-              <View style={styles.infoRowColumn}>
-                <Text style={styles.infoLabel}>Kernel Version</Text>
-                <Text style={[styles.infoValueWrap, { marginTop: Spacing.xs }]}>
-                  {systemInfo.kernelVersion}
+
+              <View style={styles.infoGroupSeparator} />
+
+              {/* SYSTEM GROUP */}
+              <View style={styles.infoGroupHeader}>
+                <Ionicons name="terminal-outline" size={11} color={Colors.textTertiary} />
+                <Text style={styles.infoGroupLabel}>SYSTEM</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="key-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Root</Text>
+                </View>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.rootSolution}{systemInfo.rootVersion ? ` ${systemInfo.rootVersion}` : ''}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>SELinux</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="terminal-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Kernel</Text>
+                </View>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.kernelVersion.split('\n')[0].slice(0, 42)}…
+                </Text>
+              </View>
+              <View style={styles.infoRow}>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="shield-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>SELinux</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.selinuxStatus}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Root</Text>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.rootSolution}
-                  {systemInfo.rootVersion ? ` ${systemInfo.rootVersion}` : ''}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>ABI</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="code-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>ABI</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.abiList}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Storage</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="save-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Storage</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.storage}
                 </Text>
               </View>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Memory</Text>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="hardware-chip-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Memory</Text>
+                </View>
                 <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
                   {systemInfo.maxMemory}
                 </Text>
               </View>
-              <View style={[styles.infoRowColumn, { borderBottomWidth: 0 }]}>
-                <Text style={styles.infoLabel}>Fingerprint</Text>
-                <Text style={[styles.infoValueWrap, { marginTop: Spacing.xs }]}>
-                  {systemInfo.fingerprint}
+              <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                <View style={styles.infoRowLeft}>
+                  <Ionicons name="finger-print-outline" size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoLabel}>Fingerprint</Text>
+                </View>
+                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
+                  {systemInfo.fingerprint.split('/').slice(-2).join('/')}
                 </Text>
               </View>
             </>
@@ -978,6 +1114,44 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
+  },
+  bridgeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    marginBottom: Spacing.md,
+  },
+  bridgeBannerText: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  infoRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  infoGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
+  },
+  infoGroupLabel: {
+    color: Colors.textTertiary,
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  infoGroupSeparator: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: Spacing.sm,
   },
   setupButton: {
     flexDirection: 'row',

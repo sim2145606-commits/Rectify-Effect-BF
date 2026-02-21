@@ -134,6 +134,8 @@ export async function syncAllSettings(): Promise<void> {
       scaleY,
       offsetX,
       offsetY,
+      targetModeRaw,
+      targetAppsRaw,
     ] = await Promise.all([
       AsyncStorage.getItem(STORAGE_KEYS.HOOK_ENABLED),
       AsyncStorage.getItem(STORAGE_KEYS.SELECTED_MEDIA),
@@ -145,6 +147,8 @@ export async function syncAllSettings(): Promise<void> {
       AsyncStorage.getItem(STORAGE_KEYS.SCALE_Y),
       AsyncStorage.getItem(STORAGE_KEYS.OFFSET_X),
       AsyncStorage.getItem(STORAGE_KEYS.OFFSET_Y),
+      AsyncStorage.getItem(STORAGE_KEYS.TARGET_MODE),
+      AsyncStorage.getItem(STORAGE_KEYS.TARGET_APPS),
     ]);
 
     const front = frontCamera === 'true';
@@ -158,6 +162,12 @@ export async function syncAllSettings(): Promise<void> {
       cameraTarget = 'back';
     }
 
+    const storedApps: Array<{packageName: string; enabled: boolean}> =
+      targetAppsRaw ? JSON.parse(targetAppsRaw) : [];
+    const enabledPackages = storedApps
+      .filter(app => app.enabled)
+      .map(app => app.packageName);
+
     const config: Partial<BridgeConfig> = {
       enabled: enabled === 'true',
       mediaSourcePath: mediaPath,
@@ -168,6 +178,8 @@ export async function syncAllSettings(): Promise<void> {
       scaleY: scaleY ? parseFloat(scaleY) : 1.0,
       offsetX: offsetX ? parseFloat(offsetX) : 0.0,
       offsetY: offsetY ? parseFloat(offsetY) : 0.0,
+      targetMode: (targetModeRaw as 'whitelist' | 'blacklist') ?? 'whitelist',
+      targetPackages: enabledPackages,
     };
 
     await writeBridgeConfig(config);
@@ -199,10 +211,15 @@ export async function getBridgeStatus(): Promise<{
       }
     }
 
+    const versionKey = 'virtucam_config_version';
+    const stored = await AsyncStorage.getItem(versionKey);
+    const version = stored ? parseInt(stored, 10) + 1 : 1;
+    await AsyncStorage.setItem(versionKey, version.toString());
+
     return {
       available: !!VirtuCamSettings,
       path,
-      version: Date.now(),
+      version,
       readable,
     };
   } catch {
