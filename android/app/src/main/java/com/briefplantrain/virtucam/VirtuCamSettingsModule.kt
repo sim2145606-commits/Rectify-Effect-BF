@@ -465,8 +465,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("lsposedInstalled", lsposedExists)
             result.putString("lsposedPath", detectedPath)
             
-            // Check if module is active - multiple methods for different LSPosed forks
-            var moduleActive = false
+            // Check if module is loaded/scoped - split these signals to avoid false positives
+            var moduleLoaded = false
+            var moduleScoped = false
             var detectionMethod = "none"
             
             // Method 1: Check marker file (created when module hooks an app)
@@ -482,56 +483,74 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             if (!isValidPath) {
                 android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
             } else if (markerFile.exists()) {
-                moduleActive = true
+                moduleLoaded = true
                 detectionMethod = "marker_file"
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
             }
             
             // Method 2: Check LSPosed database for module enabled state
-            if (!moduleActive && lsposedExists) {
+            if (!moduleScoped && lsposedExists) {
                 if (checkLSPosedDatabase(packageName)) {
-                    moduleActive = true
+                    moduleScoped = true
                     detectionMethod = "lspd_database"
                     android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed database")
                 }
             }
             
             // Method 3: Check LSPosed scope configuration
-            if (!moduleActive && lsposedExists) {
+            if (!moduleScoped && lsposedExists) {
                 if (checkLSPosedScope(packageName)) {
-                    moduleActive = true
+                    moduleScoped = true
                     detectionMethod = "lspd_scope"
                     android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed scope")
                 }
             }
             
             // Method 4: Check LSPosed prefs (ReLSPosed and some forks)
-            if (!moduleActive && lsposedExists) {
+            if (!moduleScoped && lsposedExists) {
                 if (checkLSPosedPrefs(packageName)) {
-                    moduleActive = true
+                    moduleScoped = true
                     detectionMethod = "lspd_prefs"
                     android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed prefs")
                 }
             }
             
             // Method 5: Check modules directory registration
-            if (!moduleActive && lsposedExists) {
+            if (!moduleScoped && lsposedExists) {
                 if (checkModulesDirectory(packageName)) {
-                    moduleActive = true
+                    moduleScoped = true
                     detectionMethod = "modules_dir"
                     android.util.Log.d("VirtuCamSettings", "Module detected via modules directory")
                 }
             }
+
+            val enabled = prefs.getBoolean("enabled", false)
+            val mediaSourcePath = prefs.getString("mediaSourcePath", null)
+            val targetMode = prefs.getString("targetMode", "whitelist") ?: "whitelist"
+            val targetPackagesRaw = prefs.getString("targetPackages", "") ?: ""
+            val hasTargets = targetPackagesRaw
+                .split(',')
+                .map { it.trim() }
+                .any { it.isNotEmpty() }
+
+            val hookConfigured = enabled && !mediaSourcePath.isNullOrEmpty() &&
+                (targetMode != "whitelist" || hasTargets)
+            val hookReady = moduleLoaded && moduleScoped && hookConfigured
             
-            // FIXED: Only mark as active if module is actually active, not just LSPosed installed
-            // The module must be enabled in LSPosed AND have hooked at least one app
-            result.putBoolean("xposedActive", moduleActive)
-            result.putBoolean("moduleActive", moduleActive)
+            // Backward-compatible fields
+            result.putBoolean("xposedActive", moduleLoaded)
+            result.putBoolean("moduleActive", hookReady)
+            // New detailed fields
+            result.putBoolean("moduleLoaded", moduleLoaded)
+            result.putBoolean("moduleScoped", moduleScoped)
+            result.putBoolean("hookConfigured", hookConfigured)
+            result.putBoolean("hookReady", hookReady)
             result.putString("detectionMethod", detectionMethod)
             
             android.util.Log.d("VirtuCamSettings",
-                "Detection results: xposedActive=$moduleActive, lsposedInstalled=$lsposedExists, " +
-                "moduleActive=$moduleActive, method=$detectionMethod, path=$detectedPath")
+                "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +
+                "hookConfigured=$hookConfigured, hookReady=$hookReady, lsposedInstalled=$lsposedExists, " +
+                "method=$detectionMethod, path=$detectedPath")
             
             promise.resolve(result)
         } catch (e: Exception) {
@@ -540,8 +559,21 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("xposedActive", false)
             result.putBoolean("lsposedInstalled", false)
             result.putBoolean("moduleActive", false)
+            result.putBoolean("moduleLoaded", false)
+            result.putBoolean("moduleScoped", false)
+            result.putBoolean("hookConfigured", false)
+            result.putBoolean("hookReady", false)
             result.putString("detectionMethod", "error")
             promise.resolve(result)
+        }
+    }
+
+    @ReactMethod
+    fun isOverlayEnabled(promise: Promise) {
+        try {
+            promise.resolve(prefs.getBoolean("overlayEnabled", false))
+        } catch (e: Exception) {
+            promise.reject("OVERLAY_STATE_ERROR", e.message, e)
         }
     }
 
@@ -1187,4 +1219,3 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
 } // end of class VirtuCamSettingsModule
-

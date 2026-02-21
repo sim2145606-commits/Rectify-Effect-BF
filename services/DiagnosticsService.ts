@@ -177,25 +177,25 @@ export async function runDiagnostics(
     onProgress?.(r, checks.length - 1);
   }
 
-  // 7. Module Active
+  // 7. Hook Ready
   try {
     let active = false;
     if (VirtuCamSettings?.checkXposedStatus) {
       const result = await VirtuCamSettings.checkXposedStatus();
-      active = result?.moduleActive === true;
+      active = result?.hookReady === true;
     }
     const r: DiagnosticCheckResult = {
-      name: 'VirtuCam Module',
-      description: 'Hook module activation status',
+      name: 'Hook Ready',
+      description: 'Module loaded + scoped + configured',
       status: active ? 'pass' : 'fail',
-      detail: active ? 'Module is active' : 'Module not active in Xposed manager',
+      detail: active ? 'Hook pipeline is ready' : 'Hook not fully ready (load/scope/config issue)',
     };
     checks.push(r);
     onProgress?.(r, checks.length - 1);
   } catch {
     const r: DiagnosticCheckResult = {
-      name: 'VirtuCam Module',
-      description: 'Module status',
+      name: 'Hook Ready',
+      description: 'Hook pipeline status',
       status: 'fail',
       detail: 'Check failed',
     };

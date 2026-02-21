@@ -28,7 +28,6 @@ import {
   type SystemInfo,
 } from '@/services/SystemVerification';
 import { syncAllSettings, getBridgeStatus, readBridgeConfig } from '@/services/ConfigBridge';
-import { startFloatingOverlay, stopFloatingOverlay } from '@/services/OverlayService';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
@@ -105,22 +104,6 @@ export default function Dashboard() {
     };
     void loadInfo();
   }, []);
-
-  // Manage overlay lifecycle
-  useEffect(() => {
-    const manageOverlay = async () => {
-      try {
-        if (hookEnabled && systemStatus.overlayPermission?.status === 'ok') {
-          await startFloatingOverlay(true);
-        } else if (!hookEnabled) {
-          await stopFloatingOverlay();
-        }
-      } catch {
-        // Overlay is non-critical — silent fail is acceptable
-      }
-    };
-    void manageOverlay();
-  }, [hookEnabled, systemStatus.overlayPermission?.status]);
 
   useEffect(() => {
     if (hookEnabled) {
