@@ -13,6 +13,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileWriter
 import java.io.InputStreamReader
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
