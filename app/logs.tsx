@@ -27,22 +27,8 @@ export default function LogsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterLevel, setFilterLevel] = useState<LogEntry['level'] | 'all'>('all');
-  const [includeSystemLogs] = useState(false);
+  const [includeSystemLogs, setIncludeSystemLogs] = useState(false);
   const [systemLogs, setSystemLogs] = useState<string>('');
-
-  const loadLogs = useCallback(() => {
-    try {
-      const allLogs = logger.getLogs();
-      setLogs(allLogs);
-      applyFilters(allLogs, searchQuery, filterLevel);
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      if (__DEV__) console.error('Failed to load logs:', errorMessage);
-      Alert.alert('Error', `Failed to load logs: ${errorMessage}`);
-      setLogs([]);
-      setFilteredLogs([]);
-    }
-  }, [searchQuery, filterLevel]);
 
   const applyFilters = useCallback(
     (logList: LogEntry[], query: string, level: LogEntry['level'] | 'all') => {
@@ -65,6 +51,20 @@ export default function LogsScreen() {
     },
     []
   );
+
+  const loadLogs = useCallback(() => {
+    try {
+      const allLogs = logger.getLogs();
+      setLogs(allLogs);
+      applyFilters(allLogs, searchQuery, filterLevel);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      if (__DEV__) console.error('Failed to load logs:', errorMessage);
+      Alert.alert('Error', `Failed to load logs: ${errorMessage}`);
+      setLogs([]);
+      setFilteredLogs([]);
+    }
+  }, [searchQuery, filterLevel, applyFilters]);
 
   useEffect(() => {
     loadLogs();
@@ -259,6 +259,20 @@ export default function LogsScreen() {
           <TouchableOpacity style={styles.actionButton} onPress={handleClearLogs}>
             <Ionicons name="trash" size={18} color={Colors.danger} />
             <Text style={[styles.actionButtonText, { color: Colors.danger }]}>Clear</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => setIncludeSystemLogs(prev => !prev)}
+          >
+            <Ionicons
+              name={includeSystemLogs ? 'eye' : 'eye-off'}
+              size={18}
+              color={Colors.electricBlue}
+            />
+            <Text style={styles.actionButtonText}>
+              {includeSystemLogs ? 'Hide Xposed' : 'Show Xposed'}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       </View>

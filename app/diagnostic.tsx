@@ -35,7 +35,10 @@ export default function NativeModuleDiagnosticScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ padding: Spacing.xl, paddingBottom: Spacing.xxxl }}
+    >
       <Text style={styles.title}>Native Module Diagnostics</Text>
 
       {/* Build Info */}
@@ -130,7 +133,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
-    padding: Spacing.xl,
   },
   title: {
     fontSize: FontSize.xxl,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,7 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const [permissions, setPermissions] = useState<AllPermissionsState | null>(null);
   const [isChecking, setIsChecking] = useState(false);
-  const [appState, setAppState] = useState(AppState.currentState);
+  const prevAppStateRef = useRef(AppState.currentState);
 
   // Check permissions on mount and when app becomes active
   const checkPerms = useCallback(async () => {
@@ -50,16 +50,16 @@ export default function OnboardingScreen() {
   // Re-check permissions when app becomes active (user returns from settings)
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
-      if (appState.match(/inactive|background/) && nextAppState === 'active') {
+      if (prevAppStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
         void checkPerms();
       }
-      setAppState(nextAppState);
+      prevAppStateRef.current = nextAppState;
     });
 
     return () => {
       subscription.remove();
     };
-  }, [appState, checkPerms]);
+  }, [checkPerms]);
 
   const handleRequestCamera = async () => {
     await requestCameraPermission();
