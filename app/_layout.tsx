@@ -1,10 +1,12 @@
 import { Stack } from 'expo-router';
-import { StatusBar } from 'react-native';
+import { StatusBar, AppState, NativeModules } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, STORAGE_KEYS } from '@/constants/theme';
+
+const { VirtuCamSettings } = NativeModules;
 
 export default function RootLayout() {
   useEffect(() => {
@@ -19,6 +21,23 @@ export default function RootLayout() {
       }
     };
     void migrate();
+  }, []);
+
+  useEffect(() => {
+    const startOverlay = async () => {
+      try {
+        const hasPermission = await VirtuCamSettings.checkOverlayPermission();
+        if (!hasPermission) return;
+        const alreadyRunning = await VirtuCamSettings.isOverlayRunning();
+        if (!alreadyRunning) await VirtuCamSettings.startFloatingOverlay();
+      } catch (e) {}
+    };
+    void startOverlay();
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void startOverlay();
+    });
+    return () => sub.remove();
   }, []);
 
   const screenOptions = {
