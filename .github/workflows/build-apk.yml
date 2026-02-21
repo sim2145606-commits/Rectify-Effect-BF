@@ -142,7 +142,25 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: cd android && ./gradlew assembleRelease --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          cd android
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee ../gradle-release.log
+
+      - name: Annotate Gradle root error
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f gradle-release.log ]; then
+            reason="$(awk '/\* What went wrong:/{flag=1;next}/\* Try:/{flag=0}flag' gradle-release.log | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-1800)"
+            if [ -z "$reason" ]; then
+              reason="$(tail -n 80 gradle-release.log | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-1800)"
+            fi
+            echo "::error title=Gradle assembleRelease failed::$reason"
+          else
+            echo "::error title=Gradle assembleRelease failed::No gradle-release.log file was generated."
+          fi
 
       # Upload the APK as a downloadable artifact.
       # Named with the run number so you can tell builds apart.
@@ -153,3 +171,11 @@ jobs:
           name: virtucam-release-build-${{ github.run_number }}
           path: android/app/build/outputs/apk/release/*.apk
           retention-days: 30
+
+      - name: Upload Gradle log artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-release-log-${{ github.run_number }}
+          path: gradle-release.log
+          retention-days: 7
