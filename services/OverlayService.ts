@@ -8,7 +8,7 @@ export async function startFloatingOverlay(hookEnabled: boolean): Promise<void> 
     logger.warn('startFloatingOverlay not available on this build', 'OverlayService');
     return;
   }
-  await VirtuCamSettings.startFloatingOverlay();
+  await VirtuCamSettings.startFloatingOverlay({ hookEnabled });
 }
 
 export async function stopFloatingOverlay(): Promise<void> {
