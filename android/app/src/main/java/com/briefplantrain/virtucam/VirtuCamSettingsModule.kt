@@ -109,9 +109,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                         val escapedPrefsDir = escapeShellArg(prefsDir.absolutePath)
                         val escapedPrefsFile = escapeShellArg(prefsFile.absolutePath)
                         
-                        // Chmod directory to 755 and file to 644
-                        val chmodCommand = "chmod 755 $escapedPrefsDir && chmod 644 $escapedPrefsFile"
-                        executeRootCommand(chmodCommand)
+                        executeRootCommand("chmod 755 $escapedPrefsDir")
+                        executeRootCommand("chmod 644 $escapedPrefsFile")
                         
                         android.util.Log.d("VirtuCamSettings", "Root chmod applied successfully")
                     } catch (e: Exception) {
@@ -639,8 +638,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             return false
         }
         
-        val lspdModuleCheck = executeRootCommand("ls /data/adb/lspd/config/ 2>/dev/null | grep -q '$packageName' && echo 'registered'")
-        if (lspdModuleCheck.contains("registered")) return true
+        val lspdConfigCheck = executeRootCommand("ls /data/adb/lspd/config/ 2>/dev/null | grep '$packageName'")
+        if (lspdConfigCheck.contains(packageName)) return true
         
         val findCheck = executeRootCommand("find /data/adb/lspd/ -name '*$packageName*' -type f 2>/dev/null | head -1")
         return findCheck.isNotEmpty()
