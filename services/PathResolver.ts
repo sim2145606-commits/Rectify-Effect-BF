@@ -2,6 +2,9 @@ import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { Platform } from 'react-native';
 
+const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov']);
+const BLOCKED_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+
 export type ResolvedPath = {
   absolutePath: string;
   fileName: string;
@@ -61,7 +64,11 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
     }
 
     return defaultResult;
-  } catch {
+  } catch (err: unknown) {
+    if (__DEV__) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('PathResolver: resolveMediaPath failed:', message);
+    }
     return defaultResult;
   }
 }
@@ -83,7 +90,11 @@ async function resolveContentUri(uri: string): Promise<ResolvedPath> {
       fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
       isAccessible: true,
     };
-  } catch {
+  } catch (err: unknown) {
+    if (__DEV__) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('PathResolver: resolveContentUri failed:', message);
+    }
     return {
       absolutePath: uri,
       fileName: extractFileName(uri),
@@ -120,7 +131,11 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
       fileSize: 0,
       isAccessible: false,
     };
-  } catch {
+  } catch (err: unknown) {
+    if (__DEV__) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('PathResolver: resolvePhotoUri failed:', message);
+    }
     return {
       absolutePath: uri,
       fileName: extractFileName(uri),
@@ -133,8 +148,19 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
 }
 
 async function downloadAndResolve(url: string): Promise<ResolvedPath> {
+  if (!isAllowedRemoteUrl(url)) {
+    return {
+      absolutePath: url,
+      fileName: extractFileName(url),
+      fileExtension: extractExtension(url),
+      mimeType: guessMimeType(url),
+      fileSize: 0,
+      isAccessible: false,
+    };
+  }
+
   try {
-    const ext = extractExtension(url) || 'jpg';
+    const ext = validateExtension(extractExtension(url)) || 'jpg';
     const fileName = `vc_dl_${Date.now()}.${ext}`;
     const destPath = `${FileSystem.cacheDirectory}${fileName}`;
 
@@ -149,7 +175,11 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
       fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
       isAccessible: true,
     };
-  } catch {
+  } catch (err: unknown) {
+    if (__DEV__) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('PathResolver: downloadAndResolve failed:', message);
+    }
     return {
       absolutePath: url,
       fileName: extractFileName(url),
@@ -169,24 +199,36 @@ export async function saveEnhancedMedia(
   filterName: string
 ): Promise<string | null> {
   try {
+    const safeFilterName = filterName.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
     const dir = `${FileSystem.documentDirectory}virtucam/enhanced/`;
     const dirInfo = await FileSystem.getInfoAsync(dir);
     if (!dirInfo.exists) {
       await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
     }
 
-    const ext = extractExtension(sourceUri) || 'jpg';
-    const fileName = `enhanced_${filterName}_${Date.now()}.${ext}`;
+    const ext = validateExtension(extractExtension(sourceUri)) || 'jpg';
+    const fileName = `enhanced_${safeFilterName}_${Date.now()}.${ext}`;
     const destPath = `${dir}${fileName}`;
 
+    if (!destPath.startsWith(dir)) {
+      throw new Error('Path traversal detected while creating enhanced media path');
+    }
+
     if (sourceUri.startsWith('http')) {
+      if (!isAllowedRemoteUrl(sourceUri)) {
+        return null;
+      }
       const result = await FileSystem.downloadAsync(sourceUri, destPath);
       return result.uri;
     }
 
     await FileSystem.copyAsync({ from: sourceUri, to: destPath });
     return destPath;
-  } catch {
+  } catch (err: unknown) {
+    if (__DEV__) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('PathResolver: saveEnhancedMedia failed:', message);
+    }
     return null;
   }
 }
@@ -224,6 +266,36 @@ function extractExtension(uri: string): string {
     return uri.substring(lastDot + 1, end).toLowerCase();
   }
   return '';
+}
+
+function validateExtension(ext: string): string | null {
+  const lower = ext.toLowerCase();
+  return ALLOWED_EXTENSIONS.has(lower) ? lower : null;
+}
+
+function isAllowedRemoteUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (BLOCKED_HOSTS.has(parsed.hostname)) return false;
+
+    const ipv4 = parsed.hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+      const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+      if (
+        a === 10 ||
+        a === 127 ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function guessMimeType(uri: string): string {

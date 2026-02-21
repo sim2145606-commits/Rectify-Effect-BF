@@ -86,12 +86,13 @@ class FloatingOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Auth token check intentionally removed.
-        // The service is declared android:exported="false" in the manifest so
-        // only this app can start it — no runtime auth is needed or meaningful.
-        // The previous check was also broken: the token was generated inside
-        // onCreate() but never included in the starting intent, so validateAuth()
-        // always returned false and the service immediately called stopSelf().
+        // Service is android:exported="false"; only this app should be able to start it.
+        val callerPkg = intent?.`package`
+        if (callerPkg != null && callerPkg != packageName) {
+            android.util.Log.w("FloatingOverlay", "Rejected intent from: $callerPkg")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
@@ -99,49 +100,70 @@ class FloatingOverlayService : Service() {
 
     override fun onDestroy() {
         isRunning = false
-        removeFloatingView()
+        try {
+            removeFloatingView()
+        } catch (e: Exception) {
+            android.util.Log.e("FloatingOverlay", "Operation failed: ${e.javaClass.simpleName}: ${e.message}", e)
+        }
         super.onDestroy()
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "VirtuCam Floating Overlay",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Floating controls for VirtuCam"
-                setShowBadge(false)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "VirtuCam Floating Overlay",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Floating controls for VirtuCam"
+                    setShowBadge(false)
+                }
+
+                val notificationManager = getSystemService(NotificationManager::class.java)
+                notificationManager.createNotificationChannel(channel)
             }
-            
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
+        } catch (e: Exception) {
+            android.util.Log.e("FloatingOverlay", "Operation failed: ${e.javaClass.simpleName}: ${e.message}", e)
         }
     }
 
     private fun createNotification(): Notification {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        // NOTE: NotificationCompat.Builder only reads app-internal resources (no external XML parsing).
+        return try {
+            val intent = packageManager.getLaunchIntentForPackage(packageName)
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("VirtuCam Overlay Active")
-            .setContentText("Tap to return to app")
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("VirtuCam Overlay Active")
+                .setContentText("Tap to return to app")
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+        } catch (e: Exception) {
+            android.util.Log.e("FloatingOverlay", "Operation failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("VirtuCam Overlay")
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .build()
+        }
     }
 
     private fun loadCurrentState() {
-        currentScaleMode = prefs.getString("scaleMode", "fit") ?: "fit"
-        currentMirrored = prefs.getBoolean("mirrored", false)
-        currentFlipV = prefs.getBoolean("flippedVertical", false)
-        currentOffsetX = prefs.getFloat("offsetX", 0f)
-        currentOffsetY = prefs.getFloat("offsetY", 0f)
+        try {
+            currentScaleMode = prefs.getString("scaleMode", "fit") ?: "fit"
+            currentMirrored = prefs.getBoolean("mirrored", false)
+            currentFlipV = prefs.getBoolean("flippedVertical", false)
+            currentOffsetX = prefs.getFloat("offsetX", 0f)
+            currentOffsetY = prefs.getFloat("offsetY", 0f)
+        } catch (e: Exception) {
+            android.util.Log.e("FloatingOverlay", "Operation failed: ${e.javaClass.simpleName}: ${e.message}", e)
+        }
     }
 
     private fun createFloatingBubble() {
