@@ -378,7 +378,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             }
             
             // Strategy B: Fallback to JSON config if XSharedPreferences failed
-            if (!configLoaded || !enabled) {
+            if (!configLoaded) {
                 try {
                     File fallbackFile = new File("/data/local/tmp/virtucam_config.json");
                     if (fallbackFile.exists() && fallbackFile.canRead()) {
