@@ -230,6 +230,8 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
         modulePath = startupParam.modulePath;
         log("Zygote init — module path: " + modulePath);
 
+        createModuleActiveMarker();
+
         // Pre-load configuration at Zygote level for faster hook initialization
         try {
             XSharedPreferences prefs = new XSharedPreferences(PACKAGE_NAME, PREFS_NAME);
@@ -246,9 +248,6 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
         if (lpparam.packageName.equals(PACKAGE_NAME)) {
             return;
         }
-
-        // Create marker file to indicate module is active
-        createModuleActiveMarker();
 
         loadPreferences();
 
@@ -328,9 +327,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             // Strategy A: Try XSharedPreferences (works on some devices with LSPosed patches)
             try {
                 XSharedPreferences prefs = new XSharedPreferences(PACKAGE_NAME, PREFS_NAME);
-                if (Build.VERSION.SDK_INT < 24) {
-                    prefs.makeWorldReadable();
-                }
+                prefs.makeWorldReadable();
                 prefs.reload();
 
                 enabled = prefs.getBoolean("enabled", false);
