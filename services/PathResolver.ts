@@ -210,7 +210,9 @@ export async function saveEnhancedMedia(
     const fileName = `enhanced_${safeFilterName}_${Date.now()}.${ext}`;
     const destPath = `${dir}${fileName}`;
 
-    if (!destPath.startsWith(dir)) {
+    const normalizedDest = destPath.replace(/\\/g, '/').replace(/\/+/g, '/');
+    const normalizedDir = dir.replace(/\\/g, '/').replace(/\/+/g, '/');
+    if (!normalizedDest.startsWith(normalizedDir)) {
       throw new Error('Path traversal detected while creating enhanced media path');
     }
 
