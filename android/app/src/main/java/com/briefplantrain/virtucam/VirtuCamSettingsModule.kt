@@ -700,26 +700,77 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /**
-     * Check if overlay permission (SYSTEM_ALERT_WINDOW) is granted
-     */
     @ReactMethod
     fun checkOverlayPermission(promise: Promise) {
-        if (reactApplicationContext == null) {
-            promise.reject("NOT_INITIALIZED", "Module not ready")
-            return
-        }
         try {
-            val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                Settings.canDrawOverlays(reactApplicationContext)
-            } else {
-                // On older Android versions, this permission is granted by default
-                true
-            }
+            val granted = Settings.canDrawOverlays(reactApplicationContext)
             promise.resolve(granted)
         } catch (e: Exception) {
-            promise.resolve(false)
+            promise.reject("OVERLAY_CHECK_ERROR", e.message, e)
         }
+    }
+
+    @ReactMethod
+    fun requestOverlayPermission(promise: Promise) {
+        try {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:${reactApplicationContext.packageName}")
+            ).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            reactApplicationContext.startActivity(intent)
+            promise.resolve(null)
+        } catch (e: Exception) {
+            promise.reject("OVERLAY_REQUEST_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun startFloatingOverlay(promise: Promise) {
+        try {
+            if (!Settings.canDrawOverlays(reactApplicationContext)) {
+                promise.reject("NO_PERMISSION", "Overlay permission not granted")
+                return
+            }
+            // Persist that overlay was intentionally started
+            reactApplicationContext
+                .getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
+                .edit().putBoolean("overlayEnabled", true).apply()
+
+            val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java).apply {
+                `package` = reactApplicationContext.packageName
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                reactApplicationContext.startForegroundService(intent)
+            } else {
+                reactApplicationContext.startService(intent)
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("START_OVERLAY_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun stopFloatingOverlay(promise: Promise) {
+        try {
+            reactApplicationContext
+                .getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
+                .edit().putBoolean("overlayEnabled", false).apply()
+
+            val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java)
+            reactApplicationContext.stopService(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("STOP_OVERLAY_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun isOverlayRunning(promise: Promise) {
+        promise.resolve(FloatingOverlayService.isServiceRunning())
     }
 
     /**
@@ -1136,62 +1187,3 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
     
 
-    /**
-     * Start the floating overlay service
-     */
-    @ReactMethod
-    fun startFloatingOverlay(promise: Promise) {
-        try {
-            // Check overlay permission first
-            val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                Settings.canDrawOverlays(reactApplicationContext)
-            } else {
-                true
-            }
-            
-            if (!hasPermission) {
-                promise.reject("NO_PERMISSION", "Overlay permission not granted")
-                return
-            }
-            
-            // Start the service
-            val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                reactApplicationContext.startForegroundService(intent)
-            } else {
-                reactApplicationContext.startService(intent)
-            }
-            
-            promise.resolve(true)
-        } catch (e: Exception) {
-            promise.reject("START_ERROR", "Failed to start floating overlay: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * Stop the floating overlay service
-     */
-    @ReactMethod
-    fun stopFloatingOverlay(promise: Promise) {
-        try {
-            val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java)
-            reactApplicationContext.stopService(intent)
-            promise.resolve(true)
-        } catch (e: Exception) {
-            promise.reject("STOP_ERROR", "Failed to stop floating overlay: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * Check if the floating overlay service is currently running
-     */
-    @ReactMethod
-    fun isFloatingOverlayRunning(promise: Promise) {
-        try {
-            val isRunning = FloatingOverlayService.isServiceRunning()
-            promise.resolve(isRunning)
-        } catch (e: Exception) {
-            promise.resolve(false)
-        }
-    }
-}
