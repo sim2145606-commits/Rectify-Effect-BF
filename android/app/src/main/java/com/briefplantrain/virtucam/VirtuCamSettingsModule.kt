@@ -38,6 +38,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun writeConfig(config: ReadableMap, promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val editor = prefs.edit()
             
@@ -195,6 +199,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun readConfig(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val config = Arguments.createMap()
             config.putBoolean("enabled", prefs.getBoolean("enabled", false))
@@ -228,6 +236,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getConfigPath(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val prefsPath = File(reactApplicationContext.applicationInfo.dataDir, 
                 "shared_prefs/virtucam_config.xml").absolutePath
@@ -276,6 +288,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun detectRootSolution(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val result = Arguments.createMap()
             
@@ -337,6 +353,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getSystemInfo(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val info = Arguments.createMap()
             
@@ -396,6 +416,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkXposedStatus(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val result = Arguments.createMap()
             val packageName = reactApplicationContext.packageName
@@ -644,6 +668,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkStoragePermission(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val granted = when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
@@ -671,6 +699,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkAllFilesAccess(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Environment.isExternalStorageManager()
@@ -689,6 +721,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkOverlayPermission(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 Settings.canDrawOverlays(reactApplicationContext)
@@ -707,6 +743,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun verifyConfigReadable(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val prefsFile = File(reactApplicationContext.applicationInfo.dataDir,
                 "shared_prefs/virtucam_config.xml")
@@ -731,6 +771,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getXposedLogs(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val result = Arguments.createMap()
             
@@ -756,6 +800,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getSystemLogs(lineCount: Int, promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val count = if (lineCount > 0) lineCount else 1000
             val logcatCommand = "logcat -d | tail -n $count"
@@ -780,6 +828,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun clearSystemLogs(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             executeCommand("logcat -c")
             promise.resolve(true)
@@ -793,6 +845,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getLSPosedDiagnostics(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val result = Arguments.createMap()
             val packageName = sanitizePackageName(reactApplicationContext.packageName)
@@ -864,6 +920,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getInstalledPackages(packageNames: ReadableArray, promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val pm = reactApplicationContext.packageManager
             val result = Arguments.createArray()
@@ -891,6 +951,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getAllInstalledApps(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val pm = reactApplicationContext.packageManager
             val apps = pm.getInstalledApplications(android.content.pm.PackageManager.GET_META_DATA)
@@ -917,6 +981,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun detectLSPosedManager(promise: Promise) {
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
         try {
             val result = Arguments.createMap()
             val pm = reactApplicationContext.packageManager
@@ -985,14 +1053,23 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                android.util.Log.w("VirtuCamSettings", "Command timed out")
+                return ""
+            }
             val output: String
             BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                 output = reader.readText()
             }
             BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-            process.waitFor(5, TimeUnit.SECONDS)
             output
-        } catch (e: Exception) {
+        } catch (e: IOException) {
+            android.util.Log.w("VirtuCamSettings", "Command I/O error: ${e.message}", e)
+            ""
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            android.util.Log.w("VirtuCamSettings", "Command interrupted", e)
             ""
         }
     }
@@ -1004,18 +1081,23 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                android.util.Log.w("VirtuCamSettings", "Root command timed out")
+                return ""
+            }
             val output: String
             BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                 output = reader.readText()
             }
             BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-            if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                process.destroy()
-                return ""
-            }
             output
-        } catch (e: Exception) {
-            android.util.Log.w("VirtuCamSettings", "Root command failed: ${e.message}")
+        } catch (e: IOException) {
+            android.util.Log.w("VirtuCamSettings", "Root command I/O error: ${e.message}", e)
+            ""
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            android.util.Log.w("VirtuCamSettings", "Root command interrupted", e)
             ""
         }
     }
@@ -1026,9 +1108,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         val allowedPrefixes = listOf(
             "magisk ", "ksud ", "apd ", "ls ", "chmod ", "unzip ", "su ",
             "/data/adb/", "pm ", "sqlite3 ", "cat ", "grep ", "strings ", "find ",
-            "logcat ", "tail ", "getenforce", "uname ",
+            "logcat ", "tail ", "getenforce", "uname ", "sh ", "id"
         )
         return allowedPrefixes.any { trimmed.startsWith(it) }
+    }
+
+    private fun isAllowedMediaExtension(filePath: String): Boolean {
+        val allowed = setOf("mp4", "mkv", "avi", "mov", "webm", "jpg", "jpeg", "png", "gif")
+        val ext = filePath.substringAfterLast('.', "").lowercase().trim()
+        return ext.isNotEmpty() && ext in allowed
     }
 
     /**

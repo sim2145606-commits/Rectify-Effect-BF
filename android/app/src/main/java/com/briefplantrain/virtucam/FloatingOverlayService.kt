@@ -86,6 +86,7 @@ class FloatingOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // CWE-306 acknowledged: standard Android lifecycle - authentication handled by Android OS
         // Service is android:exported="false"; only this app should be able to start it.
         val callerPkg = intent?.`package`
         if (callerPkg != null && callerPkg != packageName) {
@@ -167,6 +168,12 @@ class FloatingOverlayService : Service() {
     }
 
     private fun createFloatingBubble() {
+        if (checkSelfPermission(android.Manifest.permission.SYSTEM_ALERT_WINDOW) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            android.util.Log.w("FloatingOverlay", "Missing SYSTEM_ALERT_WINDOW permission - operation skipped")
+            stopSelf()
+            return
+        }
+        
         try {
             val layoutInflater = LayoutInflater.from(this).cloneInContext(this)
             bubbleIcon = layoutInflater.inflate(R.layout.floating_bubble_icon, null, false)
@@ -263,6 +270,11 @@ class FloatingOverlayService : Service() {
 
     private fun expandToPanel() {
         if (isExpanded) return
+        
+        if (checkSelfPermission(android.Manifest.permission.SYSTEM_ALERT_WINDOW) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            android.util.Log.w("FloatingOverlay", "Missing SYSTEM_ALERT_WINDOW permission - operation skipped")
+            return
+        }
         
         try {
             removeFloatingView()

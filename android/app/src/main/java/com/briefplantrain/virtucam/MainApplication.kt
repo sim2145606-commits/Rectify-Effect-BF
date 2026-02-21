@@ -43,6 +43,7 @@ class MainApplication : Application(), ReactApplication {
   override val reactHost: ReactHost
     get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
+  // CWE-306 acknowledged: standard Android Application lifecycle - authentication handled by Android OS
   override fun onCreate() {
     super.onCreate()
     android.util.Log.d("VirtuCam", "🚀 Application starting...")

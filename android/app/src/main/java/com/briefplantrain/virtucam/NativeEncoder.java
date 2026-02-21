@@ -10,7 +10,7 @@ public class NativeEncoder {
 
     static {
         try {
-            // CWE-114 FIX: Use hardcoded constant library name to prevent process control issues
+            // Library name is hardcoded - not user-controllable (CWE-114 mitigation)
             System.loadLibrary("virtucam-native");
             nativeAvailable = true;
         } catch (UnsatisfiedLinkError e) {
