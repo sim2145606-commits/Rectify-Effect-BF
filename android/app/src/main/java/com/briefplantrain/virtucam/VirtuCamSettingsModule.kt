@@ -256,16 +256,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkRootAccess(promise: Promise) {
-        // Run on background thread to avoid blocking UI
         Thread {
             try {
                 val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
                 val output: String
-                // Consume both streams to prevent blocking (CWE-400)
                 BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                     output = reader.readText()
                 }
-                // Drain error stream to prevent process blocking
                 BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
                 val exitCode = process.waitFor()
                 
@@ -274,12 +271,16 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 result.putString("output", output)
                 result.putInt("exitCode", exitCode)
                 
-                promise.resolve(result)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.resolve(result)
+                }
             } catch (e: Exception) {
-                val result = Arguments.createMap()
-                result.putBoolean("granted", false)
-                putErrorMessage(result, e)
-                promise.resolve(result)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    val result = Arguments.createMap()
+                    result.putBoolean("granted", false)
+                    putErrorMessage(result, e)
+                    promise.resolve(result)
+                }
             }
         }.start()
     }
@@ -362,49 +363,44 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             try {
                 val info = Arguments.createMap()
                 
-                // Device info
                 info.putString("manufacturer", Build.MANUFACTURER)
                 info.putString("model", Build.MODEL)
                 info.putString("brand", Build.BRAND)
                 info.putString("product", Build.PRODUCT)
                 info.putString("device", Build.DEVICE)
-                
-                // Android version
                 info.putString("androidVersion", Build.VERSION.RELEASE)
                 info.putInt("sdkLevel", Build.VERSION.SDK_INT)
                 info.putString("buildNumber", Build.DISPLAY)
                 info.putString("fingerprint", Build.FINGERPRINT)
                 
-                // Security patch
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     info.putString("securityPatch", Build.VERSION.SECURITY_PATCH)
                 }
                 
-                // Kernel version
                 val kernelVersion = executeCommand("uname -r")
                 info.putString("kernelVersion", kernelVersion.trim())
                 
-                // SELinux status
                 val selinuxStatus = executeCommand("getenforce")
                 info.putString("selinuxStatus", selinuxStatus.trim())
                 
-                // ABI list
                 info.putString("abiList", Build.SUPPORTED_ABIS.joinToString(", "))
                 
-                // Storage info
                 val externalStorage = Environment.getExternalStorageDirectory()
-                val totalSpace = externalStorage.totalSpace / (1024 * 1024 * 1024) // GB
-                val freeSpace = externalStorage.freeSpace / (1024 * 1024 * 1024) // GB
+                val totalSpace = externalStorage.totalSpace / (1024 * 1024 * 1024)
+                val freeSpace = externalStorage.freeSpace / (1024 * 1024 * 1024)
                 info.putString("storage", "$freeSpace GB free / $totalSpace GB total")
                 
-                // RAM info
                 val runtime = Runtime.getRuntime()
-                val maxMemory = runtime.maxMemory() / (1024 * 1024) // MB
+                val maxMemory = runtime.maxMemory() / (1024 * 1024)
                 info.putString("maxMemory", "$maxMemory MB")
                 
-                promise.resolve(info)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.resolve(info)
+                }
             } catch (e: Exception) {
-                promise.reject("SYSTEM_INFO_ERROR", "Failed to get system info: ${e.message}", e)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.reject("SYSTEM_INFO_ERROR", "Failed to get system info: ${e.message}", e)
+                }
             }
         }.start()
     }
@@ -599,13 +595,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private fun checkLSPosedScope(packageName: String): Boolean {
         val escapedPkg = escapeShellArg(packageName)
         
-        // Check if module has any scope configured (meaning it's enabled and has target apps)
-        val scopeCheck = executeRootCommand(
-            "ls /data/adb/lspd/config/$packageName 2>/dev/null || " +
-            "ls /data/adb/lspd/config/scope/$packageName 2>/dev/null || " +
-            "cat /data/adb/lspd/config/modules/$packageName/scope.json 2>/dev/null || " +
-            "grep -r $escapedPkg /data/adb/lspd/config/scope/ 2>/dev/null | head -1"
-        )
+        var scopeCheck = executeRootCommand("ls /data/adb/lspd/config/$packageName 2>/dev/null")
+        if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("ls /data/adb/lspd/config/scope/$packageName 2>/dev/null")
+        if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("cat /data/adb/lspd/config/modules/$packageName/scope.json 2>/dev/null")
+        if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("grep -r $escapedPkg /data/adb/lspd/config/scope/ 2>/dev/null | head -1")
         
         return scopeCheck.isNotEmpty() &&
                !scopeCheck.contains("No such file") &&
@@ -618,12 +611,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private fun checkLSPosedPrefs(packageName: String): Boolean {
         val escapedPkg = escapeShellArg(packageName)
         
-        // ReLSPosed and some forks store module state in prefs.db or shared_prefs
-        val prefsCheck = executeRootCommand(
-            "sqlite3 /data/adb/lspd/config/prefs.db \"SELECT value FROM prefs WHERE key LIKE '%$packageName%'\" 2>/dev/null || " +
-            "cat /data/adb/lspd/config/enabled_modules 2>/dev/null | grep $escapedPkg || " +
-            "cat /data/adb/lspd/config/modules.json 2>/dev/null | grep $escapedPkg"
-        )
+        var prefsCheck = executeRootCommand("sqlite3 /data/adb/lspd/config/prefs.db \"SELECT value FROM prefs WHERE key LIKE '%$packageName%'\" 2>/dev/null")
+        if (prefsCheck.isEmpty()) prefsCheck = executeRootCommand("cat /data/adb/lspd/config/enabled_modules 2>/dev/null | grep $escapedPkg")
+        if (prefsCheck.isEmpty()) prefsCheck = executeRootCommand("cat /data/adb/lspd/config/modules.json 2>/dev/null | grep $escapedPkg")
         
         return prefsCheck.isNotEmpty() &&
                !prefsCheck.contains("Error") &&
@@ -634,34 +624,26 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      * Check if module exists in LSPosed's modules directory or is registered
      */
     private fun checkModulesDirectory(packageName: String): Boolean {
-        // Check if our package is registered as a module
-        val moduleCheck = executeRootCommand(
-            "pm path $packageName 2>/dev/null"
-        )
+        val moduleCheck = executeRootCommand("pm path $packageName 2>/dev/null")
         
         if (moduleCheck.isEmpty()) {
             return false
         }
         
-        // Verify the APK contains xposed_init (confirms it's a valid Xposed module)
         val apkPath = moduleCheck.replace("package:", "").trim()
         val escapedApkPath = escapeShellArg(apkPath)
         
-        val xposedInitCheck = executeRootCommand(
-            "unzip -l $escapedApkPath 2>/dev/null | grep -q 'assets/xposed_init' && echo 'found'"
-        )
+        val xposedInitCheck = executeRootCommand("unzip -l $escapedApkPath 2>/dev/null | grep -q 'assets/xposed_init' && echo 'found'")
         
         if (xposedInitCheck.trim() != "found") {
             return false
         }
         
-        // Now check if LSPosed knows about this module
-        val lspdModuleCheck = executeRootCommand(
-            "ls /data/adb/lspd/config/ 2>/dev/null | grep -q '$packageName' && echo 'registered' || " +
-            "find /data/adb/lspd/ -name '*$packageName*' -type f 2>/dev/null | head -1"
-        )
+        val lspdModuleCheck = executeRootCommand("ls /data/adb/lspd/config/ 2>/dev/null | grep -q '$packageName' && echo 'registered'")
+        if (lspdModuleCheck.contains("registered")) return true
         
-        return lspdModuleCheck.contains("registered") || lspdModuleCheck.isNotEmpty()
+        val findCheck = executeRootCommand("find /data/adb/lspd/ -name '*$packageName*' -type f 2>/dev/null | head -1")
+        return findCheck.isNotEmpty()
     }
 
     /**
@@ -760,13 +742,16 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 result.putBoolean("readable", prefsFile.canRead())
                 result.putString("path", prefsFile.absolutePath)
                 
-                // Escape path to prevent shell injection (CWE-78)
                 val permissions = executeCommand("ls -l ${escapeShellArg(prefsFile.absolutePath)}")
                 result.putString("permissions", permissions.trim())
                 
-                promise.resolve(result)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.resolve(result)
+                }
             } catch (e: Exception) {
-                promise.reject("VERIFY_ERROR", "Failed to verify config: ${e.message}", e)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.reject("VERIFY_ERROR", "Failed to verify config: ${e.message}", e)
+                }
             }
         }.start()
     }
@@ -860,32 +845,24 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 val packageName = sanitizePackageName(reactApplicationContext.packageName)
                 val escapedPackageName = escapeShellArg(packageName)
                 
-                // Check which LSPosed variant is installed
-                val variantCheckScript = """
-                    if [ -d /data/adb/lspd ]; then echo "standard"; fi
-                    if [ -d /data/adb/modules/zygisk_lsposed ]; then echo "zygisk"; fi
-                    if [ -d /data/adb/modules/riru_lsposed ]; then echo "riru"; fi
-                    if [ -d /data/adb/modules/lsposed ]; then echo "generic"; fi
-                """.trimIndent()
-                val variants = executeRootCommand(variantCheckScript)
+                val variants = buildString {
+                    if (executeRootCommand("ls -d /data/adb/lspd 2>/dev/null").isNotEmpty()) append("standard\n")
+                    if (executeRootCommand("ls -d /data/adb/modules/zygisk_lsposed 2>/dev/null").isNotEmpty()) append("zygisk\n")
+                    if (executeRootCommand("ls -d /data/adb/modules/riru_lsposed 2>/dev/null").isNotEmpty()) append("riru\n")
+                    if (executeRootCommand("ls -d /data/adb/modules/lsposed 2>/dev/null").isNotEmpty()) append("generic\n")
+                }
                 result.putString("lsposedVariants", variants.trim())
                 
-                // Check if module is in modules list
-                val moduleListCheck = executeRootCommand(
-                    "grep $escapedPackageName /data/adb/lspd/config/modules.list 2>/dev/null || " +
-                    "grep $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null || " +
-                    "grep $escapedPackageName /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null || " +
-                    "echo 'not_in_list'"
-                )
+                var moduleListCheck = executeRootCommand("grep $escapedPackageName /data/adb/lspd/config/modules.list 2>/dev/null")
+                if (moduleListCheck.isEmpty()) moduleListCheck = executeRootCommand("grep $escapedPackageName /data/adb/modules/zygisk_lsposed/config/modules.list 2>/dev/null")
+                if (moduleListCheck.isEmpty()) moduleListCheck = executeRootCommand("grep $escapedPackageName /data/adb/modules/riru_lsposed/config/modules.list 2>/dev/null")
+                if (moduleListCheck.isEmpty()) moduleListCheck = "not_in_list"
                 result.putString("moduleListStatus", moduleListCheck.trim())
                 
-                // Check scope configuration
-                val scopeCheck = executeRootCommand(
-                    "ls -la /data/adb/lspd/config/scope/$escapedPackageName 2>/dev/null || " +
-                    "ls -la /data/adb/modules/zygisk_lsposed/config/scope/$escapedPackageName 2>/dev/null || " +
-                    "ls -la /data/adb/modules/riru_lsposed/config/scope/$escapedPackageName 2>/dev/null || " +
-                    "echo 'no_scope_dir'"
-                )
+                var scopeCheck = executeRootCommand("ls -la /data/adb/lspd/config/scope/$escapedPackageName 2>/dev/null")
+                if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("ls -la /data/adb/modules/zygisk_lsposed/config/scope/$escapedPackageName 2>/dev/null")
+                if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("ls -la /data/adb/modules/riru_lsposed/config/scope/$escapedPackageName 2>/dev/null")
+                if (scopeCheck.isEmpty()) scopeCheck = "no_scope_dir"
                 result.putString("scopeConfiguration", scopeCheck.trim())
                 
                 // Check marker file
@@ -908,15 +885,18 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     result.putBoolean("markerFileExists", false)
                 }
                 
-                // Check xposed_init in APK
                 val xposedInitCheck = executeCommand("unzip -l ${escapeShellArg(reactApplicationContext.applicationInfo.sourceDir)} | grep xposed_init")
                 result.putBoolean("hasXposedInit", xposedInitCheck.contains("xposed_init"))
                 
-                promise.resolve(result)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.resolve(result)
+                }
             } catch (e: Exception) {
-                val result = Arguments.createMap()
-                putErrorMessage(result, e)
-                promise.resolve(result)
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    val result = Arguments.createMap()
+                    putErrorMessage(result, e)
+                    promise.resolve(result)
+                }
             }
         }.start()
     }
@@ -1108,8 +1088,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     private fun isCommandSafe(command: String): Boolean {
-        if (command.contains('\u0000') || command.contains('\n') || command.contains('\r')) return false
-        if (command.contains(';')) return false
+        if (command.contains('\u0000') || command.contains('\n') || command.contains('\r') || 
+            command.contains(';') || command.contains("&&") || command.contains("||")) return false
         val trimmed = command.trimStart()
         val allowedPrefixes = listOf(
             "magisk ", "ksud ", "apd ", "ls ", "chmod ", "unzip ", "su ",
@@ -1157,20 +1137,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
     
 
-    private fun requireInternalCaller(promise: Promise): Boolean {
-        if (reactApplicationContext.packageName != "com.briefplantrain.virtucam") {
-            promise.reject("AUTH_ERROR", "Unauthorized caller")
-            return false
-        }
-        return true
-    }
-
     /**
      * Start the floating overlay service
      */
     @ReactMethod
     fun startFloatingOverlay(promise: Promise) {
-        if (!requireInternalCaller(promise)) return
         try {
             // Check overlay permission first
             val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -1203,7 +1174,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun stopFloatingOverlay(promise: Promise) {
-        if (!requireInternalCaller(promise)) return
         try {
             val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java)
             reactApplicationContext.stopService(intent)
