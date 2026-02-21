@@ -1109,7 +1109,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     private fun isCommandSafe(command: String): Boolean {
         if (command.contains('\u0000') || command.contains('\n') || command.contains('\r')) return false
-        if (command.contains(';') || command.contains('&&') || command.contains('||')) return false
+        if (command.contains(';')) return false
         val trimmed = command.trimStart()
         val allowedPrefixes = listOf(
             "magisk ", "ksud ", "apd ", "ls ", "chmod ", "unzip ", "su ",
