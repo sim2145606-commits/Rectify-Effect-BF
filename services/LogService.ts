@@ -21,7 +21,9 @@ class LogService {
 
   subscribe(listener: LogListener): () => void {
     this.listeners.add(listener);
-    this.logs.forEach(log => listener(log));
+    if (this.logs.length > 0) {
+      listener(this.logs[this.logs.length - 1]);
+    }
     return () => this.listeners.delete(listener);
   }
 
@@ -93,6 +95,7 @@ class LogService {
 
   clear() {
     this.logs = [];
+    this.listeners.forEach(listener => listener({ timestamp: Date.now(), message: '', level: 'info' }));
   }
 
   getLogs(): LogEntry[] {

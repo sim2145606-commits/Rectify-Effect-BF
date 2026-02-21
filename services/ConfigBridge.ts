@@ -178,7 +178,7 @@ export async function syncAllSettings(): Promise<void> {
       scaleY: scaleY ? parseFloat(scaleY) : 1.0,
       offsetX: offsetX ? parseFloat(offsetX) : 0.0,
       offsetY: offsetY ? parseFloat(offsetY) : 0.0,
-      targetMode: (targetModeRaw as 'whitelist' | 'blacklist') ?? 'whitelist',
+      targetMode: (targetModeRaw === 'whitelist' || targetModeRaw === 'blacklist') ? targetModeRaw : 'whitelist',
       targetPackages: enabledPackages,
     };
 
@@ -213,8 +213,7 @@ export async function getBridgeStatus(): Promise<{
 
     const versionKey = 'virtucam_config_version';
     const stored = await AsyncStorage.getItem(versionKey);
-    const version = stored ? parseInt(stored, 10) + 1 : 1;
-    await AsyncStorage.setItem(versionKey, version.toString());
+    const version = stored ? parseInt(stored, 10) : 0;
 
     return {
       available: !!VirtuCamSettings,
@@ -255,25 +254,26 @@ export async function verifyBridge(): Promise<{
       cameraTarget: 'front',
     };
 
-    await writeBridgeConfig(testConfig);
-    const readBack = await readBridgeConfig();
+    try {
+      await writeBridgeConfig(testConfig);
+      const readBack = await readBridgeConfig();
 
-    if (readBack.cameraTarget !== 'front') {
-      await writeBridgeConfig(originalConfig);
+      if (readBack.cameraTarget !== 'front') {
+        return {
+          success: false,
+          error: 'Config read/write mismatch',
+        };
+      }
+
+      const readableStatus = await VirtuCamSettings.verifyConfigReadable();
+
       return {
-        success: false,
-        error: 'Config read/write mismatch',
+        success: readableStatus.exists && readableStatus.readable,
+        details: readableStatus as Record<string, unknown>,
       };
+    } finally {
+      await writeBridgeConfig(originalConfig);
     }
-
-    const readableStatus = await VirtuCamSettings.verifyConfigReadable();
-
-    await writeBridgeConfig(originalConfig);
-
-    return {
-      success: readableStatus.exists && readableStatus.readable,
-      details: readableStatus as Record<string, unknown>,
-    };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return {

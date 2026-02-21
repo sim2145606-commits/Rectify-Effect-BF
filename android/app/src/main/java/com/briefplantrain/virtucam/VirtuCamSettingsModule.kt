@@ -1185,5 +1185,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putString("error", "Unknown error")
         }
     }
-    
+
+} // end of class VirtuCamSettingsModule
 

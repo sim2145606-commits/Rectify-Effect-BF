@@ -25,12 +25,15 @@ export default function RootLayout() {
 
   useEffect(() => {
     const startOverlay = async () => {
+      if (!VirtuCamSettings) return;
       try {
         const hasPermission = await VirtuCamSettings.checkOverlayPermission();
         if (!hasPermission) return;
         const alreadyRunning = await VirtuCamSettings.isOverlayRunning();
         if (!alreadyRunning) await VirtuCamSettings.startFloatingOverlay();
-      } catch (e) {}
+      } catch (e) {
+        console.error('Overlay startup failed:', e);
+      }
     };
     void startOverlay();
 

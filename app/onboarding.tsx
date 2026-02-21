@@ -86,7 +86,7 @@ export default function OnboardingScreen() {
 
   const handleProceed = async () => {
     if (permissions && areAllPermissionsGranted(permissions)) {
-      AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true').catch(() => {});
+      await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
       router.replace('/(tabs)');
     }
   };
