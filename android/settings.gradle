@@ -19,12 +19,10 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   ex.autolinkLibrariesFromCommand()
 }
 
-// expo-modules-core must be explicitly included as a Gradle subproject.
-// The autolinking.gradle script does not register it automatically in this
-// project setup, but MainActivity.kt and MainApplication.kt depend on its
-// classes (ReactActivityDelegateWrapper, ReactNativeHostWrapper,
-// ApplicationLifecycleDispatcher, SplashScreenManager).
 include ':expo-modules-core'
 project(':expo-modules-core').projectDir = new File(rootProject.projectDir, '../node_modules/expo-modules-core/android')
+
+include ':expo'
+project(':expo').projectDir = new File(rootProject.projectDir, '../node_modules/expo/android')
 
 include ':app'

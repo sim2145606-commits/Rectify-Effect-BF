@@ -208,12 +208,11 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
-    // expo-modules-core is required for Expo host infrastructure classes used in
-    // MainActivity.kt and MainApplication.kt:
-    //   - expo.modules.ReactActivityDelegateWrapper
-    //   - expo.modules.ReactNativeHostWrapper
-    //   - expo.modules.ApplicationLifecycleDispatcher
-    //   - expo.modules.splashscreen.SplashScreenManager
+    // Expo Android module provides ReactNativeHostWrapper and
+    // ApplicationLifecycleDispatcher used in MainApplication.kt.
+    implementation(project(':expo'))
+
+    // expo-modules-core remains a direct dependency used by Expo modules.
     implementation(project(':expo-modules-core'))
 
     // Kotlin standard library
