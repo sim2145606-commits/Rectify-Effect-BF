@@ -32,6 +32,8 @@ import {
   requestAllFilesAccess,
   requestOverlayPermission,
 } from '@/services/PermissionManager';
+import { NativeModules } from 'react-native';
+const { VirtuCamSettings } = NativeModules;
 import { getStatusColor } from '@/services/SystemVerification';
 import { resetToDefaults } from '@/services/ResetService';
 import Card from '@/components/Card';
@@ -85,15 +87,33 @@ export default function SettingsScreen() {
     [lightImpact, success, warning, refreshSystemStatus]
   );
 
+  const ensureOverlayStarted = useCallback(async () => {
+    try {
+      const hasPermission = await VirtuCamSettings.checkOverlayPermission();
+      if (!hasPermission) return;
+      const alreadyRunning = await VirtuCamSettings.isOverlayRunning();
+      if (!alreadyRunning) {
+        await VirtuCamSettings.startFloatingOverlay();
+      }
+    } catch (e) {
+      console.warn('Overlay start failed:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    void ensureOverlayStarted();
+  }, [ensureOverlayStarted]);
+
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         void refreshSystemStatus();
+        void ensureOverlayStarted();
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
-  }, [refreshSystemStatus]);
+  }, [refreshSystemStatus, ensureOverlayStarted]);
 
   const handleRunDiagnostics = useCallback(async () => {
     setIsRunningDiagnostics(true);
