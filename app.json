@@ -16,7 +16,6 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#1E1E1E"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.briefplantrain.virtucam"
     },
     "web": {
