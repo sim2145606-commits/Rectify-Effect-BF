@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Dimensions,
   Switch,
-  AppState,
   NativeModules,
 } from 'react-native';
 import Animated, {
@@ -325,34 +324,6 @@ export default function StudioScreen() {
     [setFloatingBubbleEnabled, lightImpact, requestOverlayPermission]
   );
 
-  // AppState listener to auto-start/stop the overlay service
-  useEffect(() => {
-    if (!VirtuCamSettings) {
-      return;
-    }
-
-    const handleAppState = async (nextState: string) => {
-      if (!floatingBubbleEnabled) return;
-
-      try {
-        if (nextState === 'background' || nextState === 'inactive') {
-          // App going to background → start floating overlay
-          await VirtuCamSettings.startFloatingOverlay();
-        } else if (nextState === 'active') {
-          // App coming to foreground → stop floating overlay
-          await VirtuCamSettings.stopFloatingOverlay();
-        }
-      } catch (err: unknown) {
-        if (__DEV__) {
-          const message = err instanceof Error ? err.message : String(err);
-          console.warn('AppState overlay control error:', message);
-        }
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppState);
-    return () => subscription.remove();
-  }, [floatingBubbleEnabled]);
 
   const renderRecentItem = ({ item }: { item: MediaItem }) => (
     <RecentFileCard

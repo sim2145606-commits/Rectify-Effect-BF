@@ -43,6 +43,8 @@ export type SystemVerificationState = {
   rootAccess: SystemCheck;
   xposedFramework: SystemCheck;
   moduleActive: SystemCheck;
+  moduleScoped: SystemCheck;
+  hookConfigured: SystemCheck;
   storagePermission: SystemCheck;
   allFilesAccess: SystemCheck;
   cameraPermission: SystemCheck;
@@ -57,6 +59,8 @@ export const INITIAL_SYSTEM_STATE: SystemVerificationState = {
   rootAccess: { label: 'Root Access', detail: 'Checking...', status: 'loading' },
   xposedFramework: { label: 'LSPosed / Xposed', detail: 'Checking...', status: 'loading' },
   moduleActive: { label: 'VirtuCam Module', detail: 'Checking...', status: 'loading' },
+  moduleScoped: { label: 'Module Scope', detail: 'Checking...', status: 'loading' },
+  hookConfigured: { label: 'Hook Configuration', detail: 'Checking...', status: 'loading' },
   storagePermission: { label: 'Storage Permission', detail: 'Checking...', status: 'loading' },
   allFilesAccess: { label: 'All Files Access', detail: 'Checking...', status: 'loading' },
   cameraPermission: { label: 'Camera Permission', detail: 'Checking...', status: 'loading' },
@@ -115,6 +119,16 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     moduleActive: {
       label: 'VirtuCam Module',
       detail: 'Checking module status...',
+      status: 'loading',
+    },
+    moduleScoped: {
+      label: 'Module Scope',
+      detail: 'Checking scope status...',
+      status: 'loading',
+    },
+    hookConfigured: {
+      label: 'Hook Configuration',
+      detail: 'Checking hook configuration...',
       status: 'loading',
     },
     storagePermission: {
@@ -179,7 +193,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       try {
         const xposedResult = await VirtuCamSettings.checkXposedStatus();
 
-        if (xposedResult.moduleActive) {
+        if (xposedResult.hookReady) {
           result.xposedFramework = {
             label: 'LSPosed / Xposed',
             detail: 'Framework active',
@@ -187,7 +201,17 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           };
           result.moduleActive = {
             label: 'VirtuCam Module',
-            detail: `Module active (${xposedResult.detectionMethod || 'detected'})`,
+            detail: `Hook ready (${xposedResult.detectionMethod || 'detected'})`,
+            status: 'ok',
+          };
+          result.moduleScoped = {
+            label: 'Module Scope',
+            detail: 'Module is scoped to app targets',
+            status: 'ok',
+          };
+          result.hookConfigured = {
+            label: 'Hook Configuration',
+            detail: 'Enabled with valid media + targets',
             status: 'ok',
           };
         } else if (xposedResult.lsposedInstalled) {
@@ -198,8 +222,24 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           };
           result.moduleActive = {
             label: 'VirtuCam Module',
-            detail: 'Activate in LSPosed Manager & reboot',
+            detail: xposedResult.moduleLoaded
+              ? 'Module loaded but not fully ready'
+              : 'Module not loaded in hooked process yet',
             status: 'warning',
+          };
+          result.moduleScoped = {
+            label: 'Module Scope',
+            detail: xposedResult.moduleScoped
+              ? 'Scope configured'
+              : 'Scope missing for target app(s)',
+            status: xposedResult.moduleScoped ? 'ok' : 'warning',
+          };
+          result.hookConfigured = {
+            label: 'Hook Configuration',
+            detail: xposedResult.hookConfigured
+              ? 'Hook config valid'
+              : 'Enable hook, select media, and configure target apps',
+            status: xposedResult.hookConfigured ? 'ok' : 'warning',
           };
         } else {
           result.xposedFramework = {
@@ -210,6 +250,16 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           result.moduleActive = {
             label: 'VirtuCam Module',
             detail: 'Install LSPosed first',
+            status: 'error',
+          };
+          result.moduleScoped = {
+            label: 'Module Scope',
+            detail: 'Unavailable until LSPosed is installed',
+            status: 'error',
+          };
+          result.hookConfigured = {
+            label: 'Hook Configuration',
+            detail: 'Unavailable until LSPosed is installed',
             status: 'error',
           };
         }
@@ -224,6 +274,16 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           detail: 'Check failed',
           status: 'error',
         };
+        result.moduleScoped = {
+          label: 'Module Scope',
+          detail: 'Check failed',
+          status: 'error',
+        };
+        result.hookConfigured = {
+          label: 'Hook Configuration',
+          detail: 'Check failed',
+          status: 'error',
+        };
       }
     } else {
       result.xposedFramework = {
@@ -233,6 +293,16 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       };
       result.moduleActive = {
         label: 'VirtuCam Module',
+        detail: 'Native module unavailable',
+        status: 'error',
+      };
+      result.moduleScoped = {
+        label: 'Module Scope',
+        detail: 'Native module unavailable',
+        status: 'error',
+      };
+      result.hookConfigured = {
+        label: 'Hook Configuration',
         detail: 'Native module unavailable',
         status: 'error',
       };
@@ -386,6 +456,8 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     result.rootAccess,
     result.xposedFramework,
     result.moduleActive,
+    result.moduleScoped,
+    result.hookConfigured,
     result.storagePermission,
     result.cameraPermission,
   ].every(check => check.status === 'ok');

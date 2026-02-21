@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import { StatusBar, AppState, NativeModules } from 'react-native';
+import { StatusBar, AppState, NativeModules, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
@@ -24,22 +24,47 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    const startOverlay = async () => {
+    const syncOverlayWithAppState = async (nextState: AppStateStatus) => {
       if (!VirtuCamSettings) return;
+
       try {
         const hasPermission = await VirtuCamSettings.checkOverlayPermission();
-        if (!hasPermission) return;
+        if (!hasPermission) {
+          await VirtuCamSettings.stopFloatingOverlay();
+          return;
+        }
+
+        const overlayEnabled = await VirtuCamSettings.isOverlayEnabled();
         const alreadyRunning = await VirtuCamSettings.isOverlayRunning();
-        if (!alreadyRunning) await VirtuCamSettings.startFloatingOverlay();
+
+        if (nextState === 'active') {
+          if (alreadyRunning) {
+            await VirtuCamSettings.stopFloatingOverlay();
+          }
+          return;
+        }
+
+        if (!overlayEnabled) {
+          if (alreadyRunning) {
+            await VirtuCamSettings.stopFloatingOverlay();
+          }
+          return;
+        }
+
+        if (!alreadyRunning) {
+          await VirtuCamSettings.startFloatingOverlay();
+        }
       } catch (e) {
-        console.error('Overlay startup failed:', e);
+        console.error('Overlay lifecycle sync failed:', e);
       }
     };
-    void startOverlay();
 
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void startOverlay();
+    void syncOverlayWithAppState(AppState.currentState);
+
+    const sub = AppState.addEventListener('change', state => {
+      void syncOverlayWithAppState(state);
     });
+
     return () => sub.remove();
   }, []);
 

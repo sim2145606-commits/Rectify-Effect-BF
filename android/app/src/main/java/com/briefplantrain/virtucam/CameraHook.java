@@ -251,11 +251,8 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
         loadPreferences();
 
-        if (!isTargetedApp(lpparam.packageName)) {
-            return;
-        }
-
-        log("Hooking package: " + lpparam.packageName + " (enabled=" + enabled + ")");
+        log("Installing hooks for package: " + lpparam.packageName +
+                " (enabled=" + enabled + ", targeted=" + isTargetedApp(lpparam.packageName) + ")");
 
         // Check for per-app specialized hook strategy
         HookStrategyRegistry registry = HookStrategyRegistry.getInstance();
@@ -465,6 +462,10 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
         return enabled && mediaSourcePath != null;
     }
 
+    private boolean isActiveForPackage(String packageName) {
+        return isActive() && isTargetedApp(packageName);
+    }
+
     private synchronized Handler getFrameProcessHandler() {
         if (frameProcessThread == null || !frameProcessThread.isAlive()) {
             frameProcessThread = new HandlerThread("VirtuCamFrameProcess");
@@ -497,7 +498,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             reloadPreferencesIfNeeded();
-                            if (!isActive()) return;
+                            if (!isActiveForPackage(lpparam.packageName)) return;
 
                             final String cameraId = (String) param.args[0];
                             final Object cameraManager = param.thisObject;
@@ -525,7 +526,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                                 @Override
                                 protected void beforeHookedMethod(MethodHookParam param) {
                                     reloadPreferencesIfNeeded();
-                                    if (!isActive()) return;
+                                    if (!isActiveForPackage(lpparam.packageName)) return;
 
                                     final String cameraId = (String) param.args[0];
                                     final Object cameraManager = param.thisObject;
@@ -551,7 +552,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            if (!isActive()) return;
+                            if (!isActiveForPackage(lpparam.packageName)) return;
 
                             Object originalListener = param.args[0];
                             if (originalListener == null) return;
@@ -570,7 +571,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             XC_MethodHook imageAcquireHook = new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    if (!isActive()) return;
+                    if (!isActiveForPackage(lpparam.packageName)) return;
                     if (!hookedImageReaders.contains(param.thisObject)) return;
                     replaceImageData((Image) param.getResult(), (ImageReader) param.thisObject);
                 }
@@ -965,7 +966,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) {
-                                if (!isActive()) return;
+                                if (!isActiveForPackage(lpparam.packageName)) return;
                                 Object originalCallback = param.args[0];
                                 if (originalCallback == null) return;
 
@@ -1002,7 +1003,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            if (!isActive()) return;
+                            if (!isActiveForPackage(lpparam.packageName)) return;
                             
                             // Wrap the JPEG callback (3rd parameter, index 2)
                             Object jpegCallback = param.args[2];
@@ -1027,7 +1028,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            if (!isActive()) return;
+                            if (!isActiveForPackage(lpparam.packageName)) return;
                             
                             // Wrap the JPEG callback (4th parameter, index 3)
                             Object jpegCallback = param.args[3];
@@ -1816,7 +1817,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (!isActive()) return;
+                        if (!isActiveForPackage(lpparam.packageName)) return;
 
                         Object cameraDevice = param.thisObject;
                         Boolean shouldHook = cameraDeviceHookStatus.get(identityKey(cameraDevice));
@@ -1853,7 +1854,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (!isActive()) return;
+                        if (!isActiveForPackage(lpparam.packageName)) return;
 
                         Object cameraDevice = param.thisObject;
                         Boolean shouldHook = cameraDeviceHookStatus.get(identityKey(cameraDevice));
@@ -1915,7 +1916,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (!isActive()) return;
+                        if (!isActiveForPackage(lpparam.packageName)) return;
 
                         Object cameraDevice = param.thisObject;
                         Boolean shouldHook = cameraDeviceHookStatus.get(identityKey(cameraDevice));
@@ -2402,7 +2403,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            if (!isActive()) return;
+                            if (!isActiveForPackage(lpparam.packageName)) return;
 
                             Surface targetSurface = (Surface) param.args[0];
                             for (SurfaceMapping mapping : surfaceMappings.values()) {
@@ -2422,7 +2423,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            if (!isActive()) return;
+                            if (!isActiveForPackage(lpparam.packageName)) return;
 
                             Surface targetSurface = (Surface) param.args[0];
                             for (SurfaceMapping mapping : surfaceMappings.values()) {
