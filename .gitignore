@@ -40,3 +40,8 @@ local.properties
 .roo/
 .roomodes
 project-problems.json
+
+# Static analysis
+qodana.sarif.json
+*.sarif.json
+test-gradle-issue.js

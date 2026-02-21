@@ -248,6 +248,8 @@ export async function verifyBridge(): Promise<{
   }
 
   try {
+    const originalConfig = await readBridgeConfig();
+
     const testConfig: Partial<BridgeConfig> = {
       enabled: false,
       cameraTarget: 'front',
@@ -257,6 +259,7 @@ export async function verifyBridge(): Promise<{
     const readBack = await readBridgeConfig();
 
     if (readBack.cameraTarget !== 'front') {
+      await writeBridgeConfig(originalConfig);
       return {
         success: false,
         error: 'Config read/write mismatch',
@@ -264,6 +267,8 @@ export async function verifyBridge(): Promise<{
     }
 
     const readableStatus = await VirtuCamSettings.verifyConfigReadable();
+
+    await writeBridgeConfig(originalConfig);
 
     return {
       success: readableStatus.exists && readableStatus.readable,

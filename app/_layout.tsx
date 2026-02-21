@@ -2,9 +2,25 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Colors } from '@/constants/theme';
+import { useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Colors, STORAGE_KEYS } from '@/constants/theme';
 
 export default function RootLayout() {
+  useEffect(() => {
+    const migrate = async () => {
+      const migrated = await AsyncStorage.getItem('migration_v2_done');
+      if (!migrated) {
+        await AsyncStorage.multiRemove([
+          STORAGE_KEYS.TARGET_APPS,
+          STORAGE_KEYS.TARGET_MODE,
+        ]);
+        await AsyncStorage.setItem('migration_v2_done', 'true');
+      }
+    };
+    void migrate();
+  }, []);
+
   const screenOptions = {
     headerShown: false,
     contentStyle: { backgroundColor: Colors.background },

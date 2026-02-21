@@ -241,7 +241,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     // Check storage permission with fallback
     if (VirtuCamSettings && VirtuCamSettings.checkStoragePermission) {
       try {
-        let storageGranted = VirtuCamSettings.checkStoragePermission();
+        let storageGranted = await VirtuCamSettings.checkStoragePermission();
 
         if (!storageGranted && Platform.OS === 'android') {
           try {
@@ -387,6 +387,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     result.xposedFramework,
     result.moduleActive,
     result.storagePermission,
+    result.cameraPermission,
   ].every(check => check.status === 'ok');
 
   try {
