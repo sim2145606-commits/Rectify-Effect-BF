@@ -11,7 +11,7 @@ import android.view.*
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import androidx.security.crypto.MasterKey
 import kotlin.math.roundToInt
 
 class FloatingOverlayService : Service() {
@@ -64,12 +64,15 @@ class FloatingOverlayService : Service() {
         isRunning = true
         
         prefs = try {
-            androidx.security.crypto.EncryptedSharedPreferences.create(
-                "virtucam_config",
-                androidx.security.crypto.MasterKeys.getOrCreate(androidx.security.crypto.MasterKeys.AES256_GCM_SPEC),
+            val masterKey = MasterKey.Builder(this)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
                 this,
-                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                "virtucam_config",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
             android.util.Log.w("FloatingOverlay", "Failed to create encrypted prefs: ${e.message}", e)

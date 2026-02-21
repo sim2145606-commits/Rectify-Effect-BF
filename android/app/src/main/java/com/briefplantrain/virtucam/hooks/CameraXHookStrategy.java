@@ -144,7 +144,7 @@ public class CameraXHookStrategy {
                         }
                     }
                 });
-        } catch (ClassNotFoundException | IllegalArgumentException e) {
+        } catch (Throwable e) {
             XposedBridge.log(TAG + ": Failed to create wrapped provider: " + e.getMessage());
             return null;
         }

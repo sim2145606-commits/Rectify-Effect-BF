@@ -84,7 +84,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 val packageList = mutableListOf<String>()
                 if (packages != null) {
                     for (i in 0 until packages.size()) {
-                        packages.getString(i)?.let { packageList.add(it) }
+                        packageList.add(packages.getString(i))
                     }
                 }
                 editor.putString("targetPackages", packageList.joinToString(","))
@@ -163,7 +163,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     val packageList = mutableListOf<String>()
                     if (packages != null) {
                         for (i in 0 until packages.size()) {
-                            packages.getString(i)?.let { packageList.add(it) }
+                            packageList.add(packages.getString(i))
                         }
                     }
                     fallbackConfig.put("targetPackages", packageList.joinToString(","))
@@ -937,13 +937,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             for (i in 0 until packageNames.size()) {
                 val pkgName = packageNames.getString(i)
-                if (pkgName != null) {
-                    try {
-                        pm.getPackageInfo(pkgName, 0)
-                        result.pushString(pkgName)  // Package is installed
-                    } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
-                        // Not installed, skip
-                    }
+                try {
+                    pm.getPackageInfo(pkgName, 0)
+                    result.pushString(pkgName)
+                } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
+                    // Not installed, skip
                 }
             }
             promise.resolve(result)
