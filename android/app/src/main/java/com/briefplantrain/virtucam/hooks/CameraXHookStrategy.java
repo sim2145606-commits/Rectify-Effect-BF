@@ -144,8 +144,8 @@ public class CameraXHookStrategy {
                         }
                     }
                 });
-        } catch (Exception e) {
-            XposedBridge.log(TAG + ": Failed to create wrapped provider: " + e);
+        } catch (ClassNotFoundException | IllegalArgumentException e) {
+            XposedBridge.log(TAG + ": Failed to create wrapped provider: " + e.getMessage());
             return null;
         }
     }
@@ -169,7 +169,7 @@ public class CameraXHookStrategy {
                 "surface replacement will happen in generic Camera2 hooks");
             
         } catch (Exception e) {
-            XposedBridge.log(TAG + ": Error handling surface request: " + e);
+            XposedBridge.log(TAG + ": Error handling surface request: " + e.getClass().getSimpleName());
         }
     }
 

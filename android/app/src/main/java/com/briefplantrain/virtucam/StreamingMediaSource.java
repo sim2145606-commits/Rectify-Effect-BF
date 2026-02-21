@@ -8,8 +8,8 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.view.Surface;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.io.IOException;
+import java.util.Locale;
 
 import de.robv.android.xposed.XposedBridge;
 
@@ -58,7 +58,7 @@ public class StreamingMediaSource {
 
     public static boolean isStreamingUrl(String path) {
         if (path == null) return false;
-        String lower = path.toLowerCase().trim();
+        String lower = path.toLowerCase(Locale.ROOT).trim();
         return lower.startsWith("rtmp://") ||
                lower.startsWith("rtsp://") ||
                lower.startsWith("http://") ||
@@ -67,7 +67,7 @@ public class StreamingMediaSource {
 
     public static StreamProtocol detectProtocol(String url) {
         if (url == null) return StreamProtocol.UNKNOWN;
-        String lower = url.toLowerCase().trim();
+        String lower = url.toLowerCase(Locale.ROOT).trim();
         if (lower.startsWith("rtmp://")) return StreamProtocol.RTMP;
         if (lower.startsWith("rtsp://")) return StreamProtocol.RTSP;
         if (lower.contains(".m3u8")) return StreamProtocol.HLS;
@@ -118,7 +118,7 @@ public class StreamingMediaSource {
                 initializePlayer(context);
 
             } catch (Exception e) {
-                XposedBridge.log(TAG + ": Stream start failed: " + e);
+                XposedBridge.log(TAG + ": Stream start failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 isPlaying = false;
                 if (frameCallback != null) {
                     frameCallback.onError("Stream start failed: " + e.getMessage());
@@ -162,6 +162,11 @@ public class StreamingMediaSource {
 
             mediaPlayer.prepareAsync();
 
+        } catch (IOException e) {
+            XposedBridge.log(TAG + ": initializePlayer I/O error: " + e.getMessage());
+            if (frameCallback != null) {
+                frameCallback.onError("Player I/O error: " + e.getMessage());
+            }
         } catch (Exception e) {
             XposedBridge.log(TAG + ": initializePlayer failed: " + e);
             if (frameCallback != null) {
@@ -173,8 +178,12 @@ public class StreamingMediaSource {
     public void stop() {
         isPlaying = false;
         if (mediaPlayer != null) {
-            try { mediaPlayer.stop(); } catch (Exception ignored) {}
-            try { mediaPlayer.release(); } catch (Exception ignored) {}
+            try { mediaPlayer.stop(); } catch (IllegalStateException e) {
+                XposedBridge.log(TAG + ": MediaPlayer stop in invalid state: " + e.getMessage());
+            }
+            try { mediaPlayer.release(); } catch (Exception e) {
+                XposedBridge.log(TAG + ": MediaPlayer release failed: " + e.getMessage());
+            }
             mediaPlayer = null;
         }
         if (decodeSurface != null) {

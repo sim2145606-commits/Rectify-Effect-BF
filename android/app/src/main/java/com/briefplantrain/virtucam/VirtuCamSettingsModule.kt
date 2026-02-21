@@ -27,7 +27,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     override fun getName(): String {
-        android.util.Log.d("VirtuCamSettings", "✅ Native module registered successfully!")
+        if (BuildConfig.DEBUG) {
+            android.util.Log.d("VirtuCamSettings", "Native module registered")
+        }
         return "VirtuCamSettings"
     }
 
@@ -167,6 +169,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 if (!fallbackFile.canonicalPath.startsWith("/data/local/tmp/") || 
                     fallbackFile.canonicalPath != "/data/local/tmp/virtucam_config.json") {
                     throw SecurityException("Invalid file path")
+                }
+                val allowedExtensions = setOf("json", "xml")
+                if (fallbackFile.extension.lowercase() !in allowedExtensions) {
+                    throw SecurityException("Invalid file extension")
                 }
                 FileWriter(fallbackFile).use { writer ->
                     writer.write(fallbackConfig.toString())
@@ -973,10 +979,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      * Uses sh -c to correctly handle commands with spaces, pipes, and redirects.
      */
     private fun executeCommand(command: String): String {
+        if (!isCommandSafe(command)) {
+            android.util.Log.w("VirtuCamSettings", "Blocked unsafe command")
+            return ""
+        }
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
             val output: String
-            // Consume both streams to prevent blocking (CWE-400)
             BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                 output = reader.readText()
             }
@@ -988,33 +997,20 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /**
-     * Execute a root command and return output.
-     * Passes the full shell command string to su -c via sh -c so that
-     * shell operators (|, &&, ||, ;) work correctly in compound commands.
-     * SECURITY: All dynamic values embedded in commands must be escaped
-     * with escapeShellArg() before being passed here.
-     */
     private fun executeRootCommand(command: String): String {
+        if (!isCommandSafe(command)) {
+            android.util.Log.w("VirtuCamSettings", "Blocked unsafe root command")
+            return ""
+        }
         return try {
-            // Block null bytes and newlines which could break the exec array boundary
-            if (command.contains('\u0000') || command.contains('\n') || command.contains('\r')) {
-                android.util.Log.w("VirtuCamSettings", "Blocked command with illegal characters")
-                return ""
-            }
-
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             val output: String
-            // Consume both streams to prevent blocking (CWE-400)
             BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                 output = reader.readText()
             }
             BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-            // Add timeout to prevent indefinite blocking
-            val completed = process.waitFor(5, TimeUnit.SECONDS)
-            if (!completed) {
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
                 process.destroy()
-                android.util.Log.w("VirtuCamSettings", "Root command timed out")
                 return ""
             }
             output
@@ -1023,7 +1019,18 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             ""
         }
     }
-    
+
+    private fun isCommandSafe(command: String): Boolean {
+        if (command.contains('\u0000') || command.contains('\n') || command.contains('\r')) return false
+        val trimmed = command.trimStart()
+        val allowedPrefixes = listOf(
+            "magisk ", "ksud ", "apd ", "ls ", "chmod ", "unzip ", "su ",
+            "/data/adb/", "pm ", "sqlite3 ", "cat ", "grep ", "strings ", "find ",
+            "logcat ", "tail ", "getenforce", "uname ",
+        )
+        return allowedPrefixes.any { trimmed.startsWith(it) }
+    }
+
     /**
      * Sanitize package name for use in shell commands
      * Package names should only contain alphanumeric characters, dots, and underscores
@@ -1055,11 +1062,21 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
     }
     
+
+    private fun requireInternalCaller(promise: Promise): Boolean {
+        if (reactApplicationContext.packageName != "com.briefplantrain.virtucam") {
+            promise.reject("AUTH_ERROR", "Unauthorized caller")
+            return false
+        }
+        return true
+    }
+
     /**
      * Start the floating overlay service
      */
     @ReactMethod
     fun startFloatingOverlay(promise: Promise) {
+        if (!requireInternalCaller(promise)) return
         try {
             // Check overlay permission first
             val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -1092,6 +1109,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun stopFloatingOverlay(promise: Promise) {
+        if (!requireInternalCaller(promise)) return
         try {
             val intent = Intent(reactApplicationContext, FloatingOverlayService::class.java)
             reactApplicationContext.stopService(intent)

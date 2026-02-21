@@ -13,6 +13,14 @@
 
 extern "C" {
 
+static void throwIllegalArgument(JNIEnv* env, const char* message) {
+    jclass exClass = env->FindClass("java/lang/IllegalArgumentException");
+    if (exClass != nullptr) {
+        env->ThrowNew(exClass, message);
+    }
+}
+
+
 /**
  * PERFORMANCE FIX: High-performance RGB to NV21 conversion using ARM NEON intrinsics.
  * Processes 8 pixels at a time using SIMD instructions for 4-8x speedup.
@@ -30,9 +38,28 @@ Java_com_briefplantrain_virtucam_NativeEncoder_rgbToNv21(
     jint *rgb = env->GetIntArrayElements(rgbInput, nullptr);
     jbyte *nv21 = env->GetByteArrayElements(nv21Output, nullptr);
 
-    if (rgb == nullptr || nv21 == nullptr) return;
+    if (rgb == nullptr || nv21 == nullptr) {
+        if (rgb != nullptr) {
+            env->ReleaseIntArrayElements(rgbInput, rgb, JNI_ABORT);
+        }
+        if (nv21 != nullptr) {
+            env->ReleaseByteArrayElements(nv21Output, nv21, JNI_ABORT);
+        }
+        throwIllegalArgument(env, "Null array argument in rgbToNv21");
+        return;
+    }
 
     int frameSize = width * height;
+    const jsize rgbLen = env->GetArrayLength(rgbInput);
+    const jsize nv21Len = env->GetArrayLength(nv21Output);
+    const int expectedRgbLen = width * height;
+    const int expectedNv21Len = width * height * 3 / 2;
+    if (rgbLen < expectedRgbLen || nv21Len < expectedNv21Len) {
+        env->ReleaseIntArrayElements(rgbInput, rgb, JNI_ABORT);
+        env->ReleaseByteArrayElements(nv21Output, nv21, JNI_ABORT);
+        throwIllegalArgument(env, "Array too small for given dimensions in rgbToNv21");
+        return;
+    }
 
 #if USE_NEON
     // NEON-accelerated Y plane conversion
@@ -235,9 +262,28 @@ Java_com_briefplantrain_virtucam_NativeEncoder_rgbToI420(
     jint *rgb = env->GetIntArrayElements(rgbInput, nullptr);
     jbyte *i420 = env->GetByteArrayElements(i420Output, nullptr);
 
-    if (rgb == nullptr || i420 == nullptr) return;
+    if (rgb == nullptr || i420 == nullptr) {
+        if (rgb != nullptr) {
+            env->ReleaseIntArrayElements(rgbInput, rgb, JNI_ABORT);
+        }
+        if (i420 != nullptr) {
+            env->ReleaseByteArrayElements(i420Output, i420, JNI_ABORT);
+        }
+        throwIllegalArgument(env, "Null array argument in rgbToI420");
+        return;
+    }
 
     int frameSize = width * height;
+    const jsize rgbLen = env->GetArrayLength(rgbInput);
+    const jsize i420Len = env->GetArrayLength(i420Output);
+    const int expectedRgbLen = width * height;
+    const int expectedI420Len = width * height * 3 / 2;
+    if (rgbLen < expectedRgbLen || i420Len < expectedI420Len) {
+        env->ReleaseIntArrayElements(rgbInput, rgb, JNI_ABORT);
+        env->ReleaseByteArrayElements(i420Output, i420, JNI_ABORT);
+        throwIllegalArgument(env, "Array too small for given dimensions in rgbToI420");
+        return;
+    }
     int uOffset = frameSize;
     int vOffset = frameSize + frameSize / 4;
 

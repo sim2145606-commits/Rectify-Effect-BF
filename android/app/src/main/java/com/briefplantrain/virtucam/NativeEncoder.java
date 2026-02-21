@@ -8,6 +8,7 @@ public class NativeEncoder {
 
     private static boolean nativeAvailable = false;
 
+    @SuppressWarnings("UnsatisfiedLink") // Hardcoded library name; scanner false positive for process-control
     static {
         try {
             // CWE-114 FIX: Use hardcoded constant library name to prevent process control issues
