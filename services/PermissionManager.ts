@@ -56,12 +56,35 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
 
     const result = await VirtuCamSettings.checkXposedStatus();
 
-    if (result.moduleActive) {
+    const moduleLoaded = !!result.moduleLoaded;
+    const moduleScoped = !!result.moduleScoped;
+    const hookConfigured = !!result.hookConfigured;
+    const hookReady = !!result.hookReady;
+
+    if (hookReady) {
       return { status: 'granted', detail: 'Module active in LSPosed', canRequest: false };
+    } else if (moduleLoaded && moduleScoped && !hookConfigured) {
+      return {
+        status: 'pending',
+        detail: 'Module + scope detected. Configure hook (enable module switch, select media, add targets).',
+        canRequest: true,
+      };
+    } else if (moduleLoaded && !moduleScoped) {
+      return {
+        status: 'denied',
+        detail: 'Module loaded, but scope missing for configured target app(s). Add scope in LSPosed and reboot.',
+        canRequest: true,
+      };
+    } else if (!moduleLoaded && moduleScoped) {
+      return {
+        status: 'pending',
+        detail: 'Scope configured, but module not loaded in any hooked process yet. Open a target app after reboot.',
+        canRequest: true,
+      };
     } else if (result.lsposedInstalled) {
       return {
         status: 'denied',
-        detail: 'Enable module in LSPosed and add target apps to scope, then reboot',
+        detail: 'Enable module in LSPosed, add target apps to scope, and reboot device',
         canRequest: true,
       };
     } else {

@@ -420,7 +420,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         try {
             val result = Arguments.createMap()
-            val packageName = reactApplicationContext.packageName
+            val modulePackageName = reactApplicationContext.packageName
             
             // Check for LSPosed installation via multiple methods
             var lsposedExists = false
@@ -488,50 +488,49 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
             }
             
-            // Method 2: Check LSPosed database for module enabled state
-            if (!moduleScoped && lsposedExists) {
-                if (checkLSPosedDatabase(packageName)) {
-                    moduleScoped = true
-                    detectionMethod = "lspd_database"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed database")
+            // Read configured targets for scope checks (do not use module package here)
+            val targetPackagesRaw = prefs.getString("targetPackages", "") ?: ""
+            val configuredTargets = targetPackagesRaw
+                .split(',')
+                .map { sanitizePackageName(it.trim()) }
+                .filter { it.isNotEmpty() }
+                .distinct()
+
+            // Method 2/3/4: Check LSPosed scope against configured target apps
+            val scopedTargets = mutableListOf<String>()
+            if (lsposedExists && configuredTargets.isNotEmpty()) {
+                for (targetPkg in configuredTargets) {
+                    if (checkLSPosedDatabase(targetPkg)) {
+                        scopedTargets.add(targetPkg)
+                        detectionMethod = "lspd_database"
+                        continue
+                    }
+                    if (checkLSPosedScope(targetPkg)) {
+                        scopedTargets.add(targetPkg)
+                        detectionMethod = "lspd_scope"
+                        continue
+                    }
+                    if (checkLSPosedPrefs(targetPkg)) {
+                        scopedTargets.add(targetPkg)
+                        detectionMethod = "lspd_prefs"
+                    }
                 }
             }
-            
-            // Method 3: Check LSPosed scope configuration
-            if (!moduleScoped && lsposedExists) {
-                if (checkLSPosedScope(packageName)) {
-                    moduleScoped = true
-                    detectionMethod = "lspd_scope"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed scope")
-                }
-            }
-            
-            // Method 4: Check LSPosed prefs (ReLSPosed and some forks)
-            if (!moduleScoped && lsposedExists) {
-                if (checkLSPosedPrefs(packageName)) {
-                    moduleScoped = true
-                    detectionMethod = "lspd_prefs"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via LSPosed prefs")
-                }
-            }
-            
-            // Method 5: Check modules directory registration
-            if (!moduleScoped && lsposedExists) {
-                if (checkModulesDirectory(packageName)) {
-                    moduleScoped = true
+
+            moduleScoped = scopedTargets.isNotEmpty()
+
+            // Method 5: Check modules directory registration (module package itself)
+            if (lsposedExists && checkModulesDirectory(modulePackageName)) {
+                if (!moduleScoped) {
                     detectionMethod = "modules_dir"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via modules directory")
                 }
+                moduleLoaded = true
             }
 
             val enabled = prefs.getBoolean("enabled", false)
             val mediaSourcePath = prefs.getString("mediaSourcePath", null)
             val targetMode = prefs.getString("targetMode", "whitelist") ?: "whitelist"
-            val targetPackagesRaw = prefs.getString("targetPackages", "") ?: ""
-            val hasTargets = targetPackagesRaw
-                .split(',')
-                .map { it.trim() }
-                .any { it.isNotEmpty() }
+            val hasTargets = configuredTargets.isNotEmpty()
 
             val hookConfigured = enabled && !mediaSourcePath.isNullOrEmpty() &&
                 (targetMode != "whitelist" || hasTargets)
@@ -546,11 +545,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("hookConfigured", hookConfigured)
             result.putBoolean("hookReady", hookReady)
             result.putString("detectionMethod", detectionMethod)
+            result.putInt("configuredTargetsCount", configuredTargets.size)
+            result.putInt("scopedTargetsCount", scopedTargets.size)
+            result.putString("configuredTargets", configuredTargets.joinToString(","))
+            result.putString("scopedTargets", scopedTargets.joinToString(","))
             
             android.util.Log.d("VirtuCamSettings",
                 "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +
                 "hookConfigured=$hookConfigured, hookReady=$hookReady, lsposedInstalled=$lsposedExists, " +
-                "method=$detectionMethod, path=$detectedPath")
+                "method=$detectionMethod, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets")
             
             promise.resolve(result)
         } catch (e: Exception) {
@@ -564,6 +567,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("hookConfigured", false)
             result.putBoolean("hookReady", false)
             result.putString("detectionMethod", "error")
+            result.putInt("configuredTargetsCount", 0)
+            result.putInt("scopedTargetsCount", 0)
+            result.putString("configuredTargets", "")
+            result.putString("scopedTargets", "")
             promise.resolve(result)
         }
     }
