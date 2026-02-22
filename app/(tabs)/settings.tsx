@@ -25,8 +25,10 @@ import { useTheme } from '@/context/ThemeContext';
 import type { ColorMode } from '@/context/ThemeContext';
 import {
   runDiagnostics,
+  getRawXposedDebugInfo,
   type DiagnosticsReport,
   type DiagnosticCheckResult,
+  type RawXposedDebugInfo,
 } from '@/services/DiagnosticsService';
 import {
   requestCameraPermission,
@@ -37,6 +39,7 @@ import { getStatusColor } from '@/services/SystemVerification';
 import { resetToDefaults } from '@/services/ResetService';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
+
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -49,6 +52,7 @@ export default function SettingsScreen() {
   const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = useState<DiagnosticsReport | null>(null);
   const [diagnosticsChecks, setDiagnosticsChecks] = useState<DiagnosticCheckResult[]>([]);
+  const [rawXposedDebug, setRawXposedDebug] = useState<RawXposedDebugInfo | null>(null);
   const [isResetting, setIsResetting] = useState(false);
 
   const handleRequestPermission = useCallback(
@@ -94,6 +98,7 @@ export default function SettingsScreen() {
     setIsRunningDiagnostics(true);
     setDiagnosticsChecks([]);
     setDiagnosticsReport(null);
+    setRawXposedDebug(null);
     mediumImpact();
 
     try {
@@ -105,6 +110,8 @@ export default function SettingsScreen() {
         });
       });
       setDiagnosticsReport(report);
+      const rawDebug = await getRawXposedDebugInfo();
+      setRawXposedDebug(rawDebug);
       if (report.failCount === 0) {
         success();
       } else {
@@ -477,6 +484,34 @@ export default function SettingsScreen() {
               </Text>
               <Text style={[styles.diagnosticsWarnText, { color: colors.warningAmber }]}>
                 ⚠ {diagnosticsReport.warnCount} Warnings
+              </Text>
+            </View>
+          )}
+
+          {rawXposedDebug && (
+            <View style={styles.rawDebugBox}>
+              <Text style={styles.rawDebugTitle}>Raw Detection Debug</Text>
+              <Text style={styles.rawDebugLine}>detectionMethod: {rawXposedDebug.detectionMethod}</Text>
+              <Text style={styles.rawDebugLine}>
+                scopeEvaluationReason: {rawXposedDebug.scopeEvaluationReason}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                lsposedPath: {rawXposedDebug.lsposedPath || '(empty)'}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                configuredTargets: {rawXposedDebug.configuredTargets || '(none)'}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                scopedTargets: {rawXposedDebug.scopedTargets || '(none)'}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                moduleLoaded={String(rawXposedDebug.moduleLoaded)} | moduleScoped={String(rawXposedDebug.moduleScoped)}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                hookConfigured={String(rawXposedDebug.hookConfigured)} | hookReady={String(rawXposedDebug.hookReady)}
+              </Text>
+              <Text style={styles.rawDebugHint}>
+                Tip: if moduleLoaded=false after reboot, open a scoped target app once, then run diagnostics again.
               </Text>
             </View>
           )}

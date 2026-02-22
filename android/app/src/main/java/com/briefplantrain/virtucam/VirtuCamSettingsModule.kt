@@ -497,6 +497,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 moduleLoadedInTargetProcess = true
                 detectionMethod = "marker_file"
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
+            } else {
+                val markerRootCheck = executeRootCommand("ls /data/local/tmp/virtucam_module_active 2>/dev/null")
+                if (markerRootCheck.contains("virtucam_module_active")) {
+                    moduleLoaded = true
+                    detectionMethod = "marker_file_root"
+                    android.util.Log.d("VirtuCamSettings", "Module detected via root marker file check")
+                }
             }
             
             // Read configured targets for scope checks (do not use module package here)
@@ -534,7 +541,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             }
 
             // Method 5: Check modules directory registration (module package itself)
-            if (lsposedExists && checkModulesDirectory(modulePackageName)) {
+            if (checkModulesDirectory(modulePackageName)) {
                 if (!moduleScoped) {
                     detectionMethod = "modules_dir"
                 }
@@ -547,15 +554,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
 
-            if (!moduleScoped && moduleLoadedInTargetProcess && targetMode != "whitelist") {
-                moduleScoped = true
-                scopeEvaluationReason = "non_whitelist_mode"
-                if (detectionMethod == "none") {
-                    detectionMethod = "non_whitelist_mode"
-                }
-            } else if (!moduleScoped && moduleLoaded && targetMode != "whitelist") {
-                scopeEvaluationReason = "non_whitelist_waiting_for_hook"
-            } else if (!moduleScoped && targetMode == "whitelist") {
+            if (!moduleScoped && targetMode == "whitelist") {
                 scopeEvaluationReason = if (hasTargets) {
                     "whitelist_targets_not_in_scope"
                 } else {
@@ -633,7 +632,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             "/data/adb/lspd/config/modules_config.db",
             "/data/adb/lspd/db/lspd.db",
             "/data/adb/lspd/config/lspd.db",
-            "/data/adb/modules/zygisk_lsposed/config/modules_config.db"
+            "/data/adb/modules/zygisk_lsposed/config/modules_config.db",
+            "/data/adb/modules/zygisk_lsposed/config/lspd.db"
         )
         
         for (dbPath in dbPaths) {
@@ -669,15 +669,29 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     private fun checkLSPosedScope(packageName: String): Boolean {
         val escapedPkg = escapeShellArg(packageName)
-        
-        var scopeCheck = executeRootCommand("ls /data/adb/lspd/config/$packageName 2>/dev/null")
-        if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("ls /data/adb/lspd/config/scope/$packageName 2>/dev/null")
-        if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("cat /data/adb/lspd/config/modules/$packageName/scope.json 2>/dev/null")
-        if (scopeCheck.isEmpty()) scopeCheck = executeRootCommand("grep -r $escapedPkg /data/adb/lspd/config/scope/ 2>/dev/null | head -1")
-        
-        return scopeCheck.isNotEmpty() &&
-               !scopeCheck.contains("No such file") &&
-               !scopeCheck.contains("cannot access")
+
+        val scopeChecks = listOf(
+            "ls /data/adb/lspd/config/$packageName 2>/dev/null",
+            "ls /data/adb/lspd/config/scope/$packageName 2>/dev/null",
+            "cat /data/adb/lspd/config/modules/$packageName/scope.json 2>/dev/null",
+            "grep -r $escapedPkg /data/adb/lspd/config/scope/ 2>/dev/null | head -1",
+            "ls /data/adb/modules/zygisk_lsposed/config/$packageName 2>/dev/null",
+            "ls /data/adb/modules/zygisk_lsposed/config/scope/$packageName 2>/dev/null",
+            "cat /data/adb/modules/zygisk_lsposed/config/modules/$packageName/scope.json 2>/dev/null",
+            "grep -r $escapedPkg /data/adb/modules/zygisk_lsposed/config/scope/ 2>/dev/null | head -1"
+        )
+
+        for (command in scopeChecks) {
+            val scopeCheck = executeRootCommand(command)
+            if (scopeCheck.isNotEmpty() &&
+                !scopeCheck.contains("No such file") &&
+                !scopeCheck.contains("cannot access")
+            ) {
+                return true
+            }
+        }
+
+        return false
     }
 
     /**
@@ -685,14 +699,27 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     private fun checkLSPosedPrefs(packageName: String): Boolean {
         val escapedPkg = escapeShellArg(packageName)
-        
-        var prefsCheck = executeRootCommand("sqlite3 /data/adb/lspd/config/prefs.db \"SELECT value FROM prefs WHERE key LIKE '%$packageName%'\" 2>/dev/null")
-        if (prefsCheck.isEmpty()) prefsCheck = executeRootCommand("cat /data/adb/lspd/config/enabled_modules 2>/dev/null | grep $escapedPkg")
-        if (prefsCheck.isEmpty()) prefsCheck = executeRootCommand("cat /data/adb/lspd/config/modules.json 2>/dev/null | grep $escapedPkg")
-        
-        return prefsCheck.isNotEmpty() &&
-               !prefsCheck.contains("Error") &&
-               !prefsCheck.contains("no such")
+
+        val prefsChecks = listOf(
+            "sqlite3 /data/adb/lspd/config/prefs.db \"SELECT value FROM prefs WHERE key LIKE '%$packageName%'\" 2>/dev/null",
+            "cat /data/adb/lspd/config/enabled_modules 2>/dev/null | grep $escapedPkg",
+            "cat /data/adb/lspd/config/modules.json 2>/dev/null | grep $escapedPkg",
+            "sqlite3 /data/adb/modules/zygisk_lsposed/config/prefs.db \"SELECT value FROM prefs WHERE key LIKE '%$packageName%'\" 2>/dev/null",
+            "cat /data/adb/modules/zygisk_lsposed/config/enabled_modules 2>/dev/null | grep $escapedPkg",
+            "cat /data/adb/modules/zygisk_lsposed/config/modules.json 2>/dev/null | grep $escapedPkg"
+        )
+
+        for (command in prefsChecks) {
+            val prefsCheck = executeRootCommand(command)
+            if (prefsCheck.isNotEmpty() &&
+                !prefsCheck.contains("Error") &&
+                !prefsCheck.contains("no such")
+            ) {
+                return true
+            }
+        }
+
+        return false
     }
 
     /**
@@ -712,9 +739,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         
         val lspdConfigCheck = executeRootCommand("ls /data/adb/lspd/config/ 2>/dev/null | grep '$packageName'")
         if (lspdConfigCheck.contains(packageName)) return true
-        
-        val findCheck = executeRootCommand("find /data/adb/lspd/ -name '*$packageName*' -type f 2>/dev/null | head -1")
-        return findCheck.isNotEmpty()
+
+        val relsposedConfigCheck = executeRootCommand("ls /data/adb/modules/zygisk_lsposed/config/ 2>/dev/null | grep '$packageName'")
+        if (relsposedConfigCheck.contains(packageName)) return true
+
+        val findLspdCheck = executeRootCommand("find /data/adb/lspd/ -name '*$packageName*' -type f 2>/dev/null | head -1")
+        if (findLspdCheck.isNotEmpty()) return true
+
+        val findReLsposedCheck = executeRootCommand("find /data/adb/modules/zygisk_lsposed/ -name '*$packageName*' -type f 2>/dev/null | head -1")
+        return findReLsposedCheck.isNotEmpty()
     }
 
     private fun apkHasXposedInit(apkPath: String): Boolean {

@@ -17,6 +17,18 @@ export type DiagnosticsReport = {
   timestamp: number;
 };
 
+export type RawXposedDebugInfo = {
+  detectionMethod: string;
+  scopeEvaluationReason: string;
+  lsposedPath: string;
+  configuredTargets: string;
+  scopedTargets: string;
+  moduleLoaded: boolean;
+  moduleScoped: boolean;
+  hookConfigured: boolean;
+  hookReady: boolean;
+};
+
 export async function runDiagnostics(
   onProgress?: (check: DiagnosticCheckResult, index: number) => void
 ): Promise<DiagnosticsReport> {
@@ -208,4 +220,26 @@ export async function runDiagnostics(
   const warnCount = checks.filter(c => c.status === 'warn').length;
 
   return { checks, passCount, failCount, warnCount, timestamp: Date.now() };
+}
+
+export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null> {
+  try {
+    if (!VirtuCamSettings?.checkXposedStatus) return null;
+
+    const result = await VirtuCamSettings.checkXposedStatus();
+
+    return {
+      detectionMethod: String(result?.detectionMethod ?? 'unknown'),
+      scopeEvaluationReason: String(result?.scopeEvaluationReason ?? 'unknown'),
+      lsposedPath: String(result?.lsposedPath ?? ''),
+      configuredTargets: String(result?.configuredTargets ?? ''),
+      scopedTargets: String(result?.scopedTargets ?? ''),
+      moduleLoaded: result?.moduleLoaded === true,
+      moduleScoped: result?.moduleScoped === true,
+      hookConfigured: result?.hookConfigured === true,
+      hookReady: result?.hookReady === true,
+    };
+  } catch {
+    return null;
+  }
 }
