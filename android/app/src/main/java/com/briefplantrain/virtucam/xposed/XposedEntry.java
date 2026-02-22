@@ -201,7 +201,7 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         if (mapped == original) return false;
 
         try {
-            oc.setSurface(mapped);
+            XposedHelpers.callMethod(oc, "setSurface", mapped);
             return true;
         } catch (Throwable t) {
             engine.rollbackOutputSurfaceMapping(original);
