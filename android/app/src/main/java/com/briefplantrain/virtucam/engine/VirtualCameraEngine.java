@@ -148,6 +148,10 @@ public final class VirtualCameraEngine {
         return mappingManager.mapRequestTargetSurface(surface);
     }
 
+    public void rollbackOutputSurfaceMapping(Surface original) {
+        mappingManager.removeMapping(original);
+    }
+
     private final Runnable renderLoop = new Runnable() {
         @Override
         public void run() {

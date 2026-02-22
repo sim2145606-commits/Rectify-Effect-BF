@@ -140,19 +140,9 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                             int replaced = 0;
                             for (Object item : in) {
                                 if (!(item instanceof OutputConfiguration)) continue;
-                                OutputConfiguration oc = (OutputConfiguration) item;
-                                Surface original = oc.getSurface();
-                                if (original == null) continue;
-
-                                SurfaceInfo info = engine.inferSurfaceInfo(original);
-                                Surface mapped = engine.mapOutputSurface(original, info);
-                                if (mapped != original) {
+                                if (tryMapOutputConfigurationSurface(engine, (OutputConfiguration) item,
+                                        "createCaptureSessionByOutputConfigurations")) {
                                     replaced++;
-                                    try {
-                                        oc.setSurface(mapped);
-                                    } catch (Throwable t) {
-                                        LogUtil.e(TAG, "Failed to set mapped surface on OutputConfiguration", t);
-                                    }
                                 }
                             }
                             LogUtil.d(TAG, "createCaptureSessionByOutputConfigurations mapped=" + replaced + " outputs");
@@ -177,19 +167,9 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
 
                                 int replaced = 0;
                                 for (OutputConfiguration oc : outputs) {
-                                    if (oc == null) continue;
-                                    Surface original = oc.getSurface();
-                                    if (original == null) continue;
-
-                                    SurfaceInfo info = engine.inferSurfaceInfo(original);
-                                    Surface mapped = engine.mapOutputSurface(original, info);
-                                    if (mapped != original) {
+                                    if (tryMapOutputConfigurationSurface(engine, oc,
+                                            "createCaptureSession(SessionConfiguration)")) {
                                         replaced++;
-                                        try {
-                                            oc.setSurface(mapped);
-                                        } catch (Throwable t) {
-                                            LogUtil.e(TAG, "Failed to set mapped surface in SessionConfiguration", t);
-                                        }
                                     }
                                 }
                                 LogUtil.d(TAG, "createCaptureSession(SessionConfiguration) mapped=" + replaced + " outputs");
@@ -202,6 +182,31 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             LogUtil.d(TAG, "Camera2 session hooks installed");
         } catch (Throwable t) {
             LogUtil.e(TAG, "Camera2 session hooks failed", t);
+        }
+    }
+
+
+    private static boolean tryMapOutputConfigurationSurface(
+            VirtualCameraEngine engine,
+            OutputConfiguration oc,
+            String hookName
+    ) {
+        if (oc == null) return false;
+
+        Surface original = oc.getSurface();
+        if (original == null) return false;
+
+        SurfaceInfo info = engine.inferSurfaceInfo(original);
+        Surface mapped = engine.mapOutputSurface(original, info);
+        if (mapped == original) return false;
+
+        try {
+            oc.setSurface(mapped);
+            return true;
+        } catch (Throwable t) {
+            engine.rollbackOutputSurfaceMapping(original);
+            LogUtil.e(TAG, hookName + " failed to set mapped surface; mapping rolled back", t);
+            return false;
         }
     }
 
