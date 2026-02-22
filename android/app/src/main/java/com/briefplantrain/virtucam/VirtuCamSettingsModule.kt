@@ -475,8 +475,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check if module is loaded/scoped - split these signals to avoid false positives
             var moduleLoaded = false
-            var moduleRuntimeObserved = false
-            var moduleRegistered = false
             var moduleScoped = false
             var detectionMethod = "none"
             var scopeEvaluationReason = "no_scope_match"
@@ -495,14 +493,12 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
             } else if (markerFile.exists()) {
                 moduleLoaded = true
-                moduleRuntimeObserved = true
                 detectionMethod = "marker_file"
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
             } else {
                 val markerRootCheck = executeRootCommand("ls /data/local/tmp/virtucam_module_active 2>/dev/null")
                 if (markerRootCheck.contains("virtucam_module_active")) {
                     moduleLoaded = true
-                    moduleRuntimeObserved = true
                     detectionMethod = "marker_file_root"
                     android.util.Log.d("VirtuCamSettings", "Module detected via root marker file check")
                 }
@@ -544,7 +540,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
             // Method 5: Check modules directory registration (module package itself)
             if (checkModulesDirectory(modulePackageName)) {
-                moduleRegistered = true
                 if (!moduleScoped) {
                     detectionMethod = "modules_dir"
                 }
@@ -558,13 +553,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val hasTargets = configuredTargets.isNotEmpty()
 
             if (!moduleScoped && targetMode != "whitelist") {
-                if (moduleRuntimeObserved) {
+                if (moduleLoaded && detectionMethod != "modules_dir") {
                     moduleScoped = true
                     scopeEvaluationReason = "non_whitelist_mode"
                     if (detectionMethod == "none") {
                         detectionMethod = "non_whitelist_mode"
                     }
-                } else if (moduleRegistered || moduleLoaded) {
+                } else if (moduleLoaded) {
                     scopeEvaluationReason = "non_whitelist_waiting_for_hooked_process"
                 }
             } else if (!moduleScoped && targetMode == "whitelist") {
