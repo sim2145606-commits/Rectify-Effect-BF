@@ -348,7 +348,8 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'error',
           };
         }
-      } catch {
+      } catch (err: unknown) {
+        getLogger().warn('Storage permission check failed', 'SystemVerification', err);
         result.storagePermission = {
           label: 'Storage Permission',
           detail: 'Permission check failed',
@@ -364,7 +365,8 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             detail: allFilesGranted ? 'All files access granted' : 'Grant storage access',
             status: allFilesGranted ? 'ok' : 'error',
           };
-        } catch {
+        } catch (err: unknown) {
+          getLogger().warn('All files access check failed', 'SystemVerification', err);
           result.storagePermission = {
             label: 'Storage Permission',
             detail: 'Check method unavailable',
@@ -500,8 +502,8 @@ export async function getSystemInfo(): Promise<SystemInfo | null> {
         const rootResult = await VirtuCamSettings.detectRootSolution();
         rootSolution = rootResult.solution || 'None';
         rootVersion = rootResult.version || '';
-      } catch {
-        // Silent
+      } catch (err: unknown) {
+        getLogger().warn('Root solution detection failed', 'SystemVerification', err);
       }
     }
 

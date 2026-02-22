@@ -124,12 +124,12 @@ export async function resetToDefaults(): Promise<{
 
 export async function getCurrentSettings(): Promise<Record<string, string | null>> {
   const settings: Record<string, string | null> = {};
+  const keys = [...Object.keys(DEFAULT_VALUES), STORAGE_KEYS.TARGET_APPS];
+  const pairs = await AsyncStorage.multiGet(keys);
 
-  for (const key of Object.keys(DEFAULT_VALUES)) {
-    settings[key] = await AsyncStorage.getItem(key);
+  for (const [key, value] of pairs) {
+    settings[key] = value;
   }
-
-  settings[STORAGE_KEYS.TARGET_APPS] = await AsyncStorage.getItem(STORAGE_KEYS.TARGET_APPS);
 
   return settings;
 }
