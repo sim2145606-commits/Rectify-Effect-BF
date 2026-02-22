@@ -38,7 +38,7 @@ public final class ConfigSnapshot {
                 return !targetPackages.contains(packageName);
             case WHITELIST:
             default:
-                return targetPackages.isEmpty() || targetPackages.contains(packageName);
+                return targetPackages.contains(packageName);
         }
     }
 
