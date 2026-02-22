@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "web": "EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0 expo start --web --port 5000",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "lint": "expo lint",
