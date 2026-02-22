@@ -197,6 +197,13 @@ public final class VirtualCameraEngine {
                 return getOrUpdateTestPattern();
             case FILE:
                 if (cfg.mediaSourcePath != null) return getOrLoadMediaBitmap(cfg.mediaSourcePath);
+                return getBlackFrame();
+            case STREAM:
+                if (cfg.mediaSourcePath != null) {
+                    return getOrLoadMediaBitmap(cfg.mediaSourcePath);
+                }
+                LogUtil.d(TAG, "STREAM mode selected without mediaSourcePath; using black frame");
+                return getBlackFrame();
             case BLACK:
             default:
                 return getBlackFrame();

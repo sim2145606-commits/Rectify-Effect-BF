@@ -7,7 +7,7 @@ import java.util.Set;
 public final class ConfigSnapshot {
 
     public enum TargetMode { ALL, WHITELIST, BLACKLIST }
-    public enum SourceMode { BLACK, FILE, TEST_PATTERN }
+    public enum SourceMode { BLACK, FILE, STREAM, TEST_PATTERN }
 
     public boolean enabled = false;
     public SourceMode sourceMode = SourceMode.BLACK;

@@ -173,6 +173,8 @@ public final class ConfigLoader {
         switch (v) {
             case "file":
                 return ConfigSnapshot.SourceMode.FILE;
+            case "stream":
+                return ConfigSnapshot.SourceMode.STREAM;
             case "test":
             case "test_pattern":
             case "testpattern":
