@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, type ReactNode } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -621,7 +621,7 @@ function InfoRow({
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value?: string;
-  right?: React.ReactNode;
+  right?: ReactNode;
   last?: boolean;
   dimValue?: boolean;
 }) {

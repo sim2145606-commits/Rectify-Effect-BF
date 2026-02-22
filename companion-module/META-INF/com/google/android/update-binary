@@ -6,25 +6,40 @@ SKIPUNZIP=1
 ZIPFILE="${ZIPFILE:-$3}"
 MODPATH="${MODPATH:-/data/adb/modules_update/virtucam_companion}"
 
+abort() {
+    echo "- ERROR: $1"
+    rm -rf "$MODPATH" 2>/dev/null
+    exit 1
+}
+
+extract_or_abort() {
+    local pattern="$1"
+    unzip -o "$ZIPFILE" "$pattern" -d "$MODPATH" >/dev/null 2>&1 \
+        || abort "Failed to extract: $pattern"
+}
+
+[ -n "$ZIPFILE" ] || abort "ZIPFILE is not set"
+[ -f "$ZIPFILE" ] || abort "Installer zip not found: $ZIPFILE"
+
 mkdir -p "$MODPATH" 2>/dev/null
 
 # Extract module files
-unzip -o "$ZIPFILE" 'module.prop'     -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'customize.sh'    -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'post-fs-data.sh' -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'service.sh'      -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'action.sh'       -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'uninstall.sh'    -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'sepolicy.rule'   -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'update.json'     -d "$MODPATH" >/dev/null 2>&1
-unzip -o "$ZIPFILE" 'webroot/*'       -d "$MODPATH" >/dev/null 2>&1
+extract_or_abort 'module.prop'
+extract_or_abort 'customize.sh'
+extract_or_abort 'post-fs-data.sh'
+extract_or_abort 'service.sh'
+extract_or_abort 'action.sh'
+extract_or_abort 'uninstall.sh'
+extract_or_abort 'sepolicy.rule'
+extract_or_abort 'update.json'
+extract_or_abort 'webroot/*'
 
 # Set executable permissions
-chmod +x "$MODPATH/post-fs-data.sh" 2>/dev/null
-chmod +x "$MODPATH/service.sh" 2>/dev/null
-chmod +x "$MODPATH/action.sh" 2>/dev/null
-chmod +x "$MODPATH/uninstall.sh" 2>/dev/null
-chmod +x "$MODPATH/customize.sh" 2>/dev/null
+chmod +x "$MODPATH/post-fs-data.sh" 2>/dev/null || abort "chmod failed: post-fs-data.sh"
+chmod +x "$MODPATH/service.sh" 2>/dev/null || abort "chmod failed: service.sh"
+chmod +x "$MODPATH/action.sh" 2>/dev/null || abort "chmod failed: action.sh"
+chmod +x "$MODPATH/uninstall.sh" 2>/dev/null || abort "chmod failed: uninstall.sh"
+chmod +x "$MODPATH/customize.sh" 2>/dev/null || abort "chmod failed: customize.sh"
 
 # Run custom install logic
-. "$MODPATH/customize.sh"
+. "$MODPATH/customize.sh" || abort "customize.sh failed"

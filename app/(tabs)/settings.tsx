@@ -888,4 +888,24 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
   },
+  rawDebugBox: {
+    marginTop: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    gap: Spacing.xs,
+  },
+  rawDebugTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+  },
+  rawDebugLine: {
+    fontSize: FontSize.xs,
+    lineHeight: 16,
+  },
+  rawDebugHint: {
+    marginTop: Spacing.xs,
+    fontSize: FontSize.xs,
+    lineHeight: 16,
+  },
 });
