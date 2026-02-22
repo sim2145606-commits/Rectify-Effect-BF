@@ -1,6 +1,9 @@
 package com.briefplantrain.virtucam.engine;
 
-import android.graphics.SurfaceTexture;
+import android.media.Image;
+import android.media.ImageReader;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.view.Surface;
 
 import com.briefplantrain.virtucam.util.LogUtil;
@@ -15,6 +18,9 @@ public final class MappingManager {
     private static final String TAG = "VirtuCam/MappingManager";
 
     private final Map<Surface, SurfaceMapping> byOriginal = new ConcurrentHashMap<>();
+    private final Object drainLock = new Object();
+    private HandlerThread drainThread;
+    private Handler drainHandler;
 
     public Surface getDrainForOriginalOrNull(Surface original) {
         SurfaceMapping m = byOriginal.get(original);
@@ -32,17 +38,17 @@ public final class MappingManager {
         SurfaceMapping existing = byOriginal.get(original);
         if (existing != null) return existing.drainSurface;
 
-        SurfaceTexture st = null;
+        ImageReader reader = null;
         Surface drain = null;
 
         try {
-            st = new SurfaceTexture(0);
-            if (info != null && info.width > 0 && info.height > 0) {
-                st.setDefaultBufferSize(info.width, info.height);
-            }
-            drain = new Surface(st);
+            int width = info != null && info.width > 0 ? info.width : 1;
+            int height = info != null && info.height > 0 ? info.height : 1;
+            reader = ImageReader.newInstance(width, height, android.graphics.ImageFormat.PRIVATE, 4);
+            reader.setOnImageAvailableListener(this::drainImageReader, getOrCreateDrainHandler());
+            drain = reader.getSurface();
 
-            SurfaceMapping mapping = new SurfaceMapping(original, drain, st, info);
+            SurfaceMapping mapping = new SurfaceMapping(original, drain, reader, info);
             byOriginal.put(original, mapping);
 
             LogUtil.d(TAG, "Mapped surface: original=" + original + " -> drain=" + drain +
@@ -53,8 +59,33 @@ public final class MappingManager {
         } catch (Throwable t) {
             LogUtil.e(TAG, "Failed to create drain surface; leaving original", t);
             try { if (drain != null) drain.release(); } catch (Throwable ignored) {}
-            try { if (st != null) st.release(); } catch (Throwable ignored) {}
+            try { if (reader != null) reader.close(); } catch (Throwable ignored) {}
             return original;
+        }
+    }
+
+    private Handler getOrCreateDrainHandler() {
+        synchronized (drainLock) {
+            if (drainThread == null) {
+                drainThread = new HandlerThread("VirtuCam-DrainReader");
+                drainThread.start();
+                drainHandler = new Handler(drainThread.getLooper());
+            }
+            return drainHandler;
+        }
+    }
+
+    private void drainImageReader(ImageReader reader) {
+        if (reader == null) return;
+        Image image = null;
+        try {
+            image = reader.acquireLatestImage();
+        } catch (Throwable ignored) {
+            // no-op
+        } finally {
+            if (image != null) {
+                try { image.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -73,27 +104,35 @@ public final class MappingManager {
             removeMapping(s);
         }
         byOriginal.clear();
+
+        synchronized (drainLock) {
+            if (drainThread != null) {
+                try { drainThread.quitSafely(); } catch (Throwable ignored) {}
+                drainThread = null;
+                drainHandler = null;
+            }
+        }
     }
 
     private static final class SurfaceMapping {
         final Surface originalSurface;
         final Surface drainSurface;
-        final SurfaceTexture drainSurfaceTexture;
+        final ImageReader drainImageReader;
         final SurfaceInfo info;
 
         SurfaceMapping(Surface originalSurface,
                        Surface drainSurface,
-                       SurfaceTexture drainSurfaceTexture,
+                       ImageReader drainImageReader,
                        SurfaceInfo info) {
             this.originalSurface = originalSurface;
             this.drainSurface = drainSurface;
-            this.drainSurfaceTexture = drainSurfaceTexture;
+            this.drainImageReader = drainImageReader;
             this.info = info;
         }
 
         void releaseDrain() {
             try { if (drainSurface != null) drainSurface.release(); } catch (Throwable ignored) {}
-            try { if (drainSurfaceTexture != null) drainSurfaceTexture.release(); } catch (Throwable ignored) {}
+            try { if (drainImageReader != null) drainImageReader.close(); } catch (Throwable ignored) {}
         }
     }
 }
