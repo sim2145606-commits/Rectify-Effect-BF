@@ -554,7 +554,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
 
-            } else if (!moduleScoped && targetMode == "whitelist") {
+            if (!moduleScoped && targetMode == "whitelist") {
                 scopeEvaluationReason = if (hasTargets) {
                     "whitelist_targets_not_in_scope"
                 } else {
@@ -748,17 +748,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
         val findReLsposedCheck = executeRootCommand("find /data/adb/modules/zygisk_lsposed/ -name '*$packageName*' -type f 2>/dev/null | head -1")
         return findReLsposedCheck.isNotEmpty()
-    }
-
-    private fun apkHasXposedInit(apkPath: String): Boolean {
-        return try {
-            ZipFile(apkPath).use { zip ->
-                zip.getEntry("assets/xposed_init") != null
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("VirtuCamSettings", "Failed to inspect APK for xposed_init: ${e.message}")
-            false
-        }
     }
 
     private fun apkHasXposedInit(apkPath: String): Boolean {

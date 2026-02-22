@@ -888,6 +888,4 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
   },
-
-main
 });
