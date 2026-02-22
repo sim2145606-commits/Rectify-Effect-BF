@@ -227,11 +227,18 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
               : 'Module not loaded in hooked process yet',
             status: 'warning',
           };
+          const scopeReason = xposedResult.scopeEvaluationReason;
+          const scopeDetail = xposedResult.moduleScoped
+            ? scopeReason === 'non_whitelist_mode'
+              ? 'Scope accepted (non-whitelist target mode)'
+              : 'Scope configured'
+            : scopeReason === 'whitelist_no_targets_configured'
+              ? 'Whitelist mode: add at least one target app'
+              : 'Scope missing for target app(s)';
+
           result.moduleScoped = {
             label: 'Module Scope',
-            detail: xposedResult.moduleScoped
-              ? 'Scope configured'
-              : 'Scope missing for target app(s)',
+            detail: scopeDetail,
             status: xposedResult.moduleScoped ? 'ok' : 'warning',
           };
           result.hookConfigured = {
