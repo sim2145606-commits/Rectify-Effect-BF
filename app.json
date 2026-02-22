@@ -14,7 +14,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#1E1E1E"
+        "backgroundColor": "#0A0A1A"
       },
       "package": "com.briefplantrain.virtucam"
     },

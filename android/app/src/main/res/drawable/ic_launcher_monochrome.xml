@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Camera body -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M25,42C25,37.582 28.582,34 33,34L75,34C79.418,34 83,37.582 83,42L83,70C83,74.418 79.418,78 75,78L33,78C28.582,78 25,74.418 25,70Z"/>
+
+    <!-- Top mount -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M44,34L44,29C44,26.791 45.791,25 48,25L60,25C62.209,25 64,26.791 64,29L64,34"/>
+
+    <!-- Lens outer ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="M54,44C59.523,44 64,48.477 64,54C64,59.523 59.523,64 54,64C48.477,64 44,59.523 44,54C44,48.477 48.477,44 54,44Z"/>
+
+    <!-- Lens inner dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,50C56.209,50 58,51.791 58,54C58,56.209 56.209,58 54,58C51.791,58 50,56.209 50,54C50,51.791 51.791,50 54,50Z"/>
+
+</vector>

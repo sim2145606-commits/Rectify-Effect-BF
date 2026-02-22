@@ -85,7 +85,7 @@ export default function TabLayout() {
           paddingTop: 6,
           height: Platform.OS === 'web' ? 62 : 56 + insets.bottom,
           elevation: 0,
-          shadowOpacity: 0,
+          ...(Platform.OS === 'web' ? { boxShadow: 'none' } : { shadowOpacity: 0 }),
           position: 'absolute',
         },
         tabBarBackground: () => (

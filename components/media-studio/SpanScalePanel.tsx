@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -7,7 +7,8 @@ import Animated, {
   FadeInDown,
 } from 'react-native-reanimated';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, platformShadow } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { useHaptics } from '@/hooks/useHaptics';
 
 type ScaleMode = 'fit' | 'fill' | 'stretch';
@@ -45,13 +46,14 @@ export default function SpanScalePanel({
   onMirrorToggle,
   onFlipToggle,
 }: Props) {
+  const { colors } = useTheme();
   const { lightImpact, mediumImpact } = useHaptics();
 
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(500)} style={styles.container}>
       <View style={styles.header}>
-        <MaterialCommunityIcons name="aspect-ratio" size={16} color={Colors.electricBlue} />
-        <Text style={styles.headerTitle}>SPAN & SCALE</Text>
+        <MaterialCommunityIcons name="aspect-ratio" size={16} color={colors.electricBlue} />
+        <Text style={[styles.headerTitle, { color: colors.textSecondary }]}>SPAN & SCALE</Text>
       </View>
 
       {/* Scale Mode Cards */}
@@ -83,7 +85,7 @@ export default function SpanScalePanel({
             onMirrorToggle();
           }}
         />
-        <View style={styles.toggleDivider} />
+        <View style={[styles.toggleDivider, { backgroundColor: colors.border }]} />
         <AxisToggle
           icon="flip-vertical"
           label="FLIP V"
@@ -112,6 +114,7 @@ function ScaleModeCard({
   isActive: boolean;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -127,19 +130,39 @@ function ScaleModeCard({
           scale.value = withSpring(1);
         }}
         onPress={onPress}
-        style={[styles.scaleModeCard, isActive && styles.scaleModeCardActive]}
+        style={[
+          styles.scaleModeCard,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+          isActive && {
+            borderColor: colors.electricBlue + '60',
+            backgroundColor: colors.electricBlue + '08',
+            ...platformShadow(colors.electricBlue, 0, 8, 0.2, 4),
+          },
+        ]}
       >
-        <View style={[styles.scaleModeIconCircle, isActive && styles.scaleModeIconCircleActive]}>
+        <View
+          style={[
+            styles.scaleModeIconCircle,
+            { backgroundColor: colors.surfaceLight },
+            isActive && { backgroundColor: colors.electricBlue + '20' },
+          ]}
+        >
           <MaterialCommunityIcons
             name={icon}
             size={20}
-            color={isActive ? Colors.electricBlue : Colors.textTertiary}
+            color={isActive ? colors.electricBlue : colors.textTertiary}
           />
         </View>
-        <Text style={[styles.scaleModeLabel, isActive && styles.scaleModeLabelActive]}>
+        <Text
+          style={[
+            styles.scaleModeLabel,
+            { color: colors.textSecondary },
+            isActive && { color: colors.electricBlue },
+          ]}
+        >
           {label}
         </Text>
-        <Text style={styles.scaleModeDesc}>{description}</Text>
+        <Text style={[styles.scaleModeDesc, { color: colors.textTertiary }]}>{description}</Text>
       </Pressable>
     </Animated.View>
   );
@@ -156,6 +179,7 @@ function AxisToggle({
   active: boolean;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -171,15 +195,39 @@ function AxisToggle({
           scale.value = withSpring(1);
         }}
         onPress={onPress}
-        style={[styles.toggleButton, active && styles.toggleButtonActive]}
+        style={[
+          styles.toggleButton,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+          active && {
+            borderColor: colors.electricBlue + '50',
+            backgroundColor: colors.electricBlue + '08',
+          },
+        ]}
       >
         <MaterialCommunityIcons
           name={icon}
           size={22}
-          color={active ? Colors.electricBlue : Colors.textTertiary}
+          color={active ? colors.electricBlue : colors.textTertiary}
         />
-        <Text style={[styles.toggleLabel, active && styles.toggleLabelActive]}>{label}</Text>
-        <View style={[styles.toggleIndicator, active && styles.toggleIndicatorActive]} />
+        <Text
+          style={[
+            styles.toggleLabel,
+            { color: colors.textTertiary },
+            active && { color: colors.electricBlue },
+          ]}
+        >
+          {label}
+        </Text>
+        <View
+          style={[
+            styles.toggleIndicator,
+            { backgroundColor: colors.inactive },
+            active && {
+              backgroundColor: colors.electricBlue,
+              ...platformShadow(colors.electricBlue, 0, 4, 0.8, 3),
+            },
+          ]}
+        />
       </Pressable>
     </Animated.View>
   );
@@ -196,7 +244,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   headerTitle: {
-    color: Colors.textSecondary,
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1.5,
@@ -212,46 +259,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scaleModeCard: {
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: Colors.border,
     padding: Spacing.md,
     alignItems: 'center',
     gap: Spacing.xs,
-  },
-  scaleModeCardActive: {
-    borderColor: Colors.electricBlue + '60',
-    backgroundColor: Colors.electricBlue + '08',
-    shadowColor: Colors.electricBlue,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
   },
   scaleModeIconCircle: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: Colors.surfaceLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,
   },
-  scaleModeIconCircleActive: {
-    backgroundColor: Colors.electricBlue + '20',
-  },
   scaleModeLabel: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     fontWeight: '800',
     letterSpacing: 1,
   },
-  scaleModeLabelActive: {
-    color: Colors.electricBlue,
-  },
   scaleModeDesc: {
-    color: Colors.textTertiary,
     fontSize: 9,
   },
   toggleRow: {
@@ -265,44 +292,24 @@ const styles = StyleSheet.create({
   toggleDivider: {
     width: 1,
     height: 32,
-    backgroundColor: Colors.border,
   },
   toggleButton: {
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: Colors.border,
     padding: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
   },
-  toggleButtonActive: {
-    borderColor: Colors.electricBlue + '50',
-    backgroundColor: Colors.electricBlue + '08',
-  },
   toggleLabel: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1,
     flex: 1,
   },
-  toggleLabelActive: {
-    color: Colors.electricBlue,
-  },
   toggleIndicator: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: Colors.inactive,
-  },
-  toggleIndicatorActive: {
-    backgroundColor: Colors.electricBlue,
-    shadowColor: Colors.electricBlue,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-    elevation: 3,
   },
 });

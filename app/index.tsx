@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet, NativeModules } from 'react-native';
 import { Redirect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Colors, STORAGE_KEYS } from '@/constants/theme';
+import { STORAGE_KEYS } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { diagnoseNativeModule } from '@/services/NativeModuleDiagnostics';
 
 export default function Index() {
@@ -32,10 +33,12 @@ export default function Index() {
       });
   }, []);
 
+  const { colors } = useTheme();
+
   if (isLoading) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator color={Colors.electricBlue} size="large" />
+      <View style={[styles.loading, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.electricBlue} size="large" />
       </View>
     );
   }
@@ -52,6 +55,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.background,
   },
 });

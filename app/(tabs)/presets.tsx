@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import Animated, {
   FadeInDown,
@@ -22,7 +23,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, platformShadow } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useTheme } from '@/context/ThemeContext';
 import Card from '@/components/Card';
@@ -565,7 +566,7 @@ function PresetCard({
               <Pressable
                 onPress={onApply}
                 disabled={isApplying}
-                style={[styles.applyButton, { backgroundColor: colors.accent, shadowColor: colors.accent }]}
+                style={[styles.applyButton, { backgroundColor: colors.accent, ...platformShadow(colors.accent, 2, 8, 0.35, 4) }]}
               >
                 {isApplying ? (
                   <ActivityIndicator size={14} color="#FFFFFF" />
@@ -817,10 +818,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.md,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 4,
   },
   applyButtonText: {
     color: '#FFFFFF',

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, StyleSheet, ViewStyle, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { BorderRadius, Spacing } from '@/constants/theme';
+import { BorderRadius, Spacing, platformShadow } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
 type Props = {
@@ -20,11 +20,7 @@ export default function Card({ children, style, glow, glowColor }: Props) {
         ? {
             borderColor: glowColor || colors.accentGlow,
             borderWidth: 1,
-            shadowColor: glowColor || colors.accent,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.2,
-            shadowRadius: 16,
-            elevation: 8,
+            ...platformShadow(glowColor || colors.accent, 4, 16, 0.2, 8),
           }
         : null,
     [glow, glowColor, isPerformance, colors]
@@ -33,13 +29,7 @@ export default function Card({ children, style, glow, glowColor }: Props) {
   const softShadow = useMemo(
     () =>
       !isPerformance
-        ? {
-            shadowColor: colors.cardShadow,
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.5,
-            shadowRadius: 8,
-            elevation: 4,
-          }
+        ? platformShadow(colors.cardShadow, 2, 8, 0.5, 4)
         : null,
     [isPerformance, colors]
   );

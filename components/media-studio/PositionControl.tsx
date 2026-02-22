@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, PanResponder } from 'react-native';
+import { View, Text, StyleSheet, Pressable, PanResponder, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -7,7 +7,8 @@ import Animated, {
   FadeInDown,
 } from 'react-native-reanimated';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, platformShadow } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { useHaptics } from '@/hooks/useHaptics';
 
 type Props = {
@@ -20,6 +21,7 @@ const GRID_SIZE = 160;
 const MAX_OFFSET = 100;
 
 export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Props) {
+  const { colors } = useTheme();
   const { selection, mediumImpact, heavyImpact } = useHaptics();
 
   const panResponder = useRef(
@@ -30,7 +32,6 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
         selection();
       },
       onPanResponderMove: (_, gestureState) => {
-        // Normalize to -100..100 range based on grid drag distance
         const normX = Math.max(
           -MAX_OFFSET,
           Math.min(MAX_OFFSET, Math.round((gestureState.dx / GRID_SIZE) * MAX_OFFSET * 2))
@@ -62,36 +63,49 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
     onOffsetChange(0, 0);
   }, [onOffsetChange, heavyImpact]);
 
-  // Indicator position on grid
   const indicatorX = ((offsetX + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE;
   const indicatorY = ((offsetY + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE;
 
   return (
     <Animated.View entering={FadeInDown.delay(400).duration(500)} style={styles.container}>
       <View style={styles.header}>
-        <MaterialCommunityIcons name="cursor-move" size={16} color={Colors.electricBlue} />
-        <Text style={styles.headerTitle}>POSITION OFFSET</Text>
-        <Text style={styles.headerValue}>
+        <MaterialCommunityIcons name="cursor-move" size={16} color={colors.electricBlue} />
+        <Text style={[styles.headerTitle, { color: colors.textSecondary }]}>POSITION OFFSET</Text>
+        <Text style={[styles.headerValue, { color: colors.electricBlue }]}>
           X:{offsetX} Y:{offsetY}
         </Text>
       </View>
 
-      <View style={styles.panel}>
+      <View
+        style={[
+          styles.panel,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
         <View style={styles.contentRow}>
           {/* Drag-to-offset Grid */}
           <View style={styles.gridContainer}>
-            <View style={styles.grid} {...panResponder.panHandlers}>
+            <View
+              style={[
+                styles.grid,
+                {
+                  backgroundColor: colors.surfaceLight,
+                  borderColor: colors.electricBlue + '20',
+                },
+              ]}
+              {...panResponder.panHandlers}
+            >
               {/* Grid lines */}
-              <View style={[styles.gridLine, styles.gridLineH, { top: '25%' }]} />
-              <View style={[styles.gridLine, styles.gridLineH, { top: '50%' }]} />
-              <View style={[styles.gridLine, styles.gridLineH, { top: '75%' }]} />
-              <View style={[styles.gridLine, styles.gridLineV, { left: '25%' }]} />
-              <View style={[styles.gridLine, styles.gridLineV, { left: '50%' }]} />
-              <View style={[styles.gridLine, styles.gridLineV, { left: '75%' }]} />
+              <View style={[styles.gridLine, styles.gridLineH, { top: '25%', backgroundColor: colors.electricBlue + '08' }]} />
+              <View style={[styles.gridLine, styles.gridLineH, { top: '50%', backgroundColor: colors.electricBlue + '08' }]} />
+              <View style={[styles.gridLine, styles.gridLineH, { top: '75%', backgroundColor: colors.electricBlue + '08' }]} />
+              <View style={[styles.gridLine, styles.gridLineV, { left: '25%', backgroundColor: colors.electricBlue + '08' }]} />
+              <View style={[styles.gridLine, styles.gridLineV, { left: '50%', backgroundColor: colors.electricBlue + '08' }]} />
+              <View style={[styles.gridLine, styles.gridLineV, { left: '75%', backgroundColor: colors.electricBlue + '08' }]} />
 
               {/* Center crosshair */}
-              <View style={styles.crosshairH} />
-              <View style={styles.crosshairV} />
+              <View style={[styles.crosshairH, { backgroundColor: colors.electricBlue + '25' }]} />
+              <View style={[styles.crosshairV, { backgroundColor: colors.electricBlue + '25' }]} />
 
               {/* Position indicator */}
               <View
@@ -100,13 +114,16 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
                   {
                     left: indicatorX - 8,
                     top: indicatorY - 8,
+                    backgroundColor: colors.electricBlue + '30',
+                    borderColor: colors.electricBlue,
+                    ...platformShadow(colors.electricBlue, 0, 6, 0.6, 4),
                   },
                 ]}
               >
-                <View style={styles.indicatorInner} />
+                <View style={[styles.indicatorInner, { backgroundColor: colors.electricBlue }]} />
               </View>
             </View>
-            <Text style={styles.gridHint}>Drag to position</Text>
+            <Text style={[styles.gridHint, { color: colors.textTertiary }]}>Drag to position</Text>
           </View>
 
           {/* Nudge buttons */}
@@ -116,15 +133,24 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
             </View>
             <View style={styles.nudgeRow}>
               <NudgeButton icon="chevron-left" onPress={() => handleNudge(-10, 0)} />
-              <Pressable style={styles.nudgeCenter} onPress={handleReset}>
-                <MaterialCommunityIcons name="crosshairs" size={16} color={Colors.electricBlue} />
+              <Pressable
+                style={[
+                  styles.nudgeCenter,
+                  {
+                    backgroundColor: colors.electricBlue + '15',
+                    borderColor: colors.electricBlue + '40',
+                  },
+                ]}
+                onPress={handleReset}
+              >
+                <MaterialCommunityIcons name="crosshairs" size={16} color={colors.electricBlue} />
               </Pressable>
               <NudgeButton icon="chevron-right" onPress={() => handleNudge(10, 0)} />
             </View>
             <View style={styles.nudgeRow}>
               <NudgeButton icon="chevron-down" onPress={() => handleNudge(0, 10)} />
             </View>
-            <Text style={styles.nudgeHint}>
+            <Text style={[styles.nudgeHint, { color: colors.textTertiary }]}>
               {offsetX === 0 && offsetY === 0 ? 'Centered' : `${offsetX}, ${offsetY}`}
             </Text>
           </View>
@@ -141,6 +167,7 @@ function NudgeButton({
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -156,9 +183,12 @@ function NudgeButton({
           scale.value = withSpring(1);
         }}
         onPress={onPress}
-        style={styles.nudgeButton}
+        style={[
+          styles.nudgeButton,
+          { backgroundColor: colors.surfaceLight, borderColor: colors.border },
+        ]}
       >
-        <MaterialCommunityIcons name={icon} size={18} color={Colors.textSecondary} />
+        <MaterialCommunityIcons name={icon} size={18} color={colors.textSecondary} />
       </Pressable>
     </Animated.View>
   );
@@ -175,7 +205,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   headerTitle: {
-    color: Colors.textSecondary,
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1.5,
@@ -183,15 +212,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerValue: {
-    color: Colors.electricBlue,
     fontSize: FontSize.xs,
     fontWeight: '700',
   },
   panel: {
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    borderColor: Colors.border,
     padding: Spacing.lg,
   },
   contentRow: {
@@ -206,16 +232,13 @@ const styles = StyleSheet.create({
   grid: {
     width: GRID_SIZE,
     height: GRID_SIZE,
-    backgroundColor: Colors.surfaceLight,
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '20',
     overflow: 'hidden',
     position: 'relative',
   },
   gridLine: {
     position: 'absolute',
-    backgroundColor: Colors.electricBlue + '08',
   },
   gridLineH: {
     left: 0,
@@ -233,7 +256,6 @@ const styles = StyleSheet.create({
     left: '25%',
     right: '25%',
     height: 1,
-    backgroundColor: Colors.electricBlue + '25',
   },
   crosshairV: {
     position: 'absolute',
@@ -241,32 +263,22 @@ const styles = StyleSheet.create({
     top: '25%',
     bottom: '25%',
     width: 1,
-    backgroundColor: Colors.electricBlue + '25',
   },
   indicator: {
     position: 'absolute',
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: Colors.electricBlue + '30',
     borderWidth: 2,
-    borderColor: Colors.electricBlue,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.electricBlue,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 6,
-    elevation: 4,
   },
   indicatorInner: {
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: Colors.electricBlue,
   },
   gridHint: {
-    color: Colors.textTertiary,
     fontSize: 8,
     letterSpacing: 0.5,
   },
@@ -285,9 +297,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: Colors.surfaceLight,
     borderWidth: 1,
-    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -295,14 +305,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.electricBlue + '15',
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '40',
     alignItems: 'center',
     justifyContent: 'center',
   },
   nudgeHint: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     marginTop: Spacing.xs,
   },

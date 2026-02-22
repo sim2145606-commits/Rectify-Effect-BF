@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, type Href } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, platformShadow } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
 import { useTheme } from '@/context/ThemeContext';
@@ -220,11 +220,7 @@ export default function SettingsScreen() {
                       styles.segment,
                       active && {
                         backgroundColor: colors.accent,
-                        shadowColor: colors.accent,
-                        shadowOffset: { width: 0, height: 2 },
-                        shadowOpacity: isPerformance ? 0 : 0.3,
-                        shadowRadius: 6,
-                        elevation: isPerformance ? 0 : 3,
+                        ...(isPerformance ? {} : platformShadow(colors.accent, 2, 6, 0.3, 3)),
                       },
                     ]}
                   >

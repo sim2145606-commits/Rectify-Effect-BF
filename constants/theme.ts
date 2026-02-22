@@ -1,4 +1,4 @@
-import { Appearance } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 
 export const DarkColors = {
   background: '#080810',
@@ -143,8 +143,6 @@ export function resolveSystemIsDark(): boolean {
   return Appearance.getColorScheme() === 'dark';
 }
 
-export const Colors = DarkColors;
-
 export const Spacing = {
   xs: 4,
   sm: 8,
@@ -227,3 +225,22 @@ export const STORAGE_KEYS = {
   COLOR_MODE: 'virtucam_color_mode',
   PERFORMANCE_MODE: 'virtucam_performance_mode',
 };
+
+export function platformShadow(
+  color: string,
+  offsetY: number,
+  radius: number,
+  opacity: number,
+  elevation: number = 4
+): object {
+  if (Platform.OS === 'web') {
+    return { boxShadow: `0 ${offsetY}px ${radius * 2}px ${color}` };
+  }
+  return {
+    shadowColor: color,
+    shadowOffset: { width: 0, height: offsetY },
+    shadowOpacity: opacity,
+    shadowRadius: radius,
+    elevation,
+  };
+}

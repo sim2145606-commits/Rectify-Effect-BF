@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, STORAGE_KEYS, platformShadow } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
@@ -38,6 +38,7 @@ export default function Dashboard() {
   const router = useRouter();
   const { heavyImpact, success, warning, mediumImpact } = useHaptics();
   const { colors, isPerformance } = useTheme();
+  const isWeb = Platform.OS === 'web';
 
   const [hookEnabled, setHookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
   const [frontCamera, setFrontCamera] = useStorage(STORAGE_KEYS.FRONT_CAMERA, true);
@@ -131,7 +132,7 @@ export default function Dashboard() {
   }, [hookEnabled, masterGlow, scanLineY, isPerformance]);
 
   const masterGlowStyle = useAnimatedStyle(() => ({
-    shadowOpacity: masterGlow.value * 0.45,
+    ...(isWeb ? {} : { shadowOpacity: masterGlow.value * 0.45 }),
     borderColor: hookEnabled
       ? `rgba(10, 132, 255, ${masterGlow.value * 0.4})`
       : colors.border,
@@ -266,7 +267,9 @@ export default function Dashboard() {
             {
               backgroundColor: colors.surfaceCard,
               borderColor: colors.border,
-              shadowColor: colors.accent,
+              ...(isWeb
+                ? { boxShadow: `0 4px 48px ${colors.accent}` }
+                : { shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 }, shadowRadius: 24 }),
             },
             !isPerformance && masterGlowStyle,
             hookEnabled && { borderColor: colors.accent + '40' },
@@ -737,8 +740,6 @@ const styles = StyleSheet.create({
     padding: Spacing.xl,
     marginBottom: Spacing.xl,
     borderWidth: 1,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 24,
     elevation: 8,
     overflow: 'hidden',
   },
