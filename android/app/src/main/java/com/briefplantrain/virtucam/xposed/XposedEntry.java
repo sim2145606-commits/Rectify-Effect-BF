@@ -13,6 +13,7 @@ import com.briefplantrain.virtucam.engine.SurfaceInfo;
 import com.briefplantrain.virtucam.engine.VirtualCameraEngine;
 import com.briefplantrain.virtucam.util.LogUtil;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -43,6 +44,7 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         if (!INSTALLED.add(key)) return;
 
         LogUtil.d(TAG, "Loaded into: pkg=" + lpparam.packageName + " proc=" + lpparam.processName);
+        updateModuleActiveMarker();
 
         final VirtualCameraEngine engine = VirtualCameraEngine.getOrCreate(lpparam.packageName, lpparam.processName);
         engine.start();
@@ -50,6 +52,19 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         installSurfaceTrackingHooks(engine);
         installCamera2SessionHooks(engine);
         installCaptureRequestHooks(engine);
+    }
+
+    private static void updateModuleActiveMarker() {
+        try {
+            File markerFile = new File("/data/local/tmp/virtucam_module_active");
+            if (!markerFile.exists()) {
+                markerFile.createNewFile();
+            }
+            markerFile.setLastModified(System.currentTimeMillis());
+            LogUtil.d(TAG, "Module active marker updated from XposedEntry");
+        } catch (Throwable t) {
+            LogUtil.e(TAG, "Failed to update module active marker", t);
+        }
     }
 
     private static void installSurfaceTrackingHooks(final VirtualCameraEngine engine) {

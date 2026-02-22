@@ -14,6 +14,7 @@ import java.io.File
 import java.io.FileWriter
 import java.io.InputStreamReader
 import java.io.IOException
+import java.util.zip.ZipFile
 import java.util.concurrent.TimeUnit
 
 class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
@@ -474,8 +475,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check if module is loaded/scoped - split these signals to avoid false positives
             var moduleLoaded = false
+            var moduleLoadedInTargetProcess = false
             var moduleScoped = false
             var detectionMethod = "none"
+            var scopeEvaluationReason = "no_scope_match"
             
             // Method 1: Check marker file (created when module hooks an app)
             // The marker file persists until reboot (it's in /data/local/tmp)
@@ -491,6 +494,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
             } else if (markerFile.exists()) {
                 moduleLoaded = true
+                moduleLoadedInTargetProcess = true
                 detectionMethod = "marker_file"
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
             }
@@ -525,6 +529,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             }
 
             moduleScoped = scopedTargets.isNotEmpty()
+            if (moduleScoped) {
+                scopeEvaluationReason = "configured_targets_scoped"
+            }
 
             // Method 5: Check modules directory registration (module package itself)
             if (lsposedExists && checkModulesDirectory(modulePackageName)) {
@@ -539,6 +546,22 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val targetMode = prefs.getString("targetMode", "whitelist") ?: "whitelist"
             val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
+
+            if (!moduleScoped && moduleLoadedInTargetProcess && targetMode != "whitelist") {
+                moduleScoped = true
+                scopeEvaluationReason = "non_whitelist_mode"
+                if (detectionMethod == "none") {
+                    detectionMethod = "non_whitelist_mode"
+                }
+            } else if (!moduleScoped && moduleLoaded && targetMode != "whitelist") {
+                scopeEvaluationReason = "non_whitelist_waiting_for_hook"
+            } else if (!moduleScoped && targetMode == "whitelist") {
+                scopeEvaluationReason = if (hasTargets) {
+                    "whitelist_targets_not_in_scope"
+                } else {
+                    "whitelist_no_targets_configured"
+                }
+            }
 
             val sourceConfigured = when (sourceMode) {
                 "black", "test" -> true
@@ -561,6 +584,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putInt("scopedTargetsCount", scopedTargets.size)
             result.putString("configuredTargets", configuredTargets.joinToString(","))
             result.putString("scopedTargets", scopedTargets.joinToString(","))
+            result.putString("scopeEvaluationReason", scopeEvaluationReason)
             
             android.util.Log.d("VirtuCamSettings",
                 "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +
@@ -583,6 +607,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putInt("scopedTargetsCount", 0)
             result.putString("configuredTargets", "")
             result.putString("scopedTargets", "")
+            result.putString("scopeEvaluationReason", "error")
             promise.resolve(result)
         }
     }
@@ -681,11 +706,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         
         val apkPath = moduleCheck.replace("package:", "").trim()
-        val escapedApkPath = escapeShellArg(apkPath)
-        
-        val xposedInitCheck = executeRootCommand("unzip -l $escapedApkPath 2>/dev/null | grep -q 'assets/xposed_init' && echo 'found'")
-        
-        if (xposedInitCheck.trim() != "found") {
+        if (!apkHasXposedInit(apkPath)) {
             return false
         }
         
@@ -694,6 +715,17 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         
         val findCheck = executeRootCommand("find /data/adb/lspd/ -name '*$packageName*' -type f 2>/dev/null | head -1")
         return findCheck.isNotEmpty()
+    }
+
+    private fun apkHasXposedInit(apkPath: String): Boolean {
+        return try {
+            ZipFile(apkPath).use { zip ->
+                zip.getEntry("assets/xposed_init") != null
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VirtuCamSettings", "Failed to inspect APK for xposed_init: ${e.message}")
+            false
+        }
     }
 
     /**
