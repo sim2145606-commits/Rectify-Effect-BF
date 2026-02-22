@@ -22,8 +22,10 @@ import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
 import {
   runDiagnostics,
+  getRawXposedDebugInfo,
   type DiagnosticsReport,
   type DiagnosticCheckResult,
+  type RawXposedDebugInfo,
 } from '@/services/DiagnosticsService';
 import {
   requestCameraPermission,
@@ -34,6 +36,7 @@ import { getStatusColor } from '@/services/SystemVerification';
 import { resetToDefaults } from '@/services/ResetService';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
+
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -46,6 +49,7 @@ export default function SettingsScreen() {
   const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = useState<DiagnosticsReport | null>(null);
   const [diagnosticsChecks, setDiagnosticsChecks] = useState<DiagnosticCheckResult[]>([]);
+  const [rawXposedDebug, setRawXposedDebug] = useState<RawXposedDebugInfo | null>(null);
   const [isResetting, setIsResetting] = useState(false);
 
   const handleRequestPermission = useCallback(
@@ -91,6 +95,7 @@ export default function SettingsScreen() {
     setIsRunningDiagnostics(true);
     setDiagnosticsChecks([]);
     setDiagnosticsReport(null);
+    setRawXposedDebug(null);
     mediumImpact();
 
     try {
@@ -102,6 +107,8 @@ export default function SettingsScreen() {
         });
       });
       setDiagnosticsReport(report);
+      const rawDebug = await getRawXposedDebugInfo();
+      setRawXposedDebug(rawDebug);
       if (report.failCount === 0) {
         success();
       } else {
@@ -393,6 +400,34 @@ export default function SettingsScreen() {
               </Text>
               <Text style={styles.diagnosticsWarnText}>
                 ⚠ {diagnosticsReport.warnCount} Warnings
+              </Text>
+            </View>
+          )}
+
+          {rawXposedDebug && (
+            <View style={styles.rawDebugBox}>
+              <Text style={styles.rawDebugTitle}>Raw Detection Debug</Text>
+              <Text style={styles.rawDebugLine}>detectionMethod: {rawXposedDebug.detectionMethod}</Text>
+              <Text style={styles.rawDebugLine}>
+                scopeEvaluationReason: {rawXposedDebug.scopeEvaluationReason}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                lsposedPath: {rawXposedDebug.lsposedPath || '(empty)'}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                configuredTargets: {rawXposedDebug.configuredTargets || '(none)'}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                scopedTargets: {rawXposedDebug.scopedTargets || '(none)'}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                moduleLoaded={String(rawXposedDebug.moduleLoaded)} | moduleScoped={String(rawXposedDebug.moduleScoped)}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                hookConfigured={String(rawXposedDebug.hookConfigured)} | hookReady={String(rawXposedDebug.hookReady)}
+              </Text>
+              <Text style={styles.rawDebugHint}>
+                Tip: if moduleLoaded=false after reboot, open a scoped target app once, then run diagnostics again.
               </Text>
             </View>
           )}
@@ -711,6 +746,31 @@ const styles = StyleSheet.create({
     color: Colors.warningAmber,
     fontSize: FontSize.sm,
     fontWeight: '700',
+  },
+  rawDebugBox: {
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.sm,
+    padding: Spacing.md,
+    backgroundColor: Colors.background,
+    gap: 4,
+  },
+  rawDebugTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.electricBlue,
+    marginBottom: 4,
+  },
+  rawDebugLine: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  rawDebugHint: {
+    marginTop: Spacing.xs,
+    fontSize: FontSize.xs,
+    color: Colors.textTertiary,
   },
   logsLink: {
     flexDirection: 'row',
