@@ -3,7 +3,9 @@ package com.briefplantrain.virtucam
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Binder
 import android.os.Build
+import android.os.Process
 import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.ContextCompat
@@ -265,7 +267,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     fun checkRootAccess(promise: Promise) {
         Thread {
             try {
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+                val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
                 val output: String
                 BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                     output = reader.readText()
@@ -799,6 +801,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkAllFilesAccess(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -818,6 +821,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun checkOverlayPermission(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         try {
             val granted = Settings.canDrawOverlays(reactApplicationContext)
             promise.resolve(granted)
@@ -828,6 +832,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun requestOverlayPermission(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         try {
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -844,6 +849,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun startFloatingOverlay(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         try {
             if (!Settings.canDrawOverlays(reactApplicationContext)) {
                 promise.reject("NO_PERMISSION", "Overlay permission not granted")
@@ -871,6 +877,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun stopFloatingOverlay(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         try {
             reactApplicationContext
                 .getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
@@ -1203,7 +1210,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             return ""
         }
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val process = ProcessBuilder("sh", "-c", command).redirectErrorStream(true).start()
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
                 android.util.Log.w("VirtuCamSettings", "Command timed out")
@@ -1231,7 +1238,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             return ""
         }
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
                 android.util.Log.w("VirtuCamSettings", "Root command timed out")
@@ -1300,6 +1307,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } else {
             result.putString("error", "Unknown error")
         }
+    }
+
+    private fun assertAuthenticated(promise: Promise): Boolean {
+        val callerUid = Binder.getCallingUid()
+        if (callerUid != Process.myUid()) {
+            promise.reject("UNAUTHORIZED", "Caller is not authorized")
+            return false
+        }
+        return true
     }
 
 } // end of class VirtuCamSettingsModule

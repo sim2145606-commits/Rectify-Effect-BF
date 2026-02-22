@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -21,6 +22,7 @@ public final class ConfigLoader {
     public static final String MODULE_PACKAGE = "com.briefplantrain.virtucam";
     public static final String PREFS_FILE = "virtucam_config";
     public static final String FALLBACK_JSON_PATH = "/data/local/tmp/virtucam_config.json";
+    private static final long MAX_CONFIG_SIZE_BYTES = 512 * 1024;
 
     private final long reloadIntervalMs;
     private volatile long lastLoadMs = 0;
@@ -96,8 +98,14 @@ public final class ConfigLoader {
         }
 
         try {
-            File f = new File(FALLBACK_JSON_PATH);
+            File f = new File(FALLBACK_JSON_PATH).getCanonicalFile();
+            if (!f.getPath().startsWith("/data/local/tmp/") || !f.getName().equals("virtucam_config.json")) {
+                throw new SecurityException("Invalid fallback config path");
+            }
             if (f.exists() && f.canRead()) {
+                if (f.length() > MAX_CONFIG_SIZE_BYTES) {
+                    throw new IllegalStateException("Fallback config file too large");
+                }
                 String text = slurpFile(f);
                 JSONObject j = new JSONObject(text);
 
@@ -155,7 +163,7 @@ public final class ConfigLoader {
 
     private static ConfigSnapshot.TargetMode parseTargetMode(String s, ConfigSnapshot.TargetMode def) {
         if (s == null) return def;
-        String v = s.trim().toLowerCase();
+        String v = s.trim().toLowerCase(Locale.ROOT);
         switch (v) {
             case "all":
                 return ConfigSnapshot.TargetMode.ALL;
@@ -169,7 +177,7 @@ public final class ConfigLoader {
 
     private static ConfigSnapshot.SourceMode parseSourceMode(String s, ConfigSnapshot.SourceMode def) {
         if (s == null) return def;
-        String v = s.trim().toLowerCase();
+        String v = s.trim().toLowerCase(Locale.ROOT);
         switch (v) {
             case "file":
                 return ConfigSnapshot.SourceMode.FILE;

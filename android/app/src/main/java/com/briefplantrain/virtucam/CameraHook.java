@@ -120,9 +120,9 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private static final int MAX_POOL_SIZE = 8;
 
     // Thread-local YUV buffers to avoid races
-    private final ThreadLocal<int[]> threadLocalArgbBuffer = ThreadLocal.withInitial(() -> null);
-    private final ThreadLocal<byte[]> threadLocalYuvBuffer = ThreadLocal.withInitial(() -> null);
-    private final ThreadLocal<int[]> threadLocalBufferDims = ThreadLocal.withInitial(() -> null);
+    private static final ThreadLocal<int[]> threadLocalArgbBuffer = ThreadLocal.withInitial(() -> null);
+    private static final ThreadLocal<byte[]> threadLocalYuvBuffer = ThreadLocal.withInitial(() -> null);
+    private static final ThreadLocal<int[]> threadLocalBufferDims = ThreadLocal.withInitial(() -> null);
 
     // Video frame decoding
     private final Object videoLock = new Object();
@@ -208,16 +208,16 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             if (imageReader != null) {
                 try { 
                     imageReader.close(); 
-                } catch (Exception e) {
-                    // Expected during cleanup
+                } catch (RuntimeException e) {
+                    XposedBridge.log(TAG + ": imageReader close failed during cleanup: " + e.getMessage());
                 }
                 imageReader = null;
             }
             if (imageWriter != null) {
                 try { 
                     imageWriter.close(); 
-                } catch (Exception e) {
-                    // Expected during cleanup
+                } catch (RuntimeException e) {
+                    XposedBridge.log(TAG + ": imageWriter close failed during cleanup: " + e.getMessage());
                 }
                 imageWriter = null;
             }

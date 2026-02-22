@@ -4,6 +4,17 @@ import { Platform } from 'react-native';
 
 const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov']);
 const BLOCKED_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+const MIME_MAP: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo',
+};
 
 export type ResolvedPath = {
   absolutePath: string;
@@ -246,8 +257,11 @@ export async function cleanEnhancedCache(): Promise<void> {
       await FileSystem.deleteAsync(dir, { idempotent: true });
       await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
     }
-  } catch {
-    // Silent
+  } catch (err: unknown) {
+    if (__DEV__) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('PathResolver: cleanEnhancedCache failed:', message);
+    }
   }
 }
 
@@ -302,16 +316,5 @@ function isAllowedRemoteUrl(rawUrl: string): boolean {
 
 function guessMimeType(uri: string): string {
   const ext = extractExtension(uri);
-  const mimeMap: Record<string, string> = {
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    png: 'image/png',
-    webp: 'image/webp',
-    gif: 'image/gif',
-    mp4: 'video/mp4',
-    mov: 'video/quicktime',
-    mkv: 'video/x-matroska',
-    avi: 'video/x-msvideo',
-  };
-  return mimeMap[ext] || 'application/octet-stream';
+  return MIME_MAP[ext] || 'application/octet-stream';
 }
