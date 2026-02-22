@@ -11,9 +11,10 @@ import android.view.Surface;
 
 import com.briefplantrain.virtucam.engine.SurfaceInfo;
 import com.briefplantrain.virtucam.engine.VirtualCameraEngine;
+import com.briefplantrain.virtucam.hooks.HookStrategyRegistry;
+import com.briefplantrain.virtucam.hooks.IHookStrategy;
 import com.briefplantrain.virtucam.util.LogUtil;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -22,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.IXposedHookZygoteInit;
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
@@ -30,44 +32,94 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
     private static final String TAG = "VirtuCam/XposedEntry";
 
     private static final Set<String> INSTALLED = ConcurrentHashMap.newKeySet();
+    private static final Set<String> SKIP_ENGINE_PACKAGES = ConcurrentHashMap.newKeySet();
+
+    static {
+        SKIP_ENGINE_PACKAGES.add("com.briefplantrain.virtucam");
+        SKIP_ENGINE_PACKAGES.add("android");
+        SKIP_ENGINE_PACKAGES.add("system");
+        SKIP_ENGINE_PACKAGES.add("com.android.systemui");
+    }
 
     @Override
     public void initZygote(StartupParam startupParam) {
-        // No-op for now; keep for future modulePath needs.
+        LogUtil.d(TAG, "initZygote: installing early framework hooks");
+        try {
+            installZygoteSurfaceHooks();
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": initZygote hook install failed: " + t.getMessage());
+        }
     }
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
-        if ("com.briefplantrain.virtucam".equals(lpparam.packageName)) return;
+        if (SKIP_ENGINE_PACKAGES.contains(lpparam.packageName)) {
+            if ("android".equals(lpparam.packageName)) {
+                try {
+                    installCamera2SessionHooksInProcess(lpparam.classLoader, null);
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + ": android framework hook failed: " + t.getMessage());
+                }
+            }
+            return;
+        }
 
         final String key = lpparam.processName != null ? lpparam.processName : lpparam.packageName;
         if (!INSTALLED.add(key)) return;
 
-        LogUtil.d(TAG, "Loaded into: pkg=" + lpparam.packageName + " proc=" + lpparam.processName);
-        updateModuleActiveMarker();
+        LogUtil.d(TAG, "handleLoadPackage: pkg=" + lpparam.packageName + " proc=" + lpparam.processName);
 
-        final VirtualCameraEngine engine = VirtualCameraEngine.getOrCreate(lpparam.packageName, lpparam.processName);
-        engine.start();
+        VirtualCameraEngine engine = null;
+        try {
+            engine = VirtualCameraEngine.getOrCreate(lpparam.packageName, lpparam.processName);
+            engine.start();
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": VirtualCameraEngine init failed for " + lpparam.packageName + ": " + t.getMessage());
+        }
 
-        installSurfaceTrackingHooks(engine);
-        installCamera2SessionHooks(engine);
+        final VirtualCameraEngine finalEngine = engine;
+        if (finalEngine != null) {
+            installPerProcessHooks(lpparam.classLoader, finalEngine);
+        }
+
+        try {
+            HookStrategyRegistry registry = HookStrategyRegistry.getInstance();
+            IHookStrategy strategy = registry.getStrategy(lpparam.packageName);
+            if (strategy != null) {
+                LogUtil.d(TAG, "Applying specialized strategy: " + strategy.getStrategyName()
+                        + " for " + lpparam.packageName);
+                strategy.install(lpparam, finalEngine);
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": HookStrategyRegistry failed for " + lpparam.packageName + ": " + t.getMessage());
+        }
+
+        XposedBridge.log(TAG + ": module active in process: " + key);
+    }
+
+    private static void installZygoteSurfaceHooks() {
+        XposedHelpers.findAndHookMethod(
+                SurfaceTexture.class,
+                "setDefaultBufferSize",
+                int.class,
+                int.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        XposedBridge.log(TAG + ": [zygote] SurfaceTexture.setDefaultBufferSize called");
+                    }
+                }
+        );
+        LogUtil.d(TAG, "Zygote Surface hooks installed");
+    }
+
+    private static void installPerProcessHooks(ClassLoader classLoader, VirtualCameraEngine engine) {
+        installSurfaceTrackingHooks(classLoader, engine);
+        installCamera2SessionHooksInProcess(classLoader, engine);
         installCaptureRequestHooks(engine);
     }
 
-    private static void updateModuleActiveMarker() {
-        try {
-            File markerFile = new File("/data/local/tmp/virtucam_module_active");
-            if (!markerFile.exists()) {
-                markerFile.createNewFile();
-            }
-            markerFile.setLastModified(System.currentTimeMillis());
-            LogUtil.d(TAG, "Module active marker updated from XposedEntry");
-        } catch (Throwable t) {
-            LogUtil.e(TAG, "Failed to update module active marker", t);
-        }
-    }
-
-    private static void installSurfaceTrackingHooks(final VirtualCameraEngine engine) {
+    private static void installSurfaceTrackingHooks(ClassLoader classLoader, final VirtualCameraEngine engine) {
         try {
             XposedHelpers.findAndHookConstructor(
                     Surface.class,
@@ -104,19 +156,27 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         }
     }
 
-    private static void installCamera2SessionHooks(final VirtualCameraEngine engine) {
+    private static void installCamera2SessionHooksInProcess(ClassLoader classLoader, final VirtualCameraEngine engine) {
         try {
             Class<?> cameraDeviceImpl = XposedHelpers.findClassIfExists(
                     "android.hardware.camera2.impl.CameraDeviceImpl",
-                    null
+                    classLoader
             );
             if (cameraDeviceImpl == null) {
-                LogUtil.d(TAG, "CameraDeviceImpl not found; Camera2 session hook skipped");
+                cameraDeviceImpl = XposedHelpers.findClassIfExists(
+                        "android.hardware.camera2.impl.CameraDeviceImpl",
+                        null
+                );
+            }
+            if (cameraDeviceImpl == null) {
+                LogUtil.d(TAG, "CameraDeviceImpl not found in this process; Camera2 session hook skipped");
                 return;
             }
 
+            final Class<?> finalCameraDeviceImpl = cameraDeviceImpl;
+
             XposedHelpers.findAndHookMethod(
-                    cameraDeviceImpl,
+                    finalCameraDeviceImpl,
                     "createCaptureSession",
                     List.class,
                     CameraCaptureSession.StateCallback.class,
@@ -124,20 +184,19 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
+                            if (engine == null) return;
                             Object arg0 = param.args[0];
                             if (!(arg0 instanceof List)) return;
                             @SuppressWarnings("unchecked")
                             List<Object> in = (List<Object>) arg0;
                             if (in.isEmpty()) return;
-
                             param.args[0] = mapSurfaceList(engine, in);
                         }
                     }
             );
-            LogUtil.d(TAG, "Hooked Camera2 createCaptureSession(List<Surface>, ...) overload");
 
             XposedHelpers.findAndHookMethod(
-                    cameraDeviceImpl,
+                    finalCameraDeviceImpl,
                     "createCaptureSessionByOutputConfigurations",
                     List.class,
                     CameraCaptureSession.StateCallback.class,
@@ -145,53 +204,46 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
+                            if (engine == null) return;
                             Object arg0 = param.args[0];
                             if (!(arg0 instanceof List)) return;
-
                             @SuppressWarnings("unchecked")
                             List<Object> in = (List<Object>) arg0;
                             if (in.isEmpty()) return;
-
                             int replaced = 0;
                             for (Object item : in) {
                                 if (!(item instanceof OutputConfiguration)) continue;
                                 if (tryMapOutputConfigurationSurface(engine, (OutputConfiguration) item,
-                                        "createCaptureSessionByOutputConfigurations")) {
-                                    replaced++;
-                                }
+                                        "createCaptureSessionByOutputConfigurations")) replaced++;
                             }
-                            LogUtil.d(TAG, "createCaptureSessionByOutputConfigurations mapped=" + replaced + " outputs");
+                            LogUtil.d(TAG, "createCaptureSessionByOutputConfigurations mapped=" + replaced);
                         }
                     }
             );
-            LogUtil.d(TAG, "Hooked Camera2 createCaptureSessionByOutputConfigurations(...) overload");
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 XposedHelpers.findAndHookMethod(
-                        cameraDeviceImpl,
+                        finalCameraDeviceImpl,
                         "createCaptureSession",
                         SessionConfiguration.class,
                         new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) {
+                                if (engine == null) return;
                                 Object arg0 = param.args[0];
                                 if (!(arg0 instanceof SessionConfiguration)) return;
                                 SessionConfiguration sc = (SessionConfiguration) arg0;
                                 List<OutputConfiguration> outputs = sc.getOutputConfigurations();
                                 if (outputs == null || outputs.isEmpty()) return;
-
                                 int replaced = 0;
                                 for (OutputConfiguration oc : outputs) {
                                     if (tryMapOutputConfigurationSurface(engine, oc,
-                                            "createCaptureSession(SessionConfiguration)")) {
-                                        replaced++;
-                                    }
+                                            "createCaptureSession(SessionConfiguration)")) replaced++;
                                 }
-                                LogUtil.d(TAG, "createCaptureSession(SessionConfiguration) mapped=" + replaced + " outputs");
+                                LogUtil.d(TAG, "createCaptureSession(SessionConfiguration) mapped=" + replaced);
                             }
                         }
                 );
-                LogUtil.d(TAG, "Hooked Camera2 createCaptureSession(SessionConfiguration) overload");
             }
 
             LogUtil.d(TAG, "Camera2 session hooks installed");
@@ -202,25 +254,19 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
 
 
     private static boolean tryMapOutputConfigurationSurface(
-            VirtualCameraEngine engine,
-            OutputConfiguration oc,
-            String hookName
-    ) {
+            VirtualCameraEngine engine, OutputConfiguration oc, String hookName) {
         if (oc == null) return false;
-
         Surface original = oc.getSurface();
         if (original == null) return false;
-
         SurfaceInfo info = engine.inferSurfaceInfo(original);
         Surface mapped = engine.mapOutputSurface(original, info);
         if (mapped == original) return false;
-
         try {
             XposedHelpers.callMethod(oc, "setSurface", mapped);
             return true;
         } catch (Throwable t) {
             engine.rollbackOutputSurfaceMapping(original);
-            LogUtil.e(TAG, hookName + " failed to set mapped surface; mapping rolled back", t);
+            LogUtil.e(TAG, hookName + ": failed to set mapped surface; rolled back", t);
             return false;
         }
     }
@@ -239,7 +285,7 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                 out.add(o);
             }
         }
-        LogUtil.d(TAG, "createCaptureSession(List<Surface>) mapped=" + replaced + " outputs");
+        LogUtil.d(TAG, "createCaptureSession(List<Surface>) mapped=" + replaced);
         return out;
     }
 

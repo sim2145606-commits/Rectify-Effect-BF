@@ -28,7 +28,8 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="xposedmodule" android:value="true"/>
     <meta-data android:name="xposeddescription" android:value="VirtuCam - Virtual camera effects and hooking module"/>
-    <meta-data android:name="xposedminversion" android:value="53"/>
+    <meta-data android:name="xposedminversion" android:value="93"/>
+    <meta-data android:name="xposedscope" android:value="false"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
