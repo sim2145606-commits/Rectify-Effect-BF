@@ -2,8 +2,12 @@ import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type Ionicons from '@expo/vector-icons/Ionicons';
 import type { ComponentProps } from 'react';
-import { Colors, STORAGE_KEYS } from '@/constants/theme';
-import { logger } from './LogService';
+import { DarkColors, STORAGE_KEYS } from '@/constants/theme';
+
+function getLogger() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return (require('./LogService') as typeof import('./LogService')).logger;
+}
 
 type IoniconsName = ComponentProps<typeof Ionicons>['name'];
 
@@ -70,14 +74,14 @@ export const INITIAL_SYSTEM_STATE: SystemVerificationState = {
 export function getStatusColor(status: SystemCheckStatus): string {
   switch (status) {
     case 'ok':
-      return Colors.success;
+      return DarkColors.success;
     case 'warning':
-      return Colors.warningAmber;
+      return DarkColors.warningAmber;
     case 'error':
-      return Colors.danger;
+      return DarkColors.danger;
     case 'loading':
     default:
-      return Colors.textTertiary;
+      return DarkColors.textTertiary;
   }
 }
 
@@ -456,7 +460,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       };
     }
   } catch (err: unknown) {
-    logger.error('System check error', 'SystemVerification', err);
+    getLogger().error('System check error', 'SystemVerification', err);
   }
 
   result.overallReady = [
@@ -521,7 +525,7 @@ export async function getSystemInfo(): Promise<SystemInfo | null> {
       rootVersion,
     };
   } catch (err: unknown) {
-    logger.error('Failed to get system info', 'SystemVerification', err);
+    getLogger().error('Failed to get system info', 'SystemVerification', err);
     return null;
   }
 }

@@ -3,7 +3,9 @@ import { View, StyleSheet, Platform } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, BorderRadius } from '@/constants/theme';
+import { BlurView } from 'expo-blur';
+import { BorderRadius } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 function TabIcon({
   name,
@@ -16,8 +18,9 @@ function TabIcon({
   color: string;
   focused: boolean;
 }) {
+  const { colors } = useTheme();
   return (
-    <View style={[styles.iconWrapper, focused && styles.iconWrapperActive]}>
+    <View style={[styles.iconWrapper, focused && { backgroundColor: color + '22' }]}>
       {library === 'ionicons' ? (
         <Ionicons name={name as keyof typeof Ionicons.glyphMap} size={20} color={color} />
       ) : (
@@ -31,29 +34,67 @@ function TabIcon({
   );
 }
 
+function TabBarBackground({ isDark, isPerformance }: { isDark: boolean; isPerformance: boolean }) {
+  const { colors } = useTheme();
+
+  if (isPerformance || Platform.OS === 'web') {
+    return (
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: colors.tabBar,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+          },
+        ]}
+      />
+    );
+  }
+
+  return (
+    <BlurView
+      tint={isDark ? 'dark' : 'light'}
+      intensity={85}
+      style={[
+        StyleSheet.absoluteFill,
+        {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.borderLight,
+        },
+      ]}
+    />
+  );
+}
+
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { colors, isDark, isPerformance } = useTheme();
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: Colors.electricBlue,
-        tabBarInactiveTintColor: Colors.textTertiary,
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textTertiary,
         tabBarStyle: {
-          backgroundColor: Colors.surface,
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
+          backgroundColor: isPerformance ? colors.tabBar : 'transparent',
+          borderTopColor: 'transparent',
+          borderTopWidth: 0,
           paddingBottom: Platform.OS === 'web' ? 6 : insets.bottom,
           paddingTop: 6,
           height: Platform.OS === 'web' ? 62 : 56 + insets.bottom,
           elevation: 0,
-          shadowOpacity: 0,
+          ...(Platform.OS === 'web' ? { boxShadow: 'none' } : { shadowOpacity: 0 }),
+          position: 'absolute',
         },
+        tabBarBackground: () => (
+          <TabBarBackground isDark={isDark} isPerformance={isPerformance} />
+        ),
         tabBarLabelStyle: {
           fontSize: 9,
-          fontWeight: '700',
-          letterSpacing: 0.3,
+          fontWeight: '600',
+          letterSpacing: 0.2,
           marginTop: 1,
         },
         tabBarItemStyle: {
@@ -103,13 +144,10 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   iconWrapper: {
-    width: 32,
+    width: 34,
     height: 26,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  iconWrapperActive: {
-    backgroundColor: Colors.electricBlue + '20',
   },
 });

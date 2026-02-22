@@ -8,7 +8,8 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { BorderRadius, Colors, FontSize, Spacing } from '@/constants/theme';
+import { BorderRadius, FontSize, Spacing } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 type Variant = 'primary' | 'secondary';
 type Size = 'small' | 'medium' | 'large';
@@ -45,19 +46,21 @@ export default function GlowButton({
   fullWidth = false,
   style,
 }: Props) {
+  const { colors } = useTheme();
+
   const palette =
     variant === 'primary'
       ? {
-          background: Colors.electricBlue + '20',
-          border: Colors.electricBlue + '50',
-          text: Colors.textPrimary,
-          spinner: Colors.textPrimary,
+          background: colors.accent + '22',
+          border: colors.accent + '55',
+          text: colors.textPrimary,
+          spinner: colors.textPrimary,
         }
       : {
-          background: Colors.surfaceLight,
-          border: Colors.border,
-          text: Colors.textSecondary,
-          spinner: Colors.textSecondary,
+          background: colors.surfaceLight,
+          border: colors.border,
+          text: colors.textSecondary,
+          spinner: colors.textSecondary,
         };
 
   const sizeStyle = SIZE_MAP[size];
@@ -109,7 +112,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   label: {
-    fontWeight: '800',
-    letterSpacing: 1,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });

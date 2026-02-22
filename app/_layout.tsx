@@ -1,14 +1,18 @@
 import { Stack } from 'expo-router';
-import { StatusBar, AppState, NativeModules, type AppStateStatus } from 'react-native';
+import { AppState, NativeModules, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Colors, STORAGE_KEYS } from '@/constants/theme';
+import { STORAGE_KEYS } from '@/constants/theme';
+import { ThemeProvider, useTheme } from '@/context/ThemeContext';
+import { StatusBar } from 'expo-status-bar';
 
 const { VirtuCamSettings } = NativeModules;
 
-export default function RootLayout() {
+function AppShell() {
+  const { colors, isDark } = useTheme();
+
   useEffect(() => {
     const migrate = async () => {
       const migrated = await AsyncStorage.getItem('migration_v2_done');
@@ -70,21 +74,31 @@ export default function RootLayout() {
 
   const screenOptions = {
     headerShown: false,
-    contentStyle: { backgroundColor: Colors.background },
+    contentStyle: { backgroundColor: colors.background },
     animation: 'fade' as const,
   };
 
   return (
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} backgroundColor={colors.background} />
+      <Stack screenOptions={screenOptions}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="onboarding" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="logs" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="+not-found" />
+      </Stack>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
-        <Stack screenOptions={screenOptions}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="onboarding" options={{ animation: 'slide_from_right' }} />
-          <Stack.Screen name="logs" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="+not-found" />
-        </Stack>
+        <ThemeProvider>
+          <AppShell />
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

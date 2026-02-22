@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Switch, Platform } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useTheme } from '@/context/ThemeContext';
 
 type Props = {
   label: string;
@@ -20,11 +21,13 @@ export default function SystemToggle({
   value,
   onValueChange,
   icon,
-  accentColor = Colors.accent,
+  accentColor,
   size = 'default',
 }: Props) {
   const { mediumImpact } = useHaptics();
+  const { colors, isPerformance } = useTheme();
   const pressScale = useSharedValue(1);
+  const resolvedAccent = accentColor ?? colors.accent;
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pressScale.value }],
@@ -36,28 +39,37 @@ export default function SystemToggle({
   };
 
   return (
-    <Animated.View style={animatedStyle}>
+    <Animated.View style={isPerformance ? undefined : animatedStyle}>
       <Pressable
         onPressIn={() => {
-          pressScale.value = withSpring(0.98);
+          if (!isPerformance) pressScale.value = withSpring(0.98);
         }}
         onPressOut={() => {
-          pressScale.value = withSpring(1);
+          if (!isPerformance) pressScale.value = withSpring(1);
         }}
         onPress={handleToggle}
         style={[
           styles.container,
           size === 'large' && styles.containerLarge,
-          value && {
-            borderColor: accentColor + '60',
+          {
+            backgroundColor: colors.surface,
+            borderColor: value ? resolvedAccent + '50' : colors.border,
           },
         ]}
       >
         <View style={styles.leftContent}>
-          {icon && <View style={styles.iconContainer}>{icon}</View>}
+          {icon && (
+            <View style={[styles.iconContainer, { backgroundColor: colors.surfaceLight }]}>
+              {icon}
+            </View>
+          )}
           <View style={styles.textContainer}>
-            <Text style={[styles.label, size === 'large' && styles.labelLarge]}>{label}</Text>
-            {sublabel && <Text style={styles.sublabel}>{sublabel}</Text>}
+            <Text style={[styles.label, size === 'large' && styles.labelLarge, { color: colors.textPrimary }]}>
+              {label}
+            </Text>
+            {sublabel && (
+              <Text style={[styles.sublabel, { color: colors.textSecondary }]}>{sublabel}</Text>
+            )}
           </View>
         </View>
         <Switch
@@ -67,11 +79,11 @@ export default function SystemToggle({
             onValueChange(val);
           }}
           trackColor={{
-            false: Colors.surfaceLighter,
-            true: accentColor + '80',
+            false: colors.surfaceLighter,
+            true: resolvedAccent,
           }}
-          thumbColor={value ? accentColor : Colors.textTertiary}
-          ios_backgroundColor={Colors.surfaceLighter}
+          thumbColor={Platform.OS === 'android' ? (value ? '#FFFFFF' : colors.textTertiary) : undefined}
+          ios_backgroundColor={colors.surfaceLighter}
           style={Platform.OS === 'web' ? { height: 24, width: 44 } : undefined}
         />
       </Pressable>
@@ -84,11 +96,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.card,
     padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
     marginBottom: Spacing.sm,
   },
   containerLarge: {
@@ -104,8 +114,7 @@ const styles = StyleSheet.create({
     marginRight: Spacing.md,
     width: 36,
     height: 36,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.surfaceLight,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -113,7 +122,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   label: {
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '600',
   },
@@ -121,7 +129,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.lg,
   },
   sublabel: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     marginTop: 2,
   },

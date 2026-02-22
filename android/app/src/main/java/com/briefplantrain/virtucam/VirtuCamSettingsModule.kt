@@ -475,6 +475,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check if module is loaded/scoped - split these signals to avoid false positives
             var moduleLoaded = false
+            var moduleLoadedInTargetProcess = false
             var moduleScoped = false
             var detectionMethod = "none"
             var scopeEvaluationReason = "no_scope_match"
@@ -493,6 +494,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
             } else if (markerFile.exists()) {
                 moduleLoaded = true
+                moduleLoadedInTargetProcess = true
                 detectionMethod = "marker_file"
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
             } else {
@@ -552,16 +554,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
 
-            if (!moduleScoped && targetMode != "whitelist") {
-                if (moduleLoaded && detectionMethod != "modules_dir") {
-                    moduleScoped = true
-                    scopeEvaluationReason = "non_whitelist_mode"
-                    if (detectionMethod == "none") {
-                        detectionMethod = "non_whitelist_mode"
-                    }
-                } else if (moduleLoaded) {
-                    scopeEvaluationReason = "non_whitelist_waiting_for_hooked_process"
-                }
             } else if (!moduleScoped && targetMode == "whitelist") {
                 scopeEvaluationReason = if (hasTargets) {
                     "whitelist_targets_not_in_scope"
@@ -756,6 +748,17 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
         val findReLsposedCheck = executeRootCommand("find /data/adb/modules/zygisk_lsposed/ -name '*$packageName*' -type f 2>/dev/null | head -1")
         return findReLsposedCheck.isNotEmpty()
+    }
+
+    private fun apkHasXposedInit(apkPath: String): Boolean {
+        return try {
+            ZipFile(apkPath).use { zip ->
+                zip.getEntry("assets/xposed_init") != null
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VirtuCamSettings", "Failed to inspect APK for xposed_init: ${e.message}")
+            false
+        }
     }
 
     private fun apkHasXposedInit(apkPath: String): Boolean {
