@@ -82,9 +82,15 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
         canRequest: true,
       };
     } else if (result.lsposedInstalled) {
+      const scopeReason = result.scopeEvaluationReason;
+      const detail = scopeReason === 'whitelist_no_targets_configured'
+        ? 'LSPosed detected. Add at least one target app to whitelist scope, then reboot.'
+        : scopeReason === 'whitelist_targets_not_in_scope'
+          ? 'LSPosed detected, but selected target app(s) are not scoped yet. Update LSPosed scope and reboot.'
+          : 'LSPosed detected. Module is not loaded in any hooked process yet—open a target app once after reboot.';
       return {
         status: 'denied',
-        detail: 'Enable module in LSPosed, add target apps to scope, and reboot device',
+        detail,
         canRequest: true,
       };
     } else {
