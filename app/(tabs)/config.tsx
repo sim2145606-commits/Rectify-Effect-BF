@@ -332,7 +332,12 @@ export default function StudioScreen() {
         setFloatingBubbleEnabled(value);
         lightImpact();
 
-        // 3. If disabling, stop the service immediately
+        // 3. Start/stop service to keep runtime in sync with toggle state
+        if (value) {
+          await VirtuCamSettings.startFloatingOverlay();
+        }
+
+        // If disabling, stop the service immediately
         if (!value) {
           try {
             await VirtuCamSettings.stopFloatingOverlay();
@@ -350,6 +355,8 @@ export default function StudioScreen() {
           const message = err instanceof Error ? err.message : String(err);
           console.error('Error toggling floating overlay:', message);
         }
+        // Revert toggle if runtime action failed
+        setFloatingBubbleEnabled(!value);
         const message = err instanceof Error ? err.message : String(err);
         Alert.alert('Error', `Failed to toggle floating overlay. ${message}`);
       }

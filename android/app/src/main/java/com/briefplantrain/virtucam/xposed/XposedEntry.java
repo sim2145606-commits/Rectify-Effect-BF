@@ -3,6 +3,9 @@ package com.briefplantrain.virtucam.xposed;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.params.OutputConfiguration;
+import android.hardware.camera2.params.SessionConfiguration;
+import android.os.Build;
 import android.os.Handler;
 import android.view.Surface;
 
@@ -108,31 +111,121 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                         protected void beforeHookedMethod(MethodHookParam param) {
                             Object arg0 = param.args[0];
                             if (!(arg0 instanceof List)) return;
+                            @SuppressWarnings("unchecked")
+                            List<Object> in = (List<Object>) arg0;
+                            if (in.isEmpty()) return;
+
+                            param.args[0] = mapSurfaceList(engine, in);
+                        }
+                    }
+            );
+            LogUtil.d(TAG, "Hooked Camera2 createCaptureSession(List<Surface>, ...) overload");
+
+            XposedHelpers.findAndHookMethod(
+                    cameraDeviceImpl,
+                    "createCaptureSessionByOutputConfigurations",
+                    List.class,
+                    CameraCaptureSession.StateCallback.class,
+                    Handler.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            Object arg0 = param.args[0];
+                            if (!(arg0 instanceof List)) return;
 
                             @SuppressWarnings("unchecked")
                             List<Object> in = (List<Object>) arg0;
                             if (in.isEmpty()) return;
 
-                            List<Object> out = new ArrayList<>(in.size());
-                            for (Object o : in) {
-                                if (o instanceof Surface) {
-                                    Surface original = (Surface) o;
-                                    SurfaceInfo info = engine.inferSurfaceInfo(original);
-                                    Surface mapped = engine.mapOutputSurface(original, info);
-                                    out.add(mapped);
-                                } else {
-                                    out.add(o);
+                            int replaced = 0;
+                            for (Object item : in) {
+                                if (!(item instanceof OutputConfiguration)) continue;
+                                if (tryMapOutputConfigurationSurface(engine, (OutputConfiguration) item,
+                                        "createCaptureSessionByOutputConfigurations")) {
+                                    replaced++;
                                 }
                             }
-                            param.args[0] = out;
+                            LogUtil.d(TAG, "createCaptureSessionByOutputConfigurations mapped=" + replaced + " outputs");
                         }
                     }
             );
+            LogUtil.d(TAG, "Hooked Camera2 createCaptureSessionByOutputConfigurations(...) overload");
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                XposedHelpers.findAndHookMethod(
+                        cameraDeviceImpl,
+                        "createCaptureSession",
+                        SessionConfiguration.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                Object arg0 = param.args[0];
+                                if (!(arg0 instanceof SessionConfiguration)) return;
+                                SessionConfiguration sc = (SessionConfiguration) arg0;
+                                List<OutputConfiguration> outputs = sc.getOutputConfigurations();
+                                if (outputs == null || outputs.isEmpty()) return;
+
+                                int replaced = 0;
+                                for (OutputConfiguration oc : outputs) {
+                                    if (tryMapOutputConfigurationSurface(engine, oc,
+                                            "createCaptureSession(SessionConfiguration)")) {
+                                        replaced++;
+                                    }
+                                }
+                                LogUtil.d(TAG, "createCaptureSession(SessionConfiguration) mapped=" + replaced + " outputs");
+                            }
+                        }
+                );
+                LogUtil.d(TAG, "Hooked Camera2 createCaptureSession(SessionConfiguration) overload");
+            }
 
             LogUtil.d(TAG, "Camera2 session hooks installed");
         } catch (Throwable t) {
             LogUtil.e(TAG, "Camera2 session hooks failed", t);
         }
+    }
+
+
+    private static boolean tryMapOutputConfigurationSurface(
+            VirtualCameraEngine engine,
+            OutputConfiguration oc,
+            String hookName
+    ) {
+        if (oc == null) return false;
+
+        Surface original = oc.getSurface();
+        if (original == null) return false;
+
+        SurfaceInfo info = engine.inferSurfaceInfo(original);
+        Surface mapped = engine.mapOutputSurface(original, info);
+        if (mapped == original) return false;
+
+        try {
+            XposedHelpers.callMethod(oc, "setSurface", mapped);
+            return true;
+        } catch (Throwable t) {
+            engine.rollbackOutputSurfaceMapping(original);
+            LogUtil.e(TAG, hookName + " failed to set mapped surface; mapping rolled back", t);
+            return false;
+        }
+    }
+
+    private static List<Object> mapSurfaceList(VirtualCameraEngine engine, List<Object> in) {
+        List<Object> out = new ArrayList<>(in.size());
+        int replaced = 0;
+        for (Object o : in) {
+            if (o instanceof Surface) {
+                Surface original = (Surface) o;
+                SurfaceInfo info = engine.inferSurfaceInfo(original);
+                Surface mapped = engine.mapOutputSurface(original, info);
+                if (mapped != original) replaced++;
+                out.add(mapped);
+            } else {
+                out.add(o);
+            }
+        }
+        LogUtil.d(TAG, "createCaptureSession(List<Surface>) mapped=" + replaced + " outputs");
+        return out;
     }
 
     private static void installCaptureRequestHooks(final VirtualCameraEngine engine) {
