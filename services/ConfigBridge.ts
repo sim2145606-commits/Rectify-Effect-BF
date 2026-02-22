@@ -9,6 +9,31 @@ export type CameraTarget = 'front' | 'back' | 'both' | 'none';
 export type MediaSourceType = 'file' | 'stream';
 export type SourceMode = 'black' | 'file' | 'stream' | 'test';
 
+
+type StoredTargetApp = { enabled: boolean; packageName: string };
+
+function safeParseTargetApps(targetAppsRaw: string | null): StoredTargetApp[] {
+  if (!targetAppsRaw) return [];
+
+  try {
+    const parsed = JSON.parse(targetAppsRaw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((app: unknown): app is StoredTargetApp => {
+        if (!app || typeof app !== 'object') return false;
+        const candidate = app as Partial<StoredTargetApp>;
+        return typeof candidate.enabled === 'boolean' && typeof candidate.packageName === 'string';
+      })
+      .map(app => ({ enabled: app.enabled, packageName: app.packageName }));
+  } catch (err: unknown) {
+    logger.warn('Failed to parse target app list; using empty list', 'ConfigBridge', err);
+    return [];
+  }
+}
+
 export type BridgeConfig = {
   enabled: boolean;
   mediaSourcePath: string | null;
@@ -87,7 +112,7 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
   try {
     const config = await VirtuCamSettings.readConfig();
 
-    let targetPackages: string[] = config.targetPackages
+    const targetPackages: string[] = config.targetPackages
       ? config.targetPackages.split(',').filter((p: string) => p.length > 0)
       : [];
 
@@ -166,8 +191,7 @@ export async function syncAllSettings(): Promise<void> {
       cameraTarget = 'back';
     }
 
-    const storedApps: Array<{packageName: string; enabled: boolean}> =
-      targetAppsRaw ? JSON.parse(targetAppsRaw) : [];
+    const storedApps = safeParseTargetApps(targetAppsRaw);
     const enabledPackages = storedApps
       .filter(app => app.enabled)
       .map(app => app.packageName);
@@ -211,7 +235,8 @@ export async function getBridgeStatus(): Promise<{
       try {
         const readableStatus = await VirtuCamSettings.verifyConfigReadable();
         readable = readableStatus.readable && readableStatus.exists;
-      } catch {
+      } catch (err: unknown) {
+        logger.warn('Failed to verify config readability', 'ConfigBridge', err);
         readable = false;
       }
     }
@@ -226,7 +251,8 @@ export async function getBridgeStatus(): Promise<{
       version,
       readable,
     };
-  } catch {
+  } catch (err: unknown) {
+    logger.error('Failed to get bridge status', 'ConfigBridge', err);
     return {
       available: false,
       path: null,

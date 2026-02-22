@@ -42,6 +42,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun writeConfig(config: ReadableMap, promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -208,6 +209,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun readConfig(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -246,6 +248,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getConfigPath(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -265,6 +268,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkRootAccess(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         Thread {
             try {
                 val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
@@ -299,6 +303,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun detectRootSolution(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -364,6 +369,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getSystemInfo(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -424,6 +430,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkXposedStatus(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -615,6 +622,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun isOverlayEnabled(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         try {
             promise.resolve(prefs.getBoolean("overlayEnabled", false))
         } catch (e: Exception) {
@@ -754,11 +762,19 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     private fun apkHasXposedInit(apkPath: String): Boolean {
         return try {
-            ZipFile(apkPath).use { zip ->
+            val apkFile = File(apkPath).canonicalFile
+            if (!apkFile.exists() || !apkFile.isFile || apkFile.extension.lowercase() != "apk") {
+                android.util.Log.w("VirtuCamSettings", "Rejected invalid APK path: $apkPath")
+                return false
+            }
+            ZipFile(apkFile).use { zip ->
                 zip.getEntry("assets/xposed_init") != null
             }
-        } catch (e: Exception) {
-            android.util.Log.w("VirtuCamSettings", "Failed to inspect APK for xposed_init: ${e.message}")
+        } catch (e: IOException) {
+            android.util.Log.w("VirtuCamSettings", "I/O error while inspecting APK: ${e.message}", e)
+            false
+        } catch (e: SecurityException) {
+            android.util.Log.w("VirtuCamSettings", "Security error while inspecting APK: ${e.message}", e)
             false
         }
     }
@@ -770,6 +786,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun checkStoragePermission(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -893,6 +910,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun isOverlayRunning(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         promise.resolve(FloatingOverlayService.isServiceRunning())
     }
 
@@ -901,6 +919,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun verifyConfigReadable(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -934,6 +953,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getXposedLogs(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -963,6 +983,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getSystemLogs(lineCount: Int, promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -991,6 +1012,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun clearSystemLogs(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -1008,6 +1030,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getLSPosedDiagnostics(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -1080,6 +1103,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getInstalledPackages(packageNames: ReadableArray, promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -1109,6 +1133,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun getAllInstalledApps(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
@@ -1139,6 +1164,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      */
     @ReactMethod
     fun detectLSPosedManager(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
         if (reactApplicationContext == null) {
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return

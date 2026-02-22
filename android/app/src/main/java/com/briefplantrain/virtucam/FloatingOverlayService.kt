@@ -83,9 +83,8 @@ class FloatingOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val callerPkg = intent?.`package`
-        if (callerPkg != null && callerPkg != packageName) {
-            android.util.Log.w("FloatingOverlay", "Rejected intent from: $callerPkg")
+        if (intent?.action != null && intent.action != Intent.ACTION_MAIN) {
+            android.util.Log.w("FloatingOverlay", "Rejected unexpected action: ${intent.action}")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -115,22 +114,35 @@ class FloatingOverlayService : Service() {
     }
 
     private fun createNotification(): Notification {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val pendingIntent = try {
+            PendingIntent.getActivity(
+                this,
+                0,
+                launchIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        } catch (e: RuntimeException) {
+            android.util.Log.e("FloatingOverlay", "Failed to create pending intent", e)
+            null
+        }
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("VirtuCam Overlay Active")
             .setContentText("Tap to return to app")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+
+        if (pendingIntent != null) {
+            builder.setContentIntent(pendingIntent)
+        }
+
+        return builder.build()
     }
 
     private fun loadCurrentState() {

@@ -24,12 +24,14 @@ import {
   type AllPermissionsState,
   type PermissionStatus,
 } from '@/services/PermissionManager';
+import { logger } from '@/services/LogService';
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const [permissions, setPermissions] = useState<AllPermissionsState | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [isActionBusy, setIsActionBusy] = useState(false);
   const prevAppStateRef = useRef(AppState.currentState);
 
   const checkPerms = useCallback(async () => {
@@ -38,7 +40,7 @@ export default function OnboardingScreen() {
       const perms = await checkAllPermissions();
       setPermissions(perms);
     } catch (error) {
-      console.error('Permission check failed:', error);
+      logger.error('Permission check failed', 'Onboarding', error);
     } finally {
       setIsChecking(false);
     }
@@ -59,30 +61,80 @@ export default function OnboardingScreen() {
   }, [checkPerms]);
 
   const handleRequestCamera = async () => {
-    await requestCameraPermission();
-    await checkPerms();
+    if (isActionBusy) return;
+    setIsActionBusy(true);
+    try {
+      await requestCameraPermission();
+      await checkPerms();
+    } catch (err: unknown) {
+      logger.warn('Failed to request camera permission', 'Onboarding', err);
+    } finally {
+      setIsActionBusy(false);
+    }
   };
 
   const handleRequestAllFiles = async () => {
-    await requestAllFilesAccess();
+    if (isActionBusy) return;
+    setIsActionBusy(true);
+    try {
+      await requestAllFilesAccess();
+      await checkPerms();
+    } catch (err: unknown) {
+      logger.warn('Failed to request all files access', 'Onboarding', err);
+    } finally {
+      setIsActionBusy(false);
+    }
   };
 
   const handleRequestOverlay = async () => {
-    await requestOverlayPermission();
+    if (isActionBusy) return;
+    setIsActionBusy(true);
+    try {
+      await requestOverlayPermission();
+      await checkPerms();
+    } catch (err: unknown) {
+      logger.warn('Failed to request overlay permission', 'Onboarding', err);
+    } finally {
+      setIsActionBusy(false);
+    }
   };
 
   const handleOpenLSPosed = async () => {
-    await openLSPosedManager();
+    if (isActionBusy) return;
+    setIsActionBusy(true);
+    try {
+      await openLSPosedManager();
+    } catch (err: unknown) {
+      logger.warn('Failed to open LSPosed manager', 'Onboarding', err);
+    } finally {
+      setIsActionBusy(false);
+    }
   };
 
   const handleOpenSettings = async () => {
-    await openAppSettings();
+    if (isActionBusy) return;
+    setIsActionBusy(true);
+    try {
+      await openAppSettings();
+    } catch (err: unknown) {
+      logger.warn('Failed to open app settings', 'Onboarding', err);
+    } finally {
+      setIsActionBusy(false);
+    }
   };
 
   const handleProceed = async () => {
+    if (isActionBusy) return;
     if (permissions && areAllPermissionsGranted(permissions)) {
-      await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
-      router.replace('/(tabs)');
+      setIsActionBusy(true);
+      try {
+        await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
+        router.replace('/(tabs)');
+      } catch (err: unknown) {
+        logger.error('Failed to complete onboarding', 'Onboarding', err);
+      } finally {
+        setIsActionBusy(false);
+      }
     }
   };
 

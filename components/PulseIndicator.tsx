@@ -15,6 +15,7 @@ type Props = {
 };
 
 export default function PulseIndicator({ active, color = '#00D4FF', size = 10 }: Props) {
+  const safeSize = Number.isFinite(size) && size > 0 ? size : 10;
   const scale = useSharedValue(1);
   const opacity = useSharedValue(0.8);
 
@@ -42,12 +43,12 @@ export default function PulseIndicator({ active, color = '#00D4FF', size = 10 }:
       -1,
       true
     );
-  }, [active, scale, opacity]);
+  }, [active]);
 
   const animStyle = useAnimatedStyle(() => ({
-    width: size,
-    height: size,
-    borderRadius: size / 2,
+    width: safeSize,
+    height: safeSize,
+    borderRadius: safeSize / 2,
     backgroundColor: color,
     transform: [{ scale: scale.value }],
     opacity: opacity.value,

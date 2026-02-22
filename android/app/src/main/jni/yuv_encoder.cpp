@@ -2,6 +2,7 @@
 #include <cstring>
 #include <cstdint>
 #include <algorithm>
+#include <limits>
 
 // PERFORMANCE FIX: Include ARM NEON intrinsics for hardware acceleration
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
@@ -20,6 +21,45 @@ static void throwIllegalArgument(JNIEnv* env, const char* message) {
     }
 }
 
+static bool validateDimensionsAndArrays(
+    JNIEnv* env,
+    jintArray rgbInput,
+    jbyteArray yuvOutput,
+    jint width,
+    jint height,
+    const char* methodName
+) {
+    if (width <= 0 || height <= 0) {
+        throwIllegalArgument(env, "Width and height must be > 0");
+        return false;
+    }
+
+    if ((width & 1) != 0 || (height & 1) != 0) {
+        throwIllegalArgument(env, "Width and height must be even for YUV420 output");
+        return false;
+    }
+
+    const int64_t frameSize64 = static_cast<int64_t>(width) * static_cast<int64_t>(height);
+    const int64_t expectedYuvLen64 = frameSize64 + (frameSize64 / 2);
+
+    if (frameSize64 <= 0 ||
+        frameSize64 > std::numeric_limits<int>::max() ||
+        expectedYuvLen64 > std::numeric_limits<int>::max() ||
+        expectedYuvLen64 > std::numeric_limits<jsize>::max()) {
+        throwIllegalArgument(env, "Frame dimensions overflow expected output size");
+        return false;
+    }
+
+    const jsize rgbLen = env->GetArrayLength(rgbInput);
+    const jsize yuvLen = env->GetArrayLength(yuvOutput);
+    if (rgbLen < static_cast<jsize>(frameSize64) || yuvLen < static_cast<jsize>(expectedYuvLen64)) {
+        throwIllegalArgument(env, methodName);
+        return false;
+    }
+
+    return true;
+}
+
 
 /**
  * PERFORMANCE FIX: High-performance RGB to NV21 conversion using ARM NEON intrinsics.
@@ -35,6 +75,16 @@ Java_com_briefplantrain_virtucam_NativeEncoder_rgbToNv21(
     jint width,
     jint height
 ) {
+    if (!validateDimensionsAndArrays(
+            env,
+            rgbInput,
+            nv21Output,
+            width,
+            height,
+            "Array too small for given dimensions in rgbToNv21")) {
+        return;
+    }
+
     jint *rgb = env->GetIntArrayElements(rgbInput, nullptr);
     jbyte *nv21 = env->GetByteArrayElements(nv21Output, nullptr);
 
@@ -50,16 +100,6 @@ Java_com_briefplantrain_virtucam_NativeEncoder_rgbToNv21(
     }
 
     int frameSize = width * height;
-    const jsize rgbLen = env->GetArrayLength(rgbInput);
-    const jsize nv21Len = env->GetArrayLength(nv21Output);
-    const int expectedRgbLen = width * height;
-    const int expectedNv21Len = width * height * 3 / 2;
-    if (rgbLen < expectedRgbLen || nv21Len < expectedNv21Len) {
-        env->ReleaseIntArrayElements(rgbInput, rgb, JNI_ABORT);
-        env->ReleaseByteArrayElements(nv21Output, nv21, JNI_ABORT);
-        throwIllegalArgument(env, "Array too small for given dimensions in rgbToNv21");
-        return;
-    }
 
 #if USE_NEON
     // NEON-accelerated Y plane conversion
@@ -259,6 +299,16 @@ Java_com_briefplantrain_virtucam_NativeEncoder_rgbToI420(
     jint width,
     jint height
 ) {
+    if (!validateDimensionsAndArrays(
+            env,
+            rgbInput,
+            i420Output,
+            width,
+            height,
+            "Array too small for given dimensions in rgbToI420")) {
+        return;
+    }
+
     jint *rgb = env->GetIntArrayElements(rgbInput, nullptr);
     jbyte *i420 = env->GetByteArrayElements(i420Output, nullptr);
 
@@ -274,16 +324,6 @@ Java_com_briefplantrain_virtucam_NativeEncoder_rgbToI420(
     }
 
     int frameSize = width * height;
-    const jsize rgbLen = env->GetArrayLength(rgbInput);
-    const jsize i420Len = env->GetArrayLength(i420Output);
-    const int expectedRgbLen = width * height;
-    const int expectedI420Len = width * height * 3 / 2;
-    if (rgbLen < expectedRgbLen || i420Len < expectedI420Len) {
-        env->ReleaseIntArrayElements(rgbInput, rgb, JNI_ABORT);
-        env->ReleaseByteArrayElements(i420Output, i420, JNI_ABORT);
-        throwIllegalArgument(env, "Array too small for given dimensions in rgbToI420");
-        return;
-    }
     int uOffset = frameSize;
     int vOffset = frameSize + frameSize / 4;
 
