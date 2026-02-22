@@ -475,6 +475,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check if module is loaded/scoped - split these signals to avoid false positives
             var moduleLoaded = false
+            var moduleLoadedInTargetProcess = false
             var moduleScoped = false
             var detectionMethod = "none"
             var scopeEvaluationReason = "no_scope_match"
@@ -493,6 +494,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
             } else if (markerFile.exists()) {
                 moduleLoaded = true
+                moduleLoadedInTargetProcess = true
                 detectionMethod = "marker_file"
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
             }
@@ -545,12 +547,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
 
-            if (!moduleScoped && moduleLoaded && targetMode != "whitelist") {
+            if (!moduleScoped && moduleLoadedInTargetProcess && targetMode != "whitelist") {
                 moduleScoped = true
                 scopeEvaluationReason = "non_whitelist_mode"
                 if (detectionMethod == "none") {
                     detectionMethod = "non_whitelist_mode"
                 }
+            } else if (!moduleScoped && moduleLoaded && targetMode != "whitelist") {
+                scopeEvaluationReason = "non_whitelist_waiting_for_hook"
             } else if (!moduleScoped && targetMode == "whitelist") {
                 scopeEvaluationReason = if (hasTargets) {
                     "whitelist_targets_not_in_scope"
