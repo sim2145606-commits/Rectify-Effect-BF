@@ -7,6 +7,7 @@ const { VirtuCamSettings } = NativeModules;
 
 export type CameraTarget = 'front' | 'back' | 'both' | 'none';
 export type MediaSourceType = 'file' | 'stream';
+export type SourceMode = 'black' | 'file' | 'stream' | 'test';
 
 export type BridgeConfig = {
   enabled: boolean;
@@ -20,7 +21,8 @@ export type BridgeConfig = {
   offsetX: number;
   offsetY: number;
   scaleMode: string;
-  targetMode: 'whitelist' | 'blacklist';
+  targetMode: 'all' | 'whitelist' | 'blacklist';
+  sourceMode: SourceMode;
   targetPackages: string[];
 };
 
@@ -47,6 +49,7 @@ export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<
       offsetY: config.offsetY ?? 0.0,
       scaleMode: config.scaleMode ?? 'fit',
       targetMode: config.targetMode ?? 'whitelist',
+      sourceMode: config.sourceMode ?? 'black',
       targetPackages: config.targetPackages ?? [],
     });
   } catch (err: unknown) {
@@ -72,6 +75,7 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
     offsetY: 0.0,
     scaleMode: 'fit',
     targetMode: 'whitelist',
+    sourceMode: 'black',
     targetPackages: [],
   };
 
@@ -178,7 +182,8 @@ export async function syncAllSettings(): Promise<void> {
       scaleY: scaleY ? parseFloat(scaleY) : 1.0,
       offsetX: offsetX ? parseFloat(offsetX) : 0.0,
       offsetY: offsetY ? parseFloat(offsetY) : 0.0,
-      targetMode: (targetModeRaw === 'whitelist' || targetModeRaw === 'blacklist') ? targetModeRaw : 'whitelist',
+      targetMode: (targetModeRaw === 'all' || targetModeRaw === 'whitelist' || targetModeRaw === 'blacklist') ? targetModeRaw : 'whitelist',
+      sourceMode: mediaPath ? (mediaPath.startsWith('rtmp://') || mediaPath.startsWith('rtsp://') || mediaPath.startsWith('http://') || mediaPath.startsWith('https://') ? 'stream' : 'file') : 'black',
       targetPackages: enabledPackages,
     };
 
