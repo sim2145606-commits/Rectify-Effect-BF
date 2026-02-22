@@ -1,11 +1,14 @@
 package com.briefplantrain.virtucam;
 
+import android.util.Log;
+
 /**
  * JNI bridge for high-performance native YUV encoding.
  * Falls back to Java implementation if native library is unavailable.
  */
 public class NativeEncoder {
 
+    private static final String TAG = "VirtuCam/NativeEncoder";
     private static boolean nativeAvailable = false;
 
     static {
@@ -14,7 +17,7 @@ public class NativeEncoder {
             System.loadLibrary("virtucam-native");
             nativeAvailable = true;
         } catch (UnsatisfiedLinkError e) {
-            // Native library not available, will use Java fallback
+            Log.w(TAG, "Native library load failed; Java fallback enabled", e);
             nativeAvailable = false;
         }
     }

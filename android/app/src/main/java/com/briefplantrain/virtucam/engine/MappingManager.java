@@ -49,7 +49,12 @@ public final class MappingManager {
             drain = reader.getSurface();
 
             SurfaceMapping mapping = new SurfaceMapping(original, drain, reader, info);
-            byOriginal.put(original, mapping);
+            SurfaceMapping raced = byOriginal.putIfAbsent(original, mapping);
+            if (raced != null) {
+                try { drain.release(); } catch (Throwable t) { LogUtil.w(TAG, "drain release failed", t); }
+                try { reader.close(); } catch (Throwable t) { LogUtil.w(TAG, "reader close failed", t); }
+                return raced.drainSurface;
+            }
 
             LogUtil.d(TAG, "Mapped surface: original=" + original + " -> drain=" + drain +
                     " kind=" + (info != null ? info.kind : SurfaceInfo.Kind.UNKNOWN) +
@@ -80,8 +85,8 @@ public final class MappingManager {
         Image image = null;
         try {
             image = reader.acquireLatestImage();
-        } catch (Throwable ignored) {
-            // no-op
+        } catch (RuntimeException e) {
+            LogUtil.w(TAG, "acquireLatestImage failed", e);
         } finally {
             if (image != null) {
                 try { image.close(); } catch (Throwable ignored) {}

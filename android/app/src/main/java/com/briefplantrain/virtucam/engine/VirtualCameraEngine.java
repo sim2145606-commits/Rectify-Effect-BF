@@ -20,6 +20,7 @@ import com.briefplantrain.virtucam.util.LogUtil;
 
 import java.io.File;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -251,13 +252,13 @@ public final class VirtualCameraEngine {
         lastMediaBitmap = null;
 
         try {
-            File f = new File(path);
-            if (!f.exists() || !f.canRead()) {
+            File f = new File(path).getCanonicalFile();
+            if (!f.exists() || !f.canRead() || f.getPath().contains("..")) {
                 LogUtil.d(TAG, "Media not readable: " + path + " -> using black");
                 return getBlackFrame();
             }
 
-            String lower = path.toLowerCase();
+            String lower = path.toLowerCase(Locale.ROOT);
             if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp")) {
                 Bitmap b = BitmapFactory.decodeFile(path);
                 lastMediaBitmap = (b != null) ? b : getBlackFrame();
@@ -265,9 +266,13 @@ public final class VirtualCameraEngine {
             }
 
             MediaMetadataRetriever mmr = new MediaMetadataRetriever();
-            mmr.setDataSource(path);
-            Bitmap b = mmr.getFrameAtTime(0);
-            mmr.release();
+            Bitmap b;
+            try {
+                mmr.setDataSource(f.getPath());
+                b = mmr.getFrameAtTime(0);
+            } finally {
+                mmr.release();
+            }
 
             lastMediaBitmap = (b != null) ? b : getBlackFrame();
             return lastMediaBitmap;
