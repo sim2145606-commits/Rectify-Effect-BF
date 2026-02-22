@@ -103,6 +103,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
     private volatile float offsetX = 0.0f;
     private volatile float offsetY = 0.0f;
     private volatile String targetMode = "whitelist";
+    private volatile String sourceMode = "black";
     private volatile Set<String> targetPackages = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
     // --- Streaming support ---
@@ -337,6 +338,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 offsetX = prefs.getFloat("offsetX", 0.0f);
                 offsetY = prefs.getFloat("offsetY", 0.0f);
                 targetMode = prefs.getString("targetMode", "whitelist");
+                sourceMode = prefs.getString("sourceMode", "black");
 
                 String packagesStr = prefs.getString("targetPackages", "");
                 if (!packagesStr.isEmpty()) {
@@ -358,15 +360,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                 }
                 mediaSourcePath = newMediaPath;
                 
-                // Check if the media source is a streaming URL
-                isStreamingMode = StreamingMediaSource.isStreamingUrl(mediaSourcePath);
-                if (isStreamingMode) {
-                    if (streamingSource != null) {
-                        streamingSource.release();
-                    }
-                    streamingSource = new StreamingMediaSource(mediaSourcePath);
-                    log("Streaming mode enabled: " + mediaSourcePath);
-                }
+                configureStreamingMode(mediaSourcePath, sourceMode);
                 
                 configLoaded = true;
                 log("Config loaded via XSharedPreferences");
@@ -407,6 +401,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                         offsetX = (float) json.optDouble("offsetX", 0.0);
                         offsetY = (float) json.optDouble("offsetY", 0.0);
                         targetMode = json.optString("targetMode", "whitelist");
+                        sourceMode = json.optString("sourceMode", "black");
                         
                         String packagesStr = json.optString("targetPackages", "");
                         if (!packagesStr.isEmpty()) {
@@ -427,6 +422,7 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
                             stopVideoDecoder();
                         }
                         mediaSourcePath = newMediaPath;
+                        configureStreamingMode(mediaSourcePath, sourceMode);
                         configLoaded = true;
                         log("Config loaded via JSON fallback (enabled=" + enabled + ")");
                         }
@@ -451,19 +447,40 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
 
     private boolean isTargetedApp(String packageName) {
         if (!enabled) return false;
-        if ("whitelist".equals(targetMode)) {
+        if ("all".equalsIgnoreCase(targetMode)) {
+            return true;
+        }
+        if ("whitelist".equalsIgnoreCase(targetMode)) {
             return targetPackages.contains(packageName);
-        } else {
+        }
+        if ("blacklist".equalsIgnoreCase(targetMode)) {
             return !targetPackages.contains(packageName);
         }
+        return targetPackages.contains(packageName);
     }
 
     private boolean isActive() {
-        return enabled && mediaSourcePath != null;
+        return enabled;
     }
 
     private boolean isActiveForPackage(String packageName) {
         return isActive() && isTargetedApp(packageName);
+    }
+
+
+    private void configureStreamingMode(String path, String mode) {
+        boolean wantsStream = "stream".equalsIgnoreCase(mode)
+                || StreamingMediaSource.isStreamingUrl(path);
+        isStreamingMode = wantsStream;
+
+        if (streamingSource != null) {
+            streamingSource.release();
+            streamingSource = null;
+        }
+
+        if (isStreamingMode && path != null && !path.isEmpty()) {
+            log("Streaming mode requested but frame extraction is not implemented yet; falling back to black frame source");
+        }
     }
 
     private synchronized Handler getFrameProcessHandler() {
@@ -1203,7 +1220,13 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             return;
         }
 
-        if (mediaSourcePath == null || mediaSourcePath.isEmpty()) return;
+        if ("black".equalsIgnoreCase(sourceMode)
+                || mediaSourcePath == null || mediaSourcePath.isEmpty()) {
+            cachedFrame = createSolidFrame(Color.BLACK, 640, 480);
+            cachedMediaPath = null;
+            isVideoSource = false;
+            return;
+        }
 
         File mediaFile = new File(mediaSourcePath);
         if (!mediaFile.exists() || !mediaFile.canRead()) {
@@ -1222,6 +1245,13 @@ public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit
             loadImageSource();
         }
         cachedMediaPath = mediaSourcePath;
+    }
+
+
+    private Bitmap createSolidFrame(int color, int width, int height) {
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        bitmap.eraseColor(color);
+        return bitmap;
     }
 
     private void loadImageSource() {
