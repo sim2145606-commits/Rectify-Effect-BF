@@ -1,5 +1,6 @@
 package com.briefplantrain.virtucam.hooks;
 
+import com.briefplantrain.virtucam.engine.VirtualCameraEngine;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
@@ -11,6 +12,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 public class DouYinHookStrategy implements IHookStrategy {
 
     private static final String TAG = "VirtuCam-DouYin";
+    private VirtualCameraEngine mEngine;
 
     @Override
     public String getStrategyName() {
@@ -35,6 +37,13 @@ public class DouYinHookStrategy implements IHookStrategy {
     }
 
     @Override
+    public void install(LoadPackageParam lpparam, VirtualCameraEngine engine) {
+        this.mEngine = engine;
+        XposedBridge.log(TAG + ": Installing hooks for " + lpparam.packageName);
+        applyHooks(lpparam, new HookConfig());
+    }
+
+    @Override
     public void applyHooks(LoadPackageParam lpparam, HookConfig config) {
         XposedBridge.log(TAG + ": Applying DouYin/TikTok-specific hooks");
 
@@ -49,5 +58,6 @@ public class DouYinHookStrategy implements IHookStrategy {
     @Override
     public void cleanup() {
         XposedBridge.log(TAG + ": Cleanup");
+        mEngine = null;
     }
 }
