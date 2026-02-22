@@ -79,6 +79,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             if (config.hasKey("targetMode")) {
                 editor.putString("targetMode", config.getString("targetMode"))
             }
+            if (config.hasKey("sourceMode")) {
+                editor.putString("sourceMode", config.getString("sourceMode"))
+            }
             if (config.hasKey("targetPackages")) {
                 val packages = config.getArray("targetPackages")
                 val packageList = mutableListOf<String>()
@@ -157,6 +160,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 if (config.hasKey("targetMode")) {
                     fallbackConfig.put("targetMode", config.getString("targetMode"))
                 }
+                if (config.hasKey("sourceMode")) {
+                    fallbackConfig.put("sourceMode", config.getString("sourceMode"))
+                }
                 if (config.hasKey("targetPackages")) {
                     val packages = config.getArray("targetPackages")
                     val packageList = mutableListOf<String>()
@@ -223,6 +229,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             config.putDouble("offsetY", prefs.getFloat("offsetY", 0.0f).toDouble())
             config.putString("scaleMode", prefs.getString("scaleMode", "fit"))
             config.putString("targetMode", prefs.getString("targetMode", "whitelist"))
+            config.putString("sourceMode", prefs.getString("sourceMode", "black"))
             config.putString("targetPackages", prefs.getString("targetPackages", ""))
             
             promise.resolve(config)
@@ -530,9 +537,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val enabled = prefs.getBoolean("enabled", false)
             val mediaSourcePath = prefs.getString("mediaSourcePath", null)
             val targetMode = prefs.getString("targetMode", "whitelist") ?: "whitelist"
+            val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
 
-            val hookConfigured = enabled && !mediaSourcePath.isNullOrEmpty() &&
+            val sourceConfigured = when (sourceMode) {
+                "black", "test" -> true
+                else -> !mediaSourcePath.isNullOrEmpty()
+            }
+            val hookConfigured = enabled && sourceConfigured &&
                 (targetMode != "whitelist" || hasTargets)
             val hookReady = moduleLoaded && moduleScoped && hookConfigured
             
