@@ -3,6 +3,7 @@ package com.briefplantrain.virtucam.config;
 import android.os.SystemClock;
 
 import com.briefplantrain.virtucam.util.LogUtil;
+import com.briefplantrain.virtucam.util.VirtuCamIPC;
 
 import org.json.JSONObject;
 
@@ -21,7 +22,8 @@ public final class ConfigLoader {
 
     public static final String MODULE_PACKAGE = "com.briefplantrain.virtucam";
     public static final String PREFS_FILE = "virtucam_config";
-    public static final String FALLBACK_JSON_PATH = "/data/local/tmp/virtucam_config.json";
+    public static final String FALLBACK_JSON_PATH = VirtuCamIPC.CONFIG_JSON;
+    public static final String LEGACY_FALLBACK_JSON_PATH = VirtuCamIPC.LEGACY_TMP_JSON;
     private static final long MAX_CONFIG_SIZE_BYTES = 512 * 1024;
 
     private final long reloadIntervalMs;
@@ -98,14 +100,26 @@ public final class ConfigLoader {
         }
 
         try {
-            File f = new File(FALLBACK_JSON_PATH).getCanonicalFile();
-            if (!f.getPath().startsWith("/data/local/tmp/") || !f.getName().equals("virtucam_config.json")) {
-                throw new SecurityException("Invalid fallback config path");
-            }
-            if (f.exists() && f.canRead()) {
+            String[] candidates = new String[] {
+                    FALLBACK_JSON_PATH,
+                    LEGACY_FALLBACK_JSON_PATH
+            };
+
+            for (String candidate : candidates) {
+                File f = new File(candidate).getCanonicalFile();
+                String canonicalPath = f.getPath();
+                boolean validPath = VirtuCamIPC.CONFIG_JSON.equals(canonicalPath)
+                        || VirtuCamIPC.LEGACY_TMP_JSON.equals(canonicalPath);
+                if (!validPath) {
+                    throw new SecurityException("Invalid fallback config path");
+                }
+                if (!f.exists() || !f.canRead()) {
+                    continue;
+                }
                 if (f.length() > MAX_CONFIG_SIZE_BYTES) {
                     throw new IllegalStateException("Fallback config file too large");
                 }
+
                 String text = slurpFile(f);
                 JSONObject j = new JSONObject(text);
 
@@ -132,7 +146,6 @@ public final class ConfigLoader {
                 if (j.has("offsetY")) snap.offsetY = (float) j.optDouble("offsetY", snap.offsetY);
 
                 if (j.has("scaleMode")) snap.scaleMode = j.optString("scaleMode", snap.scaleMode);
-
                 if (j.has("targetMode")) snap.targetMode = parseTargetMode(j.optString("targetMode", ""), snap.targetMode);
 
                 if (j.has("targetPackages")) {
@@ -140,10 +153,14 @@ public final class ConfigLoader {
                 }
 
                 if (j.has("debug")) snap.debug = j.optBoolean("debug", snap.debug);
-                if (j.has("aggressiveSurfaceReplace")) snap.aggressiveSurfaceReplace =
-                        j.optBoolean("aggressiveSurfaceReplace", snap.aggressiveSurfaceReplace);
-
+                if (j.has("aggressiveSurfaceReplace")) {
+                    snap.aggressiveSurfaceReplace =
+                            j.optBoolean("aggressiveSurfaceReplace", snap.aggressiveSurfaceReplace);
+                }
                 if (j.has("fps")) snap.fps = j.optInt("fps", snap.fps);
+
+                LogUtil.d(TAG, "Loaded JSON fallback from: " + canonicalPath);
+                break;
             }
         } catch (Throwable t) {
             LogUtil.e(TAG, "JSON fallback load failed", t);

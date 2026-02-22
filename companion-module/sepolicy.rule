@@ -1,0 +1,23 @@
+# VirtuCam Companion SELinux Policy
+# Grants camera apps and VirtuCam process access to the IPC tmpfs.
+# Format: Magisk magiskpolicy syntax (compatible with KSU and APatch).
+
+# Allow any untrusted app (camera apps, video call apps) to read IPC config
+allow untrusted_app tmpfs file { read open getattr }
+allow untrusted_app tmpfs dir  { read open getattr search }
+
+# Allow VirtuCam app itself (also untrusted_app) to write config to IPC dir
+allow untrusted_app tmpfs file { write create setattr unlink append }
+allow untrusted_app tmpfs dir  { write add_name remove_name }
+
+# Allow platform apps (some OEM camera apps run as platform_app)
+allow platform_app tmpfs file { read write open getattr create setattr unlink }
+allow platform_app tmpfs dir  { read write open getattr search add_name remove_name }
+
+# Allow isolated processes (some apps spawn isolated renderer/camera processes)
+allow isolated_app tmpfs file { read open getattr }
+allow isolated_app tmpfs dir  { read open getattr search }
+
+# Allow system server to access IPC dir (for appops/pm calls we make)
+allow system_server tmpfs file { read write open getattr create setattr }
+allow system_server tmpfs dir  { read write open getattr search add_name }

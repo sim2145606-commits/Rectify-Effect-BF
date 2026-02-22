@@ -14,6 +14,7 @@ import com.briefplantrain.virtucam.engine.VirtualCameraEngine;
 import com.briefplantrain.virtucam.hooks.HookStrategyRegistry;
 import com.briefplantrain.virtucam.hooks.IHookStrategy;
 import com.briefplantrain.virtucam.util.LogUtil;
+import com.briefplantrain.virtucam.util.VirtuCamIPC;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -95,6 +96,12 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         }
 
         XposedBridge.log(TAG + ": module active in process: " + key);
+        // Write module active state to IPC dir (companion-managed, SELinux-safe)
+        try {
+            VirtuCamIPC.writeModuleActiveMarker();
+        } catch (Throwable ignored) {
+            // Never crash the hook
+        }
     }
 
     private static void installZygoteSurfaceHooks() {

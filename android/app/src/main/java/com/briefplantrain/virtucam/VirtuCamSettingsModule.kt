@@ -10,6 +10,7 @@ import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
+import com.briefplantrain.virtucam.util.VirtuCamIPC
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
@@ -178,22 +179,26 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     fallbackConfig.put("targetPackages", packageList.joinToString(","))
                 }
                 
-                val fallbackFile = File("/data/local/tmp/virtucam_config.json")
-                // Validate file path to prevent directory traversal (CWE-434)
-                if (!fallbackFile.canonicalPath.startsWith("/data/local/tmp/") || 
-                    fallbackFile.canonicalPath != "/data/local/tmp/virtucam_config.json") {
+                val fallbackFile = File(VirtuCamIPC.CONFIG_JSON)
+                val ipcConfigDir = File(VirtuCamIPC.CONFIG_DIR)
+
+                if (!ipcConfigDir.exists()) {
+                    // Companion module missing/not ready: keep SharedPreferences as primary source.
+                    android.util.Log.w("VirtuCamSettings", "IPC dir not ready, skipping JSON config write")
+                } else if (!fallbackFile.canonicalPath.startsWith(VirtuCamIPC.IPC_ROOT) ||
+                    fallbackFile.canonicalPath != VirtuCamIPC.CONFIG_JSON) {
                     throw SecurityException("Invalid file path")
+                } else {
+                    val allowedExtensions = setOf("json", "xml")
+                    if (fallbackFile.extension.lowercase() !in allowedExtensions) {
+                        throw SecurityException("Invalid file extension")
+                    }
+                    FileWriter(fallbackFile).use { writer ->
+                        writer.write(fallbackConfig.toString())
+                    }
+                    fallbackFile.setReadable(true, false)
+                    android.util.Log.d("VirtuCamSettings", "Fallback JSON config written successfully")
                 }
-                val allowedExtensions = setOf("json", "xml")
-                if (fallbackFile.extension.lowercase() !in allowedExtensions) {
-                    throw SecurityException("Invalid file extension")
-                }
-                FileWriter(fallbackFile).use { writer ->
-                    writer.write(fallbackConfig.toString())
-                }
-                fallbackFile.setReadable(true, false)
-                
-                android.util.Log.d("VirtuCamSettings", "Fallback JSON config written successfully")
             } catch (e: Exception) {
                 android.util.Log.w("VirtuCamSettings", "Could not write fallback config: ${e.message}")
             }
@@ -490,13 +495,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             var scopeEvaluationReason = "no_scope_match"
             
             // Method 1: Check marker file (created when module hooks an app)
-            // The marker file persists until reboot (it's in /data/local/tmp)
+            // The marker file persists until reboot in companion-managed IPC storage.
             // No time-based validation needed - if it exists, module has loaded at least once since boot
-            val markerFile = File("/data/local/tmp/virtucam_module_active")
+            val markerFile = File(VirtuCamIPC.MODULE_ACTIVE)
             // Validate file path, name, and extension to prevent unsafe file access (CWE-434)
-            val expectedPath = "/data/local/tmp/virtucam_module_active"
+            val expectedPath = VirtuCamIPC.MODULE_ACTIVE
             val isValidPath = markerFile.canonicalPath == expectedPath &&
-                              markerFile.name == "virtucam_module_active" &&
+                              markerFile.name == "module_active" &&
                               markerFile.extension.isEmpty()
             
             if (!isValidPath) {
@@ -507,8 +512,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 detectionMethod = "marker_file"
                 android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
             } else {
-                val markerRootCheck = executeRootCommand("ls /data/local/tmp/virtucam_module_active 2>/dev/null")
-                if (markerRootCheck.contains("virtucam_module_active")) {
+                val markerRootCheck = executeRootCommand("ls ${escapeShellArg(VirtuCamIPC.MODULE_ACTIVE)} 2>/dev/null")
+                if (markerRootCheck.contains("module_active")) {
                     moduleLoaded = true
                     detectionMethod = "marker_file_root"
                     android.util.Log.d("VirtuCamSettings", "Module detected via root marker file check")
@@ -1062,11 +1067,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 result.putString("scopeConfiguration", scopeCheck.trim())
                 
                 // Check marker file
-                val markerFile = File("/data/local/tmp/virtucam_module_active")
+                val markerFile = File(VirtuCamIPC.MODULE_ACTIVE)
                 // Validate file path, name, and extension to prevent unsafe file access (CWE-434)
-                val expectedPath = "/data/local/tmp/virtucam_module_active"
+                val expectedPath = VirtuCamIPC.MODULE_ACTIVE
                 val isValidMarkerFile = markerFile.canonicalPath == expectedPath &&
-                                        markerFile.name == "virtucam_module_active" &&
+                                        markerFile.name == "module_active" &&
                                         markerFile.extension.isEmpty()
                 
                 if (!isValidMarkerFile) {
@@ -1293,7 +1298,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         val allowedPrefixes = listOf(
             "magisk ", "ksud ", "apd ", "ls ", "chmod ", "unzip ", "su ",
             "/data/adb/", "pm ", "sqlite3 ", "cat ", "grep ", "strings ", "find ",
-            "logcat ", "tail ", "getenforce", "uname ", "sh ", "id"
+            "logcat ", "tail ", "getenforce", "uname ", "sh ", "id",
+            "cmd appops",
+            "am ",
+            "mountpoint"
         )
         return allowedPrefixes.any { trimmed.startsWith(it) }
     }

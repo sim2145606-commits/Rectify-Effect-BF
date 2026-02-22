@@ -12,6 +12,7 @@ android/build/
 android/.gradle/
 android/app/.cxx/
 android/.cxx/
+out/
 
 # Logs
 *.log
