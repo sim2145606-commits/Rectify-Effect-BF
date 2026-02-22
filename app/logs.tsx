@@ -14,13 +14,15 @@ import {
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
-import { Colors, Spacing, BorderRadius, FontSize } from '@/constants/theme';
+import { Spacing, BorderRadius, FontSize } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { logger, type LogEntry } from '@/services/LogService';
 
 const { VirtuCamSettings } = NativeModules;
 
 export default function LogsScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [isExporting, setIsExporting] = useState(false);
@@ -33,11 +35,7 @@ export default function LogsScreen() {
   const applyFilters = useCallback(
     (logList: LogEntry[], query: string, level: LogEntry['level'] | 'all') => {
       let filtered = logList;
-
-      if (level !== 'all') {
-        filtered = filtered.filter(log => log.level === level);
-      }
-
+      if (level !== 'all') filtered = filtered.filter(log => log.level === level);
       if (query.trim()) {
         const lowerQuery = query.toLowerCase();
         filtered = filtered.filter(
@@ -46,7 +44,6 @@ export default function LogsScreen() {
             log.source?.toLowerCase().includes(lowerQuery)
         );
       }
-
       setFilteredLogs(filtered);
     },
     []
@@ -68,9 +65,7 @@ export default function LogsScreen() {
 
   useEffect(() => {
     loadLogs();
-    const subscription = logger.subscribe(() => {
-      loadLogs();
-    });
+    const subscription = logger.subscribe(() => loadLogs());
     return () => subscription();
   }, [loadLogs]);
 
@@ -82,9 +77,7 @@ export default function LogsScreen() {
     try {
       setIsExporting(true);
       const filePath = await logger.exportLogs(share);
-      Alert.alert('Success', `Logs exported successfully!\n\nSaved to: ${filePath}`, [
-        { text: 'OK' },
-      ]);
+      Alert.alert('Success', `Logs exported successfully!\n\nSaved to: ${filePath}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       Alert.alert('Error', `Failed to export logs: ${message}`);
@@ -107,13 +100,8 @@ export default function LogsScreen() {
   const handleCopyLog = async (log: LogEntry) => {
     try {
       const date = new Date(log.timestamp);
-      const detailsStr =
-        log.details !== undefined
-          ? `\nDetails: ${JSON.stringify(log.details, null, 2)}`
-          : '';
-      const logText = `[${date.toLocaleString()}] [${log.level.toUpperCase()}]${
-        log.source ? ` [${log.source}]` : ''
-      }\n${log.message}${detailsStr}`;
+      const detailsStr = log.details !== undefined ? `\nDetails: ${JSON.stringify(log.details, null, 2)}` : '';
+      const logText = `[${date.toLocaleString()}] [${log.level.toUpperCase()}]${log.source ? ` [${log.source}]` : ''}\n${log.message}${detailsStr}`;
       await Clipboard.setStringAsync(logText);
       Alert.alert('Success', 'Log entry copied to clipboard!');
     } catch (err: unknown) {
@@ -123,74 +111,45 @@ export default function LogsScreen() {
   };
 
   const handleClearLogs = () => {
-    Alert.alert(
-      'Clear Logs',
-      'Are you sure you want to clear all application logs? This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: () => {
-            logger.clear();
-            loadLogs();
-          },
-        },
-      ]
-    );
+    Alert.alert('Clear Logs', 'Are you sure you want to clear all application logs? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => { logger.clear(); loadLogs(); } },
+    ]);
   };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
     loadLogs();
-
-    // Load system logs if enabled
     if (includeSystemLogs && VirtuCamSettings) {
       try {
         const result = await VirtuCamSettings.getXposedLogs();
-        if (result.success) {
-          setSystemLogs(result.logs);
-        }
+        if (result.success) setSystemLogs(result.logs);
       } catch (error: unknown) {
-        if (__DEV__) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error('Failed to load system logs:', message);
-        }
+        if (__DEV__) console.error('Failed to load system logs:', error instanceof Error ? error.message : String(error));
       }
     }
-
     setIsRefreshing(false);
   };
 
   const getLevelColor = (level: LogEntry['level']): string => {
     switch (level) {
-      case 'error':
-        return Colors.danger;
-      case 'warn':
-        return Colors.warningAmber;
-      case 'success':
-        return Colors.success;
-      case 'debug':
-        return Colors.textTertiary;
+      case 'error': return colors.danger;
+      case 'warn': return colors.warningAmber;
+      case 'success': return colors.success;
+      case 'debug': return colors.textTertiary;
       case 'info':
-      default:
-        return Colors.electricBlue;
+      default: return colors.electricBlue;
     }
   };
 
   const getLevelIcon = (level: LogEntry['level']): keyof typeof Ionicons.glyphMap => {
     switch (level) {
-      case 'error':
-        return 'close-circle';
-      case 'warn':
-        return 'warning';
-      case 'success':
-        return 'checkmark-circle';
-      case 'debug':
-        return 'bug';
+      case 'error': return 'close-circle';
+      case 'warn': return 'warning';
+      case 'success': return 'checkmark-circle';
+      case 'debug': return 'bug';
       case 'info':
-      default:
-        return 'information-circle';
+      default: return 'information-circle';
     }
   };
 
@@ -198,79 +157,79 @@ export default function LogsScreen() {
   const warningCount = logger.getWarningCount();
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Diagnostic Logs</Text>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Diagnostic Logs</Text>
           <View style={styles.statsContainer}>
             {errorCount > 0 && (
               <View style={styles.statBadge}>
-                <Ionicons name="close-circle" size={14} color={Colors.danger} />
-                <Text style={[styles.statText, { color: Colors.danger }]}>{errorCount}</Text>
+                <Ionicons name="close-circle" size={14} color={colors.danger} />
+                <Text style={[styles.statText, { color: colors.danger }]}>{errorCount}</Text>
               </View>
             )}
             {warningCount > 0 && (
               <View style={styles.statBadge}>
-                <Ionicons name="warning" size={14} color={Colors.warningAmber} />
-                <Text style={[styles.statText, { color: Colors.warningAmber }]}>
-                  {warningCount}
-                </Text>
+                <Ionicons name="warning" size={14} color={colors.warningAmber} />
+                <Text style={[styles.statText, { color: colors.warningAmber }]}>{warningCount}</Text>
               </View>
             )}
-            <Text style={styles.statText}>{filteredLogs.length} logs</Text>
+            <Text style={[styles.statText, { color: colors.textSecondary }]}>{filteredLogs.length} logs</Text>
           </View>
         </View>
       </View>
 
       {/* Action Buttons */}
-      <View style={styles.actionBar}>
+      <View style={[styles.actionBar, { borderBottomColor: colors.border }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}
             onPress={() => handleExport(false)}
             disabled={isExporting}
           >
             {isExporting ? (
-              <ActivityIndicator size="small" color={Colors.electricBlue} />
+              <ActivityIndicator size="small" color={colors.electricBlue} />
             ) : (
-              <Ionicons name="save" size={18} color={Colors.electricBlue} />
+              <Ionicons name="save" size={18} color={colors.electricBlue} />
             )}
-            <Text style={styles.actionButtonText}>Save</Text>
+            <Text style={[styles.actionButtonText, { color: colors.electricBlue }]}>Save</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}
             onPress={() => handleExport(true)}
             disabled={isExporting}
           >
-            <Ionicons name="share" size={18} color={Colors.electricBlue} />
-            <Text style={styles.actionButtonText}>Share</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={handleCopyAll}>
-            <Ionicons name="copy" size={18} color={Colors.electricBlue} />
-            <Text style={styles.actionButtonText}>Copy All</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={handleClearLogs}>
-            <Ionicons name="trash" size={18} color={Colors.danger} />
-            <Text style={[styles.actionButtonText, { color: Colors.danger }]}>Clear</Text>
+            <Ionicons name="share" size={18} color={colors.electricBlue} />
+            <Text style={[styles.actionButtonText, { color: colors.electricBlue }]}>Share</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}
+            onPress={handleCopyAll}
+          >
+            <Ionicons name="copy" size={18} color={colors.electricBlue} />
+            <Text style={[styles.actionButtonText, { color: colors.electricBlue }]}>Copy All</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}
+            onPress={handleClearLogs}
+          >
+            <Ionicons name="trash" size={18} color={colors.danger} />
+            <Text style={[styles.actionButtonText, { color: colors.danger }]}>Clear</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}
             onPress={() => setIncludeSystemLogs(prev => !prev)}
           >
-            <Ionicons
-              name={includeSystemLogs ? 'eye' : 'eye-off'}
-              size={18}
-              color={Colors.electricBlue}
-            />
-            <Text style={styles.actionButtonText}>
+            <Ionicons name={includeSystemLogs ? 'eye' : 'eye-off'} size={18} color={colors.electricBlue} />
+            <Text style={[styles.actionButtonText, { color: colors.electricBlue }]}>
               {includeSystemLogs ? 'Hide Xposed' : 'Show Xposed'}
             </Text>
           </TouchableOpacity>
@@ -278,19 +237,19 @@ export default function LogsScreen() {
       </View>
 
       {/* Search and Filter */}
-      <View style={styles.filterContainer}>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color={Colors.textTertiary} />
+      <View style={[styles.filterContainer, { borderBottomColor: colors.border }]}>
+        <View style={[styles.searchContainer, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
+          <Ionicons name="search" size={20} color={colors.textTertiary} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
             placeholder="Search logs..."
-            placeholderTextColor={Colors.textTertiary}
+            placeholderTextColor={colors.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color={Colors.textTertiary} />
+              <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
             </TouchableOpacity>
           )}
         </View>
@@ -299,13 +258,20 @@ export default function LogsScreen() {
           {(['all', 'error', 'warn', 'info', 'success', 'debug'] as const).map(level => (
             <TouchableOpacity
               key={level}
-              style={[styles.filterChip, filterLevel === level && styles.filterChipActive]}
+              style={[
+                styles.filterChip,
+                { backgroundColor: colors.surfaceCard, borderColor: colors.border },
+                filterLevel === level && {
+                  backgroundColor: colors.electricBlue + '20',
+                  borderColor: colors.electricBlue,
+                },
+              ]}
               onPress={() => setFilterLevel(level)}
             >
               <Text
                 style={[
                   styles.filterChipText,
-                  filterLevel === level && styles.filterChipTextActive,
+                  { color: filterLevel === level ? colors.electricBlue : colors.textSecondary },
                 ]}
               >
                 {level.charAt(0).toUpperCase() + level.slice(1)}
@@ -322,17 +288,17 @@ export default function LogsScreen() {
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
-            tintColor={Colors.electricBlue}
+            tintColor={colors.electricBlue}
           />
         }
       >
         {filteredLogs.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={64} color={Colors.textTertiary} />
-            <Text style={styles.emptyStateText}>
+            <Ionicons name="document-text-outline" size={64} color={colors.textTertiary} />
+            <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
               {logs.length === 0 ? 'No logs available' : 'No logs match your filters'}
             </Text>
-            <Text style={styles.emptyStateSubtext}>
+            <Text style={[styles.emptyStateSubtext, { color: colors.textTertiary }]}>
               {logs.length === 0
                 ? 'Logs will appear here as you use the app'
                 : 'Try adjusting your search or filter'}
@@ -342,31 +308,32 @@ export default function LogsScreen() {
           filteredLogs.map((log, index) => (
             <TouchableOpacity
               key={`${log.timestamp}-${index}`}
-              style={[styles.logEntry, { borderLeftColor: getLevelColor(log.level) }]}
+              style={[
+                styles.logEntry,
+                { backgroundColor: colors.surfaceCard, borderLeftColor: getLevelColor(log.level) },
+              ]}
               onLongPress={() => handleCopyLog(log)}
             >
               <View style={styles.logHeader}>
                 <View style={styles.logHeaderLeft}>
-                  <Ionicons
-                    name={getLevelIcon(log.level)}
-                    size={16}
-                    color={getLevelColor(log.level)}
-                  />
+                  <Ionicons name={getLevelIcon(log.level)} size={16} color={getLevelColor(log.level)} />
                   <Text style={[styles.logLevel, { color: getLevelColor(log.level) }]}>
                     {log.level.toUpperCase()}
                   </Text>
                   {log.source && (
-                    <View style={styles.sourceTag}>
-                      <Text style={styles.sourceText}>{log.source}</Text>
+                    <View style={[styles.sourceTag, { backgroundColor: colors.electricBlue + '18' }]}>
+                      <Text style={[styles.sourceText, { color: colors.electricBlue }]}>{log.source}</Text>
                     </View>
                   )}
                 </View>
-                <Text style={styles.logTime}>{new Date(log.timestamp).toLocaleTimeString()}</Text>
+                <Text style={[styles.logTime, { color: colors.textTertiary }]}>
+                  {new Date(log.timestamp).toLocaleTimeString()}
+                </Text>
               </View>
-              <Text style={styles.logMessage}>{log.message}</Text>
+              <Text style={[styles.logMessage, { color: colors.textPrimary }]}>{log.message}</Text>
               {log.details !== undefined && (
-                <View style={styles.logDetails}>
-                  <Text style={styles.logDetailsText}>
+                <View style={[styles.logDetails, { backgroundColor: colors.background }]}>
+                  <Text style={[styles.logDetailsText, { color: colors.textSecondary }]}>
                     {typeof log.details === 'string'
                       ? log.details
                       : JSON.stringify(log.details, null, 2)}
@@ -377,12 +344,11 @@ export default function LogsScreen() {
           ))
         )}
 
-        {/* System Logs Section */}
         {includeSystemLogs && systemLogs && (
           <View style={styles.systemLogsSection}>
-            <Text style={styles.systemLogsTitle}>System/Xposed Logs</Text>
-            <View style={styles.systemLogsContainer}>
-              <Text style={styles.systemLogsText}>{systemLogs}</Text>
+            <Text style={[styles.systemLogsTitle, { color: colors.textPrimary }]}>System/Xposed Logs</Text>
+            <View style={[styles.systemLogsContainer, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
+              <Text style={[styles.systemLogsText, { color: colors.textSecondary }]}>{systemLogs}</Text>
             </View>
           </View>
         )}
@@ -394,7 +360,6 @@ export default function LogsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: 'row',
@@ -402,8 +367,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.xxxl,
     paddingBottom: Spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
     marginRight: Spacing.md,
@@ -414,8 +378,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: FontSize.xl,
     fontWeight: '800',
-    color: Colors.textPrimary,
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   statsContainer: {
     flexDirection: 'row',
@@ -430,14 +393,12 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: FontSize.sm,
-    color: Colors.textSecondary,
     fontWeight: '600',
   },
   actionBar: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   actionButton: {
     flexDirection: 'row',
@@ -445,22 +406,18 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
     marginRight: Spacing.sm,
   },
   actionButtonText: {
     fontSize: FontSize.sm,
     fontWeight: '600',
-    color: Colors.electricBlue,
   },
   filterContainer: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -468,16 +425,13 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
     marginBottom: Spacing.sm,
   },
   searchInput: {
     flex: 1,
     fontSize: FontSize.md,
-    color: Colors.textPrimary,
     padding: 0,
   },
   filterRow: {
@@ -486,23 +440,13 @@ const styles = StyleSheet.create({
   filterChip: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
     marginRight: Spacing.sm,
-  },
-  filterChipActive: {
-    backgroundColor: Colors.electricBlue + '20',
-    borderColor: Colors.electricBlue,
   },
   filterChipText: {
     fontSize: FontSize.sm,
     fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  filterChipTextActive: {
-    color: Colors.electricBlue,
   },
   logsList: {
     flex: 1,
@@ -516,16 +460,13 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: FontSize.lg,
     fontWeight: '700',
-    color: Colors.textSecondary,
     marginTop: Spacing.lg,
   },
   emptyStateSubtext: {
     fontSize: FontSize.md,
-    color: Colors.textTertiary,
     marginTop: Spacing.xs,
   },
   logEntry: {
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
     marginTop: Spacing.md,
@@ -549,7 +490,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   sourceTag: {
-    backgroundColor: Colors.electricBlue + '15',
     paddingHorizontal: Spacing.xs,
     paddingVertical: 2,
     borderRadius: BorderRadius.sm,
@@ -557,27 +497,22 @@ const styles = StyleSheet.create({
   sourceText: {
     fontSize: FontSize.xs,
     fontWeight: '600',
-    color: Colors.electricBlue,
   },
   logTime: {
     fontSize: FontSize.xs,
-    color: Colors.textTertiary,
     fontWeight: '500',
   },
   logMessage: {
     fontSize: FontSize.sm,
-    color: Colors.textPrimary,
     lineHeight: 20,
   },
   logDetails: {
     marginTop: Spacing.sm,
     padding: Spacing.sm,
-    backgroundColor: Colors.background,
     borderRadius: BorderRadius.sm,
   },
   logDetailsText: {
     fontSize: FontSize.xs,
-    color: Colors.textSecondary,
     fontFamily: 'monospace',
   },
   systemLogsSection: {
@@ -587,19 +522,15 @@ const styles = StyleSheet.create({
   systemLogsTitle: {
     fontSize: FontSize.lg,
     fontWeight: '700',
-    color: Colors.textPrimary,
     marginBottom: Spacing.md,
   },
   systemLogsContainer: {
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   systemLogsText: {
     fontSize: FontSize.xs,
-    color: Colors.textSecondary,
     fontFamily: 'monospace',
     lineHeight: 18,
   },

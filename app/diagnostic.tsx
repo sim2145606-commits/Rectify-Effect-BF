@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import {
   diagnoseNativeModule,
   testNativeModule,
@@ -11,112 +12,121 @@ type DiagnosticsResult = ReturnType<typeof diagnoseNativeModule>;
 type BuildInfo = ReturnType<typeof getBuildInfo>;
 
 export default function NativeModuleDiagnosticScreen() {
+  const { colors } = useTheme();
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
   const [testResults, setTestResults] = useState<string>('');
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    const diag = diagnoseNativeModule();
-    setDiagnostics(diag);
-
-    const build = getBuildInfo();
-    setBuildInfo(build);
+    setDiagnostics(diagnoseNativeModule());
+    setBuildInfo(getBuildInfo());
   }, []);
 
   const runTests = async () => {
     setTesting(true);
     setTestResults('Running tests...\n\n');
-
-    const success = await testNativeModule();
-
-    setTestResults(prev => prev + `\n\nTests ${success ? 'PASSED ✅' : 'FAILED ❌'}`);
+    const ok = await testNativeModule();
+    setTestResults(prev => prev + `\n\nTests ${ok ? 'PASSED ✅' : 'FAILED ❌'}`);
     setTesting(false);
   };
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{ padding: Spacing.xl, paddingBottom: Spacing.xxxl }}
     >
-      <Text style={styles.title}>Native Module Diagnostics</Text>
+      <Text style={[styles.title, { color: colors.electricBlue }]}>
+        Native Module Diagnostics
+      </Text>
 
-      {/* Build Info */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Build Information</Text>
+      <View style={[styles.section, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Build Information</Text>
         {buildInfo && (
           <>
-            <Text style={styles.text}>Platform: {buildInfo.platform}</Text>
-            <Text style={styles.text}>Platform Version: {buildInfo.platformVersion}</Text>
-            <Text style={styles.text}>Hermes: {buildInfo.isHermes ? 'Yes' : 'No'}</Text>
-            <Text style={styles.text}>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>Platform: {buildInfo.platform}</Text>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>Platform Version: {buildInfo.platformVersion}</Text>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>Hermes: {buildInfo.isHermes ? 'Yes' : 'No'}</Text>
+            <Text style={[styles.text, { color: colors.textSecondary }]}>
               TurboModules: {buildInfo.isTurboModuleEnabled ? 'Yes' : 'No'}
             </Text>
           </>
         )}
       </View>
 
-      {/* Module Status */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Module Status</Text>
+      <View style={[styles.section, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Module Status</Text>
         {diagnostics && (
           <>
             <Text
               style={[
                 styles.text,
-                diagnostics.nativeModuleExists ? styles.success : styles.error,
+                { color: diagnostics.nativeModuleExists ? colors.success : colors.danger, fontWeight: '700' },
               ]}
             >
               Native Module: {diagnostics.nativeModuleExists ? '✅ LOADED' : '❌ NOT FOUND'}
             </Text>
-
             {diagnostics.error && (
-              <Text style={[styles.text, styles.error]}>Error: {diagnostics.error}</Text>
+              <Text style={[styles.text, { color: colors.danger, fontWeight: '700' }]}>
+                Error: {diagnostics.error}
+              </Text>
             )}
-
             {diagnostics.nativeModuleExists && (
               <>
-                <Text style={styles.text}>
+                <Text style={[styles.text, { color: colors.textSecondary }]}>
                   Available Methods: {diagnostics.availableMethods.length}
                 </Text>
-                <Text style={styles.methodList}>{diagnostics.availableMethods.join('\n')}</Text>
+                <Text style={[styles.methodList, { color: colors.textTertiary }]}>
+                  {diagnostics.availableMethods.join('\n')}
+                </Text>
               </>
             )}
           </>
         )}
       </View>
 
-      {/* Test Button */}
       {diagnostics?.nativeModuleExists && (
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
           <TouchableOpacity
-            style={[styles.button, testing && styles.buttonDisabled]}
+            style={[
+              styles.button,
+              { backgroundColor: colors.electricBlue },
+              testing && { backgroundColor: colors.surfaceLighter },
+            ]}
             onPress={runTests}
             disabled={testing}
           >
-            <Text style={styles.buttonText}>
+            <Text style={[styles.buttonText, { color: testing ? colors.textTertiary : colors.background }]}>
               {testing ? 'Testing...' : 'Run Functionality Tests'}
             </Text>
           </TouchableOpacity>
-
           {testResults ? (
-            <View style={styles.resultsBox}>
-              <Text style={styles.resultsText}>{testResults}</Text>
+            <View style={[styles.resultsBox, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <Text style={[styles.resultsText, { color: colors.textSecondary }]}>{testResults}</Text>
             </View>
           ) : null}
         </View>
       )}
 
-      {/* Fix Instructions */}
       {!diagnostics?.nativeModuleExists && (
-        <View style={[styles.section, styles.errorBox]}>
-          <Text style={styles.errorTitle}>⚠️ Native Module Not Found</Text>
-          <Text style={styles.errorText}>
+        <View
+          style={[
+            styles.section,
+            { backgroundColor: colors.danger + '18', borderColor: colors.danger, borderWidth: 2 },
+          ]}
+        >
+          <Text style={[styles.errorTitle, { color: colors.danger }]}>⚠️ Native Module Not Found</Text>
+          <Text style={[styles.errorText, { color: colors.textSecondary }]}>
             The VirtuCamSettings native module is not loaded.{'\n\n'}
             This means the app was not built correctly.{'\n\n'}
             To fix this:
           </Text>
-          <Text style={styles.fixSteps}>
+          <Text
+            style={[
+              styles.fixSteps,
+              { color: colors.textPrimary, backgroundColor: colors.background, borderRadius: BorderRadius.sm },
+            ]}
+          >
             1. Close the app{'\n'}
             2. Run: build-and-install.bat{'\n'}
             3. Wait for build to complete{'\n'}
@@ -132,96 +142,64 @@ export default function NativeModuleDiagnosticScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   title: {
     fontSize: FontSize.xxl,
     fontWeight: '700',
-    color: Colors.electricBlue,
     marginBottom: Spacing.xl,
     textAlign: 'center',
   },
   section: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.card,
     padding: Spacing.lg,
     marginBottom: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   sectionTitle: {
     fontSize: FontSize.lg,
     fontWeight: '700',
-    color: Colors.textPrimary,
     marginBottom: Spacing.md,
   },
   text: {
     fontSize: FontSize.sm,
-    color: Colors.textSecondary,
     marginBottom: Spacing.sm,
   },
   methodList: {
     fontSize: FontSize.xs,
-    color: Colors.textTertiary,
     marginTop: Spacing.sm,
   },
-  success: {
-    color: Colors.success,
-    fontWeight: '700',
-  },
-  error: {
-    color: Colors.danger,
-    fontWeight: '700',
-  },
   button: {
-    backgroundColor: Colors.electricBlue,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     padding: Spacing.lg,
     alignItems: 'center',
     marginBottom: Spacing.lg,
   },
-  buttonDisabled: {
-    backgroundColor: Colors.surfaceLighter,
-  },
   buttonText: {
     fontSize: FontSize.md,
     fontWeight: '700',
-    color: Colors.background,
   },
   resultsBox: {
-    backgroundColor: Colors.background,
     borderRadius: BorderRadius.sm,
     padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   resultsText: {
     fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-  },
-  errorBox: {
-    backgroundColor: Colors.danger + '15',
-    borderWidth: 2,
-    borderColor: Colors.danger,
   },
   errorTitle: {
     fontSize: FontSize.lg,
     fontWeight: '700',
-    color: Colors.danger,
     marginBottom: Spacing.md,
   },
   errorText: {
     fontSize: FontSize.sm,
-    color: Colors.textSecondary,
     marginBottom: Spacing.md,
     lineHeight: 20,
   },
   fixSteps: {
     fontSize: FontSize.sm,
-    color: Colors.textPrimary,
-    backgroundColor: Colors.background,
     padding: Spacing.md,
-    borderRadius: BorderRadius.sm,
     lineHeight: 20,
   },
+  surfaceLighter: {},
 });

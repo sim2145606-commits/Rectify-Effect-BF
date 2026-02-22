@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   Linking,
+  Switch,
 } from 'react-native';
 import Animated, {
   FadeInDown,
@@ -17,9 +18,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, type Href } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
+import { useTheme } from '@/context/ThemeContext';
+import type { ColorMode } from '@/context/ThemeContext';
 import {
   runDiagnostics,
   type DiagnosticsReport,
@@ -39,10 +42,10 @@ export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { lightImpact, mediumImpact, success, warning, heavyImpact } = useHaptics();
+  const { colors, colorMode, setColorMode, performanceMode, setPerformanceMode, isPerformance } = useTheme();
 
   const { status: systemStatus, refresh: refreshSystemStatus } = useSystemStatus();
 
-  // Diagnostics state
   const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = useState<DiagnosticsReport | null>(null);
   const [diagnosticsChecks, setDiagnosticsChecks] = useState<DiagnosticCheckResult[]>([]);
@@ -118,7 +121,7 @@ export default function SettingsScreen() {
   const handleResetToDefaults = useCallback(() => {
     Alert.alert(
       'Reset to Defaults',
-      'This will reset ALL settings to their default values. Your permissions and onboarding status will be preserved. This action cannot be undone.\\n\\nAre you sure?',
+      'This will reset ALL settings to their default values. Your permissions and onboarding status will be preserved. This action cannot be undone.\n\nAre you sure?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -164,30 +167,137 @@ export default function SettingsScreen() {
     );
   }, [heavyImpact, success, warning]);
 
+  const COLOR_MODES: { key: ColorMode; label: string; icon: string }[] = [
+    { key: 'day', label: 'Day', icon: 'sunny' },
+    { key: 'system', label: 'Auto', icon: 'phone-portrait' },
+    { key: 'dark', label: 'Dark', icon: 'moon' },
+  ];
+
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
-      <Animated.View entering={FadeInDown.delay(100).duration(500)}> 
-        <Text style={styles.screenTitle}>Settings</Text>
-        <Text style={styles.screenSubtitle}>
-          Configure permissions and system options
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(100).duration(500)}>
+        <Text style={[styles.screenTitle, { color: colors.textPrimary }]}>Settings</Text>
+        <Text style={[styles.screenSubtitle, { color: colors.textSecondary }]}>
+          Appearance, permissions, and system options
         </Text>
       </Animated.View>
 
+      {/* Appearance Section */}
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(130).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="color-palette-outline" size={16} color={colors.accent} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Appearance</Text>
+        </View>
+
+        <Card>
+          {/* Color Mode picker */}
+          <View style={styles.colorModeRow}>
+            <View style={styles.colorModeLabel}>
+              <Ionicons name="contrast-outline" size={18} color={colors.textSecondary} />
+              <View style={styles.colorModeLabelText}>
+                <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>Color Mode</Text>
+                <Text style={[styles.rowSublabel, { color: colors.textTertiary }]}>
+                  {colorMode === 'system' ? 'Follows system theme' : colorMode === 'dark' ? 'Always dark' : 'Always light'}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.segmentedControl, { backgroundColor: colors.surfaceLighter, borderColor: colors.border }]}>
+              {COLOR_MODES.map(({ key, label, icon }) => {
+                const active = colorMode === key;
+                return (
+                  <Pressable
+                    key={key}
+                    onPress={() => {
+                      lightImpact();
+                      setColorMode(key);
+                    }}
+                    style={[
+                      styles.segment,
+                      active && {
+                        backgroundColor: colors.accent,
+                        shadowColor: colors.accent,
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: isPerformance ? 0 : 0.3,
+                        shadowRadius: 6,
+                        elevation: isPerformance ? 0 : 3,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={icon as keyof typeof Ionicons.glyphMap}
+                      size={13}
+                      color={active ? '#FFFFFF' : colors.textTertiary}
+                    />
+                    <Text
+                      style={[
+                        styles.segmentLabel,
+                        { color: active ? '#FFFFFF' : colors.textTertiary },
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.separator }]} />
+
+          {/* Performance Mode toggle */}
+          <Pressable
+            onPress={() => {
+              mediumImpact();
+              setPerformanceMode(!performanceMode);
+            }}
+            style={styles.perfRow}
+          >
+            <View style={[styles.perfIconWrap, { backgroundColor: performanceMode ? colors.accent + '20' : colors.surfaceLight }]}>
+              <Ionicons
+                name="flash"
+                size={18}
+                color={performanceMode ? colors.accent : colors.textSecondary}
+              />
+            </View>
+            <View style={styles.perfTextWrap}>
+              <Text style={[styles.rowLabel, { color: colors.textPrimary }]}>Performance Mode</Text>
+              <Text style={[styles.rowSublabel, { color: colors.textTertiary }]}>
+                Disables blur, animations &amp; transparency for maximum speed
+              </Text>
+            </View>
+            <Switch
+              value={performanceMode}
+              onValueChange={val => {
+                mediumImpact();
+                setPerformanceMode(val);
+              }}
+              trackColor={{
+                false: colors.surfaceLighter,
+                true: colors.accent,
+              }}
+              thumbColor={Platform.OS === 'android' ? '#FFFFFF' : undefined}
+              ios_backgroundColor={colors.surfaceLighter}
+              style={Platform.OS === 'web' ? { height: 24, width: 44 } : undefined}
+            />
+          </Pressable>
+        </Card>
+      </Animated.View>
+
       {/* LSPosed Notice */}
-      <Animated.View entering={FadeInDown.delay(150).duration(500)}>
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(160).duration(500)}>
         <Card style={styles.lsposedNoticeCard}>
           <View style={styles.lsposedNoticeRow}>
-            <View style={[styles.lsposedIcon, { backgroundColor: Colors.electricBlue + '15' }]}>
-              <MaterialCommunityIcons name="puzzle-outline" size={20} color={Colors.electricBlue} />
+            <View style={[styles.lsposedIcon, { backgroundColor: colors.electricBlue + '18' }]}>
+              <MaterialCommunityIcons name="puzzle-outline" size={20} color={colors.electricBlue} />
             </View>
             <View style={styles.lsposedNoticeText}>
-              <Text style={styles.lsposedNoticeTitle}>App Targeting via LSPosed</Text>
-              <Text style={styles.lsposedNoticeDesc}>
+              <Text style={[styles.lsposedNoticeTitle, { color: colors.textPrimary }]}>App Targeting via LSPosed</Text>
+              <Text style={[styles.lsposedNoticeDesc, { color: colors.textSecondary }]}>
                 Per-app hook scope is managed in LSPosed Manager → Modules → VirtuCam → Scope.
                 Enable only the apps you want the virtual camera feed injected into.
               </Text>
@@ -197,10 +307,10 @@ export default function SettingsScreen() {
       </Animated.View>
 
       {/* Permissions Section */}
-      <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(200).duration(500)}>
         <View style={styles.sectionHeader}>
-          <Ionicons name="shield-checkmark" size={18} color={Colors.electricBlue} />
-          <Text style={styles.sectionTitle}>System Permissions</Text>
+          <Ionicons name="shield-checkmark" size={16} color={colors.electricBlue} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>System Permissions</Text>
         </View>
         <Card>
           <PermissionRow
@@ -243,101 +353,79 @@ export default function SettingsScreen() {
       </Animated.View>
 
       {/* App Info */}
-      <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(300).duration(500)}>
         <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
-          <Ionicons name="information-circle-outline" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>About VirtuCam</Text>
+          <Ionicons name="information-circle-outline" size={16} color={colors.accent} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>About VirtuCam</Text>
         </View>
         <Card>
           <View style={styles.aboutHeader}>
-            <View style={styles.aboutLogoContainer}>
-              <MaterialCommunityIcons name="camera-iris" size={36} color={Colors.electricBlue} />
+            <View style={[styles.aboutLogoContainer, { backgroundColor: colors.electricBlue + '18', borderColor: colors.electricBlue + '30' }]}>
+              <MaterialCommunityIcons name="camera-iris" size={36} color={colors.electricBlue} />
             </View>
             <View style={styles.aboutHeaderInfo}>
-              <Text style={styles.aboutAppName}>VirtuCam</Text>
-              <Text style={styles.aboutAppTagline}>Virtual Camera Engine for Android</Text>
+              <Text style={[styles.aboutAppName, { color: colors.textPrimary }]}>VirtuCam</Text>
+              <Text style={[styles.aboutAppTagline, { color: colors.textTertiary }]}>Virtual Camera Engine for Android</Text>
             </View>
           </View>
 
-          <View style={styles.aboutDivider} />
+          <View style={[styles.aboutDivider, { backgroundColor: colors.border }]} />
 
+          <AboutRow label="Version" value="1.0.0" />
+          <AboutRow label="Build" value={`${Platform.OS} ${Platform.Version}`} />
+          <AboutRow label="Hook Engine" value="Camera2 API Interceptor" />
           <View style={styles.aboutRow}>
-            <Text style={styles.aboutLabel}>Version</Text>
-            <Text style={styles.aboutValue}>1.0.0</Text>
-          </View>
-          <View style={styles.aboutRow}>
-            <Text style={styles.aboutLabel}>Build</Text>
-            <Text style={styles.aboutValue}>
-              {Platform.OS} {Platform.Version}
-            </Text>
-          </View>
-          <View style={styles.aboutRow}>
-            <Text style={styles.aboutLabel}>Hook Engine</Text>
-            <Text style={styles.aboutValue}>Camera2 API Interceptor</Text>
-          </View>
-          <View style={styles.aboutRow}>
-            <Text style={styles.aboutLabel}>Framework</Text>
-            <Text
-              style={[
-                styles.aboutValue,
-                { color: getStatusColor(systemStatus.xposedFramework.status) },
-              ]}
-            >
+            <Text style={[styles.aboutLabel, { color: colors.textSecondary }]}>Framework</Text>
+            <Text style={[styles.aboutValue, { color: getStatusColor(systemStatus.xposedFramework.status) }]}>
               {systemStatus.xposedFramework.detail}
             </Text>
           </View>
-          <View style={styles.aboutRow}>
-            <Text style={styles.aboutLabel}>Target SDK</Text>
-            <Text style={styles.aboutValue}>Android 10 – 16</Text>
-          </View>
-          <View style={[styles.aboutRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.aboutLabel}>Developer</Text>
-            <Text style={styles.aboutValue}>ggSetRanges</Text>
-          </View>
+          <AboutRow label="Target SDK" value="Android 10 – 16" />
+          <AboutRow label="Developer" value="ggSetRanges" last />
 
           <View style={styles.aboutLinks}>
             <Pressable
-              style={styles.aboutLinkButton}
+              style={[styles.aboutLinkButton, { backgroundColor: colors.surfaceLight, borderColor: colors.border }]}
               onPress={() => Linking.openURL('https://github.com/ggsetRanges/virtucam')}
             >
-              <Ionicons name="logo-github" size={16} color={Colors.textSecondary} />
-              <Text style={styles.aboutLinkText}>Source Code</Text>
+              <Ionicons name="logo-github" size={16} color={colors.textSecondary} />
+              <Text style={[styles.aboutLinkText, { color: colors.textSecondary }]}>Source Code</Text>
             </Pressable>
             <Pressable
-              style={styles.aboutLinkButton}
+              style={[styles.aboutLinkButton, { backgroundColor: colors.surfaceLight, borderColor: colors.border }]}
               onPress={() => Linking.openURL('https://github.com/ggsetRanges/virtucam/issues')}
             >
-              <Ionicons name="bug-outline" size={16} color={Colors.textSecondary} />
-              <Text style={styles.aboutLinkText}>Report Issue</Text>
+              <Ionicons name="bug-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.aboutLinkText, { color: colors.textSecondary }]}>Report Issue</Text>
             </Pressable>
           </View>
         </Card>
       </Animated.View>
 
-      {/* Diagnostic Logs Section */}
-      <Animated.View entering={FadeInDown.delay(400).duration(500)}>
+      {/* Diagnostics */}
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(400).duration(500)}>
         <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
-          <Ionicons name="document-text-outline" size={18} color={Colors.electricBlue} />
-          <Text style={styles.sectionTitle}>Diagnostics</Text>
+          <Ionicons name="document-text-outline" size={16} color={colors.electricBlue} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Diagnostics</Text>
         </View>
         <Card>
           <Pressable
             onPress={handleRunDiagnostics}
             disabled={isRunningDiagnostics}
-            style={[styles.aboutRow, diagnosticsReport ? {} : { borderBottomWidth: 0 }]}
+            style={[styles.aboutRow, { borderBottomColor: colors.border }, diagnosticsReport ? {} : { borderBottomWidth: 0 }]}
           >
             <View style={styles.logsButtonContent}>
               {isRunningDiagnostics ? (
-                <ActivityIndicator size={14} color={Colors.accent} />
+                <ActivityIndicator size={14} color={colors.accent} />
               ) : (
-                <Ionicons name="pulse" size={16} color={Colors.accent} />
+                <Ionicons name="pulse" size={16} color={colors.accent} />
               )}
-              <Text style={[styles.aboutLabel, { color: Colors.accent }]}>
+              <Text style={[styles.aboutLabel, { color: colors.accent }]}>
                 {isRunningDiagnostics ? 'Running Diagnostics...' : 'Run Diagnostics'}
               </Text>
             </View>
             {!isRunningDiagnostics && (
-              <Ionicons name="play-circle" size={18} color={Colors.accent} />
+              <Ionicons name="play-circle" size={18} color={colors.accent} />
             )}
           </Pressable>
 
@@ -345,10 +433,10 @@ export default function SettingsScreen() {
             diagnosticsChecks.map((check, i) => {
               const color =
                 check.status === 'pass'
-                  ? Colors.success
+                  ? colors.success
                   : check.status === 'fail'
-                    ? Colors.danger
-                    : Colors.warningAmber;
+                    ? colors.danger
+                    : colors.warningAmber;
               const icon =
                 check.status === 'pass'
                   ? 'checkmark-circle'
@@ -362,17 +450,17 @@ export default function SettingsScreen() {
                   style={[
                     styles.permissionRow,
                     i < diagnosticsChecks.length - 1 && {
-                      borderBottomWidth: 1,
-                      borderBottomColor: Colors.border,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: colors.border,
                     },
                   ]}
                 >
                   <View style={[styles.permissionIcon, { backgroundColor: bgColor }]}>
-                    <Ionicons name={icon} size={18} color={color} />
+                    <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={18} color={color} />
                   </View>
                   <View style={styles.permissionInfo}>
-                    <Text style={styles.permissionLabel}>{check.name}</Text>
-                    <Text style={styles.permissionDesc}>{check.detail}</Text>
+                    <Text style={[styles.permissionLabel, { color: colors.textPrimary }]}>{check.name}</Text>
+                    <Text style={[styles.permissionDesc, { color: colors.textTertiary }]}>{check.detail}</Text>
                   </View>
                   <View style={[styles.permissionBadge, { backgroundColor: bgColor }]}>
                     <Text style={[styles.permissionBadgeText, { color }]}>
@@ -385,13 +473,13 @@ export default function SettingsScreen() {
 
           {diagnosticsReport && (
             <View style={styles.diagnosticsSummary}>
-              <Text style={styles.diagnosticsPassText}>
+              <Text style={[styles.diagnosticsPassText, { color: colors.success }]}>
                 ✓ {diagnosticsReport.passCount} Passed
               </Text>
-              <Text style={styles.diagnosticsFailText}>
+              <Text style={[styles.diagnosticsFailText, { color: colors.danger }]}>
                 ✗ {diagnosticsReport.failCount} Failed
               </Text>
-              <Text style={styles.diagnosticsWarnText}>
+              <Text style={[styles.diagnosticsWarnText, { color: colors.warningAmber }]}>
                 ⚠ {diagnosticsReport.warnCount} Warnings
               </Text>
             </View>
@@ -402,27 +490,27 @@ export default function SettingsScreen() {
             style={styles.logsLink}
           >
             <View style={styles.logsButtonContent}>
-              <Ionicons name="document-text" size={16} color={Colors.electricBlue} />
-              <Text style={styles.logsLinkText}>
+              <Ionicons name="document-text" size={16} color={colors.electricBlue} />
+              <Text style={[styles.logsLinkText, { color: colors.electricBlue }]}>
                 View Diagnostic Logs
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={Colors.electricBlue} />
+            <Ionicons name="chevron-forward" size={18} color={colors.electricBlue} />
           </Pressable>
         </Card>
       </Animated.View>
 
-      {/* Reset to Defaults */}
-      <Animated.View entering={FadeInDown.delay(500).duration(500)}>
-        <View style={styles.resetSectionHeader}>
-          <Ionicons name="refresh" size={18} color={Colors.danger} />
-          <Text style={styles.sectionTitle}>Reset Settings</Text>
+      {/* Reset */}
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(500).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="refresh" size={16} color={colors.danger} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Reset Settings</Text>
         </View>
         <Card>
           <View style={styles.resetSection}>
             <View style={styles.resetInfo}>
-              <Text style={styles.resetTitle}>Reset to Default Settings</Text>
-              <Text style={styles.resetDesc}>
+              <Text style={[styles.resetTitle, { color: colors.textPrimary }]}>Reset to Default Settings</Text>
+              <Text style={[styles.resetDesc, { color: colors.textSecondary }]}>
                 Restore all settings to their default values. Your permissions, onboarding status,
                 and system logs will be preserved.
               </Text>
@@ -435,7 +523,7 @@ export default function SettingsScreen() {
               disabled={isResetting}
               icon={
                 isResetting ? undefined : (
-                  <Ionicons name="refresh" size={16} color={Colors.textPrimary} />
+                  <Ionicons name="refresh" size={16} color={colors.textPrimary} />
                 )
               }
             />
@@ -443,8 +531,18 @@ export default function SettingsScreen() {
         </Card>
       </Animated.View>
 
-      <View style={{ height: 40 }} />
+      <View style={{ height: 100 }} />
     </ScrollView>
+  );
+}
+
+function AboutRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <View style={[styles.aboutRow, { borderBottomColor: colors.border }, last && { borderBottomWidth: 0 }]}>
+      <Text style={[styles.aboutLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <Text style={[styles.aboutValue, { color: colors.textPrimary }]}>{value}</Text>
+    </View>
   );
 }
 
@@ -463,22 +561,23 @@ function PermissionRow({
   last?: boolean;
   onRequest?: () => void;
 }) {
-  const statusColor = granted ? Colors.electricBlue : Colors.warningAmber;
+  const { colors } = useTheme();
+  const statusColor = granted ? colors.electricBlue : colors.warningAmber;
 
   return (
     <Pressable
       onPress={!granted ? onRequest : undefined}
       style={[
         styles.permissionRow,
-        !last && { borderBottomWidth: 1, borderBottomColor: Colors.border },
+        !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
       ]}
     >
       <View style={[styles.permissionIcon, { backgroundColor: statusColor + '20' }]}>
         <Ionicons name={icon} size={18} color={statusColor} />
       </View>
       <View style={styles.permissionInfo}>
-        <Text style={styles.permissionLabel}>{label}</Text>
-        <Text style={styles.permissionDesc}>{description}</Text>
+        <Text style={[styles.permissionLabel, { color: colors.textPrimary }]}>{label}</Text>
+        <Text style={[styles.permissionDesc, { color: colors.textTertiary }]}>{description}</Text>
       </View>
       <View style={[styles.permissionBadge, { backgroundColor: statusColor + '20' }]}>
         <Ionicons name={granted ? 'checkmark' : 'alert'} size={12} color={statusColor} />
@@ -493,23 +592,96 @@ function PermissionRow({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   content: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.xxxl,
   },
   screenTitle: {
-    color: Colors.textPrimary,
     fontSize: FontSize.xxxl,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   screenSubtitle: {
-    color: Colors.textSecondary,
     fontSize: FontSize.md,
     marginTop: 4,
     marginBottom: Spacing.xxl,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    flex: 1,
+  },
+  colorModeRow: {
+    flexDirection: 'column',
+    gap: Spacing.md,
+    paddingBottom: Spacing.sm,
+  },
+  colorModeLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  colorModeLabelText: {
+    flex: 1,
+  },
+  segmentedControl: {
+    flexDirection: 'row',
+    borderRadius: BorderRadius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 3,
+    gap: 3,
+  },
+  segment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.full,
+  },
+  segmentLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: Spacing.md,
+  },
+  perfRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  perfIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  perfTextWrap: {
+    flex: 1,
+  },
+  rowLabel: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+  },
+  rowSublabel: {
+    fontSize: FontSize.xs,
+    marginTop: 2,
+    lineHeight: 16,
   },
   lsposedNoticeCard: {
     marginBottom: Spacing.lg,
@@ -530,30 +702,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   lsposedNoticeTitle: {
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '700',
     marginBottom: 4,
   },
   lsposedNoticeDesc: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     lineHeight: 18,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-    marginTop: Spacing.sm,
-  },
-  sectionTitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    flex: 1,
   },
   permissionRow: {
     flexDirection: 'row',
@@ -572,12 +727,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   permissionLabel: {
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '600',
   },
   permissionDesc: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     marginTop: 2,
   },
@@ -604,29 +757,24 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: Colors.electricBlue + '15',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '30',
   },
   aboutHeaderInfo: {
     flex: 1,
   },
   aboutAppName: {
-    color: Colors.textPrimary,
     fontSize: FontSize.xl,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   aboutAppTagline: {
-    color: Colors.textTertiary,
     fontSize: FontSize.sm,
     marginTop: 2,
   },
   aboutDivider: {
-    height: 1,
-    backgroundColor: Colors.border,
+    height: StyleSheet.hairlineWidth,
     marginVertical: Spacing.md,
   },
   aboutRow: {
@@ -634,15 +782,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   aboutLabel: {
-    color: Colors.textSecondary,
     fontSize: FontSize.md,
   },
   aboutValue: {
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '600',
   },
@@ -658,13 +803,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.xs,
     paddingVertical: Spacing.sm,
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   aboutLinkText: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     fontWeight: '600',
   },
@@ -675,59 +817,44 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   resetTitle: {
-    color: Colors.textPrimary,
     fontSize: FontSize.lg,
     fontWeight: '700',
   },
   resetDesc: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
-    lineHeight: 18,
+    lineHeight: 20,
   },
   logsButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+    flex: 1,
+  },
+  logsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
+  },
+  logsLinkText: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
   },
   diagnosticsSummary: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    gap: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    marginTop: Spacing.sm,
   },
   diagnosticsPassText: {
-    color: Colors.success,
     fontSize: FontSize.sm,
     fontWeight: '700',
   },
   diagnosticsFailText: {
-    color: Colors.danger,
     fontSize: FontSize.sm,
     fontWeight: '700',
   },
   diagnosticsWarnText: {
-    color: Colors.warningAmber,
     fontSize: FontSize.sm,
     fontWeight: '700',
-  },
-  logsLink: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 0,
-  },
-  logsLinkText: {
-    color: Colors.electricBlue,
-    fontSize: FontSize.md,
-  },
-  resetSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-    marginTop: Spacing.xl,
   },
 });

@@ -16,10 +16,11 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Colors, FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
+import { useTheme } from '@/context/ThemeContext';
 import {
   getStatusColor,
   getStatusIcon,
@@ -36,6 +37,7 @@ export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { heavyImpact, success, warning, mediumImpact } = useHaptics();
+  const { colors, isPerformance } = useTheme();
 
   const [hookEnabled, setHookEnabled] = useStorage(STORAGE_KEYS.HOOK_ENABLED, false);
   const [frontCamera, setFrontCamera] = useStorage(STORAGE_KEYS.FRONT_CAMERA, true);
@@ -51,8 +53,7 @@ export default function Dashboard() {
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loadingSystemInfo, setLoadingSystemInfo] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  
-  // Additional bridge status info
+
   const [bridgeHookEnabled, setBridgeHookEnabled] = useState(false);
   const [bridgeMediaPath, setBridgeMediaPath] = useState<string | null>(null);
   const [bridgeCameraTarget, setBridgeCameraTarget] = useState<string>('front');
@@ -72,11 +73,10 @@ export default function Dashboard() {
         setBridgeTargetAppsCount(config.targetPackages?.length || 0);
       }
     } catch {
-      // Silent - config read may fail
+      // Silent
     }
   }, []);
 
-  // Sync bridge config whenever key settings change
   useEffect(() => {
     const doSync = async () => {
       try {
@@ -94,7 +94,6 @@ export default function Dashboard() {
     void doSync();
   }, [hookEnabled, frontCamera, backCamera, selectedMedia, applyBridgeConfig]);
 
-  // Load system info on mount
   useEffect(() => {
     const loadInfo = async () => {
       setLoadingSystemInfo(true);
@@ -106,6 +105,11 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    if (isPerformance) {
+      masterGlow.value = withTiming(0, { duration: 200 });
+      scanLineY.value = withTiming(0, { duration: 200 });
+      return;
+    }
     if (hookEnabled) {
       masterGlow.value = withRepeat(
         withSequence(
@@ -124,11 +128,13 @@ export default function Dashboard() {
       masterGlow.value = withTiming(0, { duration: 400 });
       scanLineY.value = withTiming(0, { duration: 300 });
     }
-  }, [hookEnabled, masterGlow, scanLineY]);
+  }, [hookEnabled, masterGlow, scanLineY, isPerformance]);
 
   const masterGlowStyle = useAnimatedStyle(() => ({
-    shadowOpacity: masterGlow.value * 0.6,
-    borderColor: hookEnabled ? `rgba(0, 212, 255, ${masterGlow.value * 0.5})` : Colors.border,
+    shadowOpacity: masterGlow.value * 0.45,
+    borderColor: hookEnabled
+      ? `rgba(10, 132, 255, ${masterGlow.value * 0.4})`
+      : colors.border,
   }));
 
   const masterButtonStyle = useAnimatedStyle(() => ({
@@ -173,22 +179,18 @@ export default function Dashboard() {
     setBridgeReadable(bridgeSt.readable);
     setLastSyncTime(new Date().toLocaleTimeString());
     await applyBridgeConfig();
-
-    // Refresh system info
     setLoadingSystemInfo(true);
     const info = await getSystemInfo();
     setSystemInfo(info);
     setLoadingSystemInfo(false);
   }, [mediumImpact, refreshSystemStatus, applyBridgeConfig]);
 
-  // Pull-to-refresh handler
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await handleRefreshStatus();
     setRefreshing(false);
   }, [handleRefreshStatus]);
 
-  // Navigate to setup/onboarding
   const handleSetup = useCallback(() => {
     mediumImpact();
     router.push('/onboarding');
@@ -196,49 +198,57 @@ export default function Dashboard() {
 
   const activeTargets = [frontCamera && 'Front', backCamera && 'Back'].filter(Boolean);
 
+  const entering = (delay: number) =>
+    isPerformance ? undefined : FadeInDown.delay(delay).duration(500);
+
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          tintColor={Colors.electricBlue}
-          colors={[Colors.electricBlue]}
-          progressBackgroundColor={Colors.surface}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+          progressBackgroundColor={colors.surfaceSolid}
         />
       }
     >
       {/* Header */}
-      <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+      <Animated.View entering={entering(100)}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.appName}>VIRTUCAM</Text>
-            <Text style={styles.appSubtitle}>Virtual Camera Engine</Text>
+            <Text style={[styles.appName, { color: colors.accent }]}>VIRTUCAM</Text>
+            <Text style={[styles.appSubtitle, { color: colors.textTertiary }]}>Virtual Camera Engine</Text>
           </View>
           <View style={styles.headerRight}>
-            <Pressable onPress={handleSetup} style={styles.setupButton}>
-              <Ionicons name="settings-outline" size={16} color={Colors.accent} />
-              <Text style={styles.setupButtonText}>Setup</Text>
+            <Pressable
+              onPress={handleSetup}
+              style={[styles.setupButton, { backgroundColor: colors.accent + '18', borderColor: colors.accent + '40' }]}
+            >
+              <Ionicons name="settings-outline" size={16} color={colors.accent} />
+              <Text style={[styles.setupButtonText, { color: colors.accent }]}>Setup</Text>
             </Pressable>
             <View
               style={[
                 styles.versionBadge,
-                allSystemsReady ? styles.versionBadgeReady : styles.versionBadgeWarn,
+                allSystemsReady
+                  ? { backgroundColor: colors.electricBlue + '18', borderColor: colors.electricBlue + '40' }
+                  : { backgroundColor: colors.warningAmber + '18', borderColor: colors.warningAmber + '40' },
               ]}
             >
               <View
                 style={[
                   styles.versionDot,
-                  { backgroundColor: allSystemsReady ? Colors.electricBlue : Colors.warningAmber },
+                  { backgroundColor: allSystemsReady ? colors.electricBlue : colors.warningAmber },
                 ]}
               />
               <Text
                 style={[
                   styles.versionText,
-                  { color: allSystemsReady ? Colors.electricBlue : Colors.warningAmber },
+                  { color: allSystemsReady ? colors.electricBlue : colors.warningAmber },
                 ]}
               >
                 {allSystemsReady ? 'READY' : 'SETUP'}
@@ -249,48 +259,54 @@ export default function Dashboard() {
       </Animated.View>
 
       {/* Master Control */}
-      <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+      <Animated.View entering={entering(200)}>
         <Animated.View
-          style={[styles.masterCard, masterGlowStyle, hookEnabled && styles.masterCardActive]}
+          style={[
+            styles.masterCard,
+            {
+              backgroundColor: colors.surfaceCard,
+              borderColor: colors.border,
+              shadowColor: colors.accent,
+            },
+            !isPerformance && masterGlowStyle,
+            hookEnabled && { borderColor: colors.accent + '40' },
+          ]}
         >
           <View style={styles.masterHeader}>
             <View style={styles.masterStatus}>
               <PulseIndicator
-                active={hookEnabled}
-                color={hookEnabled ? Colors.electricBlue : Colors.inactive}
+                active={hookEnabled && !isPerformance}
+                color={hookEnabled ? colors.accent : colors.inactive}
                 size={12}
               />
-              <Text
-                style={[styles.masterStatusText, hookEnabled && { color: Colors.electricBlue }]}
-              >
+              <Text style={[styles.masterStatusText, { color: hookEnabled ? colors.accent : colors.textTertiary }]}>
                 {hookEnabled ? 'HOOK ACTIVE' : 'HOOK INACTIVE'}
               </Text>
             </View>
             <View
               style={[
                 styles.statusChip,
-                hookEnabled ? styles.statusChipActive : styles.statusChipInactive,
+                hookEnabled
+                  ? { backgroundColor: colors.accent + '20', borderColor: colors.accent + '40' }
+                  : { backgroundColor: colors.surfaceLighter, borderColor: colors.border },
               ]}
             >
-              <Text
-                style={[
-                  styles.statusChipText,
-                  hookEnabled ? styles.statusChipTextActive : undefined,
-                ]}
-              >
+              <Text style={[styles.statusChipText, { color: hookEnabled ? colors.accent : colors.textTertiary }]}>
                 {hookEnabled ? 'ONLINE' : 'OFFLINE'}
               </Text>
             </View>
           </View>
 
-          {/* Live Feed Monitor */}
           {hookEnabled && selectedMedia && (
-            <Animated.View entering={FadeIn.duration(400)} style={styles.liveFeedContainer}>
+            <Animated.View
+              entering={isPerformance ? undefined : FadeIn.duration(400)}
+              style={[styles.liveFeedContainer, { borderColor: colors.accent + '30' }]}
+            >
               <Image
                 source={{ uri: selectedMedia }}
                 style={styles.liveFeedImage}
                 contentFit="cover"
-                transition={300}
+                transition={isPerformance ? 0 : 300}
               />
               <View style={styles.liveFeedOverlay}>
                 <View style={styles.liveFeedBadge}>
@@ -298,78 +314,85 @@ export default function Dashboard() {
                   <Text style={styles.liveFeedText}>LIVE FEED</Text>
                 </View>
                 <View style={styles.liveFeedInfo}>
-                  <Text style={styles.liveFeedInfoText}>
+                  <Text style={[styles.liveFeedInfoText, { color: colors.textSecondary }]}>
                     {activeTargets.join(' + ')} CAM •{' '}
                     {aiEnhancement ? `AI: ${aiEnhancement}` : 'RAW'}
                   </Text>
                 </View>
               </View>
-              {/* Scan line effect */}
-              <Animated.View style={[styles.scanLine, scanLineStyle]} />
+              {!isPerformance && (
+                <Animated.View
+                  style={[styles.scanLine, { backgroundColor: colors.accent + '40' }]}
+                />
+              )}
             </Animated.View>
           )}
 
-          <Animated.View style={masterButtonStyle}>
+          <Animated.View style={isPerformance ? undefined : masterButtonStyle}>
             <Pressable
               onPressIn={() => {
-                masterScale.value = withSpring(0.95);
+                if (!isPerformance) masterScale.value = withSpring(0.95);
               }}
               onPressOut={() => {
-                masterScale.value = withSpring(1);
+                if (!isPerformance) masterScale.value = withSpring(1);
               }}
               onPress={handleMasterToggle}
               style={[
                 styles.masterButton,
-                hookEnabled ? styles.masterButtonActive : styles.masterButtonInactive,
+                hookEnabled
+                  ? { backgroundColor: colors.accent + '12', borderColor: colors.accent + '50' }
+                  : { backgroundColor: colors.surfaceLight, borderColor: colors.border },
               ]}
             >
               <Ionicons
                 name={hookEnabled ? 'power' : 'power-outline'}
                 size={40}
-                color={hookEnabled ? Colors.electricBlue : Colors.textSecondary}
+                color={hookEnabled ? colors.accent : colors.textSecondary}
               />
               <Text
-                style={[styles.masterButtonLabel, hookEnabled && styles.masterButtonLabelActive]}
+                style={[
+                  styles.masterButtonLabel,
+                  { color: hookEnabled ? colors.accent : colors.textSecondary },
+                ]}
               >
                 {hookEnabled ? 'DISABLE HOOK' : 'ENABLE HOOK'}
               </Text>
             </Pressable>
           </Animated.View>
 
-          {/* Quick Stats */}
-          <View style={styles.statsRow}>
+          <View style={[styles.statsRow, { borderTopColor: colors.separator }]}>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>
+              <Text style={[styles.statValue, { color: colors.textPrimary }]}>
                 {activeTargets.length > 0 ? activeTargets.join(' + ') : 'None'}
               </Text>
-              <Text style={styles.statLabel}>Camera Target</Text>
+              <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Camera Target</Text>
             </View>
-            <View style={styles.statDivider} />
+            <View style={[styles.statDivider, { backgroundColor: colors.separator }]} />
             <View style={styles.statItem}>
               <Text
-                style={[styles.statValue, selectedMedia ? { color: Colors.success } : undefined]}
+                style={[styles.statValue, { color: selectedMedia ? colors.success : colors.textPrimary }]}
               >
                 {selectedMedia ? 'Ready' : 'No Media'}
               </Text>
-              <Text style={styles.statLabel}>Source Status</Text>
+              <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Source Status</Text>
             </View>
-            <View style={styles.statDivider} />
+            <View style={[styles.statDivider, { backgroundColor: colors.separator }]} />
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, hookEnabled && { color: Colors.electricBlue }]}>
+              <Text style={[styles.statValue, { color: hookEnabled ? colors.accent : colors.textPrimary }]}>
                 {hookEnabled ? 'Live' : 'Idle'}
               </Text>
-              <Text style={styles.statLabel}>Engine</Text>
+              <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Engine</Text>
             </View>
           </View>
         </Animated.View>
       </Animated.View>
 
-      {/* System Verification Status */}
-      <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+      {/* System Verification */}
+      <Animated.View entering={entering(300)}>
         <View style={styles.sectionHeader}>
-          <Ionicons name="shield-checkmark" size={18} color={Colors.electricBlue} />
-          <Text style={styles.sectionTitle}>System Verification</Text>
-          {isChecking && <ActivityIndicator size="small" color={Colors.electricBlue} />}
+          <Ionicons name="shield-checkmark" size={16} color={colors.electricBlue} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>System Verification</Text>
+          {isChecking && <ActivityIndicator size="small" color={colors.electricBlue} />}
         </View>
         <View style={styles.systemGrid}>
           <SystemCheckCard
@@ -400,10 +423,10 @@ export default function Dashboard() {
       </Animated.View>
 
       {/* Camera Targeting */}
-      <Animated.View entering={FadeInDown.delay(400).duration(500)}>
+      <Animated.View entering={entering(400)}>
         <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="camera-switch" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>Camera Targeting</Text>
+          <MaterialCommunityIcons name="camera-switch" size={16} color={colors.accent} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Camera Targeting</Text>
         </View>
         <View style={styles.section}>
           <SystemToggle
@@ -411,46 +434,60 @@ export default function Dashboard() {
             sublabel="Override selfie / front-facing camera"
             value={frontCamera}
             onValueChange={setFrontCamera}
-            icon={<Ionicons name="camera-reverse-outline" size={18} color={Colors.accent} />}
-            accentColor={Colors.accent}
+            icon={<Ionicons name="camera-reverse-outline" size={18} color={colors.accent} />}
+            accentColor={colors.accent}
           />
           <SystemToggle
             label="Back Camera"
             sublabel="Override rear / main camera"
             value={backCamera}
             onValueChange={setBackCamera}
-            icon={<Ionicons name="camera-outline" size={18} color={Colors.accentLight} />}
-            accentColor={Colors.accentLight}
+            icon={<Ionicons name="camera-outline" size={18} color={colors.accentLight} />}
+            accentColor={colors.accentLight}
           />
         </View>
       </Animated.View>
 
-      {/* Config Bridge Status */}
-      <Animated.View entering={FadeInDown.delay(500).duration(500)}>
+      {/* Config Bridge */}
+      <Animated.View entering={entering(500)}>
         <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="bridge" size={18} color={Colors.cyan} />
-          <Text style={styles.sectionTitle}>Config Bridge</Text>
+          <MaterialCommunityIcons name="bridge" size={16} color={colors.cyan} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Config Bridge</Text>
         </View>
         <Card>
-          <View style={[
-            styles.bridgeBanner,
-            { backgroundColor: bridgeReadable && bridgeHookEnabled
-                ? Colors.success + '15'
-                : bridgeReadable
-                  ? Colors.warningAmber + '15'
-                  : Colors.danger + '15' }
-          ]}>
-            <View style={[styles.miniDot, {
-              backgroundColor: bridgeReadable
-                ? (bridgeHookEnabled ? Colors.success : Colors.warningAmber)
-                : Colors.danger,
-              width: 8, height: 8, borderRadius: 4
-            }]} />
-            <Text style={[styles.bridgeBannerText, {
-              color: bridgeReadable
-                ? (bridgeHookEnabled ? Colors.success : Colors.warningAmber)
-                : Colors.danger,
-            }]}>
+          <View
+            style={[
+              styles.bridgeBanner,
+              {
+                backgroundColor: bridgeReadable && bridgeHookEnabled
+                  ? colors.success + '18'
+                  : bridgeReadable
+                    ? colors.warningAmber + '18'
+                    : colors.danger + '18',
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.miniDot,
+                {
+                  backgroundColor: bridgeReadable
+                    ? bridgeHookEnabled ? colors.success : colors.warningAmber
+                    : colors.danger,
+                  width: 8, height: 8, borderRadius: 4,
+                },
+              ]}
+            />
+            <Text
+              style={[
+                styles.bridgeBannerText,
+                {
+                  color: bridgeReadable
+                    ? bridgeHookEnabled ? colors.success : colors.warningAmber
+                    : colors.danger,
+                },
+              ]}
+            >
               {bridgeReadable && bridgeHookEnabled
                 ? 'BRIDGE ACTIVE — HOOK LIVE'
                 : bridgeReadable
@@ -458,257 +495,91 @@ export default function Dashboard() {
                   : 'BRIDGE OFFLINE'}
             </Text>
           </View>
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <Ionicons name="link-outline" size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoLabel}>Bridge Status</Text>
-            </View>
-            <View style={styles.infoValueRow}>
-              <View
-                style={[
-                  styles.miniDot,
-                  { backgroundColor: bridgeReadable ? Colors.success : Colors.danger },
-                ]}
-              />
-              <Text
-                style={[
-                  styles.infoValue,
-                  { color: bridgeReadable ? Colors.success : Colors.danger },
-                ]}
-              >
-                {bridgeReadable ? 'Connected' : 'Disconnected'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <Ionicons name="power-outline" size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoLabel}>Hook Status</Text>
-            </View>
-            <View style={styles.infoValueRow}>
-              <View
-                style={[
-                  styles.miniDot,
-                  { backgroundColor: bridgeHookEnabled ? Colors.electricBlue : Colors.inactive },
-                ]}
-              />
-              <Text
-                style={[
-                  styles.infoValue,
-                  { color: bridgeHookEnabled ? Colors.electricBlue : Colors.textTertiary },
-                ]}
-              >
-                {bridgeHookEnabled ? 'Enabled' : 'Disabled'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <Ionicons name="camera-outline" size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoLabel}>Camera Target</Text>
-            </View>
-            <Text style={styles.infoValue}>
-              {bridgeCameraTarget === 'both' ? 'Front & Back' : bridgeCameraTarget === 'front' ? 'Front Only' : 'Back Only'}
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <Ionicons name="apps-outline" size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoLabel}>Target Apps</Text>
-            </View>
-            <Text style={styles.infoValue}>Managed by LSPosed</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <Ionicons name="image-outline" size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoLabel}>Active Media</Text>
-            </View>
-            <Text
-              style={[styles.infoValue, !bridgeMediaPath && { color: Colors.textTertiary }]}
-              numberOfLines={1}
-            >
-              {bridgeMediaPath ? bridgeMediaPath.split('/').pop() : 'None selected'}
-            </Text>
-          </View>
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <Ionicons name="code-slash-outline" size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoLabel}>Config Rev</Text>
-            </View>
-            <Text style={styles.infoValue}>#{bridgeVersion}</Text>
-          </View>
-          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <View style={styles.infoRowLeft}>
-              <Ionicons name="time-outline" size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoLabel}>Last Sync</Text>
-            </View>
-            <Text style={styles.infoValue}>{lastSyncTime === 'Never' ? 'Syncing...' : lastSyncTime}</Text>
-          </View>
+          <InfoRow
+            icon="link-outline"
+            label="Bridge Status"
+            right={
+              <View style={styles.infoValueRow}>
+                <View style={[styles.miniDot, { backgroundColor: bridgeReadable ? colors.success : colors.danger }]} />
+                <Text style={[styles.infoValue, { color: bridgeReadable ? colors.success : colors.danger }]}>
+                  {bridgeReadable ? 'Connected' : 'Disconnected'}
+                </Text>
+              </View>
+            }
+          />
+          <InfoRow
+            icon="power-outline"
+            label="Hook Status"
+            right={
+              <View style={styles.infoValueRow}>
+                <View style={[styles.miniDot, { backgroundColor: bridgeHookEnabled ? colors.accent : colors.inactive }]} />
+                <Text style={[styles.infoValue, { color: bridgeHookEnabled ? colors.accent : colors.textTertiary }]}>
+                  {bridgeHookEnabled ? 'Enabled' : 'Disabled'}
+                </Text>
+              </View>
+            }
+          />
+          <InfoRow
+            icon="camera-outline"
+            label="Camera Target"
+            value={bridgeCameraTarget === 'both' ? 'Front & Back' : bridgeCameraTarget === 'front' ? 'Front Only' : 'Back Only'}
+          />
+          <InfoRow icon="apps-outline" label="Target Apps" value="Managed by LSPosed" />
+          <InfoRow
+            icon="image-outline"
+            label="Active Media"
+            value={bridgeMediaPath ? bridgeMediaPath.split('/').pop() ?? 'Unknown' : 'None selected'}
+            dimValue={!bridgeMediaPath}
+          />
+          <InfoRow icon="code-slash-outline" label="Config Rev" value={`#${bridgeVersion}`} />
+          <InfoRow
+            icon="time-outline"
+            label="Last Sync"
+            value={lastSyncTime === 'Never' ? 'Syncing...' : lastSyncTime}
+            last
+          />
         </Card>
       </Animated.View>
 
       {/* System Information */}
-      <Animated.View entering={FadeInDown.delay(600).duration(500)}>
+      <Animated.View entering={entering(600)}>
         <View style={styles.sectionHeader}>
-          <Ionicons name="information-circle-outline" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>System Information</Text>
-          {loadingSystemInfo && <ActivityIndicator size="small" color={Colors.accent} />}
+          <Ionicons name="information-circle-outline" size={16} color={colors.accent} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>System Information</Text>
+          {loadingSystemInfo && <ActivityIndicator size="small" color={colors.accent} />}
         </View>
         <Card>
           {systemInfo ? (
             <>
-              {/* DEVICE GROUP */}
-              <View style={styles.infoGroupHeader}>
-                <Ionicons name="phone-portrait-outline" size={11} color={Colors.textTertiary} />
-                <Text style={styles.infoGroupLabel}>DEVICE</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="hardware-chip-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Device</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.manufacturer} {systemInfo.model}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="pricetag-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Brand</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.brand}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="cube-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Model</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.model}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="cube-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Product</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.product}
-                </Text>
-              </View>
-
-              <View style={styles.infoGroupSeparator} />
-
-              {/* ANDROID GROUP */}
-              <View style={styles.infoGroupHeader}>
-                <Ionicons name="logo-android" size={11} color={Colors.textTertiary} />
-                <Text style={styles.infoGroupLabel}>ANDROID</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="logo-android" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Android</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.androidVersion} (SDK {systemInfo.sdkLevel})
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="build-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Build</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.buildNumber}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="shield-checkmark-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Security</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.securityPatch}
-                </Text>
-              </View>
-
-              <View style={styles.infoGroupSeparator} />
-
-              {/* SYSTEM GROUP */}
-              <View style={styles.infoGroupHeader}>
-                <Ionicons name="terminal-outline" size={11} color={Colors.textTertiary} />
-                <Text style={styles.infoGroupLabel}>SYSTEM</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="key-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Root</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.rootSolution}{systemInfo.rootVersion ? ` ${systemInfo.rootVersion}` : ''}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="terminal-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Kernel</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.kernelVersion.split('\n')[0].slice(0, 42)}…
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="shield-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>SELinux</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.selinuxStatus}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="code-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>ABI</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.abiList}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="save-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Storage</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.storage}
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="hardware-chip-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Memory</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.maxMemory}
-                </Text>
-              </View>
-              <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-                <View style={styles.infoRowLeft}>
-                  <Ionicons name="finger-print-outline" size={14} color={Colors.textTertiary} />
-                  <Text style={styles.infoLabel}>Fingerprint</Text>
-                </View>
-                <Text style={[styles.infoValue, styles.infoValueFlex]} numberOfLines={1}>
-                  {systemInfo.fingerprint.split('/').slice(-2).join('/')}
-                </Text>
-              </View>
+              <InfoGroupHeader icon="phone-portrait-outline" label="DEVICE" />
+              <InfoRow icon="hardware-chip-outline" label="Device" value={`${systemInfo.manufacturer} ${systemInfo.model}`} />
+              <InfoRow icon="pricetag-outline" label="Brand" value={systemInfo.brand} />
+              <InfoRow icon="cube-outline" label="Model" value={systemInfo.model} />
+              <InfoRow icon="cube-outline" label="Product" value={systemInfo.product} />
+              <GroupSeparator />
+              <InfoGroupHeader icon="logo-android" label="ANDROID" />
+              <InfoRow icon="logo-android" label="Android" value={`${systemInfo.androidVersion} (SDK ${systemInfo.sdkLevel})`} />
+              <InfoRow icon="build-outline" label="Build" value={systemInfo.buildNumber} />
+              <InfoRow icon="shield-checkmark-outline" label="Security" value={systemInfo.securityPatch} />
+              <GroupSeparator />
+              <InfoGroupHeader icon="terminal-outline" label="SYSTEM" />
+              <InfoRow icon="key-outline" label="Root" value={`${systemInfo.rootSolution}${systemInfo.rootVersion ? ` ${systemInfo.rootVersion}` : ''}`} />
+              <InfoRow icon="terminal-outline" label="Kernel" value={`${systemInfo.kernelVersion.split('\n')[0].slice(0, 42)}…`} />
+              <InfoRow icon="shield-outline" label="SELinux" value={systemInfo.selinuxStatus} />
+              <InfoRow icon="code-outline" label="ABI" value={systemInfo.abiList} />
+              <InfoRow icon="save-outline" label="Storage" value={systemInfo.storage} />
+              <InfoRow icon="hardware-chip-outline" label="Memory" value={systemInfo.maxMemory} />
+              <InfoRow
+                icon="finger-print-outline"
+                label="Fingerprint"
+                value={systemInfo.fingerprint.split('/').slice(-2).join('/')}
+                last
+              />
             </>
           ) : (
-            <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-              <Text style={styles.infoLabel}>Status</Text>
-              <Text style={[styles.infoValue, { color: Colors.danger }]}>
+            <View style={[styles.infoRow, { borderBottomWidth: 0, borderBottomColor: colors.border }]}>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Status</Text>
+              <Text style={[styles.infoValue, { color: colors.danger }]}>
                 {loadingSystemInfo ? 'Loading...' : 'Unavailable'}
               </Text>
             </View>
@@ -716,8 +587,63 @@ export default function Dashboard() {
         </Card>
       </Animated.View>
 
-      <View style={{ height: 40 }} />
+      <View style={{ height: 100 }} />
     </ScrollView>
+  );
+}
+
+function InfoGroupHeader({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.infoGroupHeader}>
+      <Ionicons name={icon} size={11} color={colors.textTertiary} />
+      <Text style={[styles.infoGroupLabel, { color: colors.textTertiary }]}>{label}</Text>
+    </View>
+  );
+}
+
+function GroupSeparator() {
+  const { colors } = useTheme();
+  return <View style={[styles.infoGroupSeparator, { backgroundColor: colors.separator }]} />;
+}
+
+function InfoRow({
+  icon,
+  label,
+  value,
+  right,
+  last,
+  dimValue,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value?: string;
+  right?: React.ReactNode;
+  last?: boolean;
+  dimValue?: boolean;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View
+      style={[
+        styles.infoRow,
+        { borderBottomColor: colors.border },
+        last && { borderBottomWidth: 0 },
+      ]}
+    >
+      <View style={styles.infoRowLeft}>
+        <Ionicons name={icon} size={14} color={colors.textTertiary} />
+        <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{label}</Text>
+      </View>
+      {right ?? (
+        <Text
+          style={[styles.infoValue, styles.infoValueFlex, { color: dimValue ? colors.textTertiary : colors.textPrimary }]}
+          numberOfLines={1}
+        >
+          {value}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -732,6 +658,7 @@ function SystemCheckCard({
   status: SystemCheckStatus;
   icon: keyof typeof Ionicons.glyphMap;
 }) {
+  const { colors } = useTheme();
   const color = getStatusColor(status);
   const statusIcon = getStatusIcon(status);
 
@@ -740,17 +667,18 @@ function SystemCheckCard({
       style={[
         styles.checkCard,
         {
+          backgroundColor: colors.surfaceCard,
           borderColor: color + '30',
         },
       ]}
     >
       <View style={styles.checkCardHeader}>
-        <View style={[styles.checkIconCircle, { backgroundColor: color + '15' }]}>
+        <View style={[styles.checkIconCircle, { backgroundColor: color + '18' }]}>
           <Ionicons name={icon} size={16} color={color} />
         </View>
-        <Ionicons name={statusIcon} size={16} color={color} />
+        <Ionicons name={statusIcon as keyof typeof Ionicons.glyphMap} size={16} color={color} />
       </View>
-      <Text style={styles.checkLabel}>{label}</Text>
+      <Text style={[styles.checkLabel, { color: colors.textSecondary }]}>{label}</Text>
       <Text style={[styles.checkDetail, { color }]}>{detail}</Text>
     </View>
   );
@@ -759,7 +687,6 @@ function SystemCheckCard({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   content: {
     paddingHorizontal: Spacing.xl,
@@ -772,14 +699,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xxl,
   },
   appName: {
-    color: Colors.electricBlue,
-    fontSize: FontSize.xxxl,
+    fontSize: FontSize.xxl,
     fontWeight: '800',
-    letterSpacing: 3,
+    letterSpacing: 4,
   },
   appSubtitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     letterSpacing: 1,
     marginTop: 2,
   },
@@ -788,32 +713,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
   },
-  refreshButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.surfaceLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
   versionBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.full,
     borderWidth: 1,
-  },
-  versionBadgeReady: {
-    backgroundColor: Colors.electricBlue + '15',
-    borderColor: Colors.electricBlue + '40',
-  },
-  versionBadgeWarn: {
-    backgroundColor: Colors.warningAmber + '15',
-    borderColor: Colors.warningAmber + '40',
   },
   versionDot: {
     width: 6,
@@ -826,19 +733,14 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   masterCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.xl,
+    borderRadius: BorderRadius.xxl,
     padding: Spacing.xl,
     marginBottom: Spacing.xl,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    shadowColor: Colors.electricBlue,
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 20,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 24,
     elevation: 8,
-  },
-  masterCardActive: {
-    backgroundColor: Colors.surface,
+    overflow: 'hidden',
   },
   masterHeader: {
     flexDirection: 'row',
@@ -852,8 +754,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   masterStatusText: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     fontWeight: '700',
     letterSpacing: 1.5,
   },
@@ -861,34 +762,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.full,
-  },
-  statusChipActive: {
-    backgroundColor: Colors.electricBlue + '20',
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '40',
-  },
-  statusChipInactive: {
-    backgroundColor: Colors.surfaceLighter,
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
   statusChipText: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1,
   },
-  statusChipTextActive: {
-    color: Colors.electricBlue,
-  },
   liveFeedContainer: {
     width: '100%',
     height: 160,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     marginBottom: Spacing.xl,
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '30',
   },
   liveFeedImage: {
     width: '100%',
@@ -916,22 +803,21 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Colors.textPrimary,
+    backgroundColor: '#FFFFFF',
   },
   liveFeedText: {
-    color: Colors.textPrimary,
+    color: '#FFFFFF',
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1,
   },
   liveFeedInfo: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.sm,
   },
   liveFeedInfoText: {
-    color: Colors.textSecondary,
     fontSize: FontSize.xs,
     fontWeight: '600',
   },
@@ -940,77 +826,55 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 2,
-    backgroundColor: Colors.electricBlue + '40',
-    shadowColor: Colors.electricBlue,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
   },
   masterButton: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: Spacing.xxl,
     borderRadius: BorderRadius.xl,
-    borderWidth: 2,
+    borderWidth: 1,
     gap: Spacing.md,
   },
-  masterButtonActive: {
-    backgroundColor: Colors.electricBlue + '10',
-    borderColor: Colors.electricBlue + '50',
-  },
-  masterButtonInactive: {
-    backgroundColor: Colors.surfaceLight,
-    borderColor: Colors.border,
-  },
   masterButtonLabel: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 2,
-  },
-  masterButtonLabelActive: {
-    color: Colors.electricBlue,
   },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: Spacing.xl,
     paddingTop: Spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   statItem: {
     flex: 1,
     alignItems: 'center',
   },
   statValue: {
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '700',
   },
   statLabel: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     marginTop: 4,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   statDivider: {
-    width: 1,
+    width: StyleSheet.hairlineWidth,
     height: 30,
-    backgroundColor: Colors.border,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
     marginTop: Spacing.sm,
   },
   sectionTitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     fontWeight: '700',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
     flex: 1,
   },
@@ -1026,10 +890,9 @@ const styles = StyleSheet.create({
   checkCard: {
     flex: 1,
     minWidth: '45%',
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.card,
     padding: Spacing.lg,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: Spacing.sm,
   },
   checkCardHeader: {
@@ -1045,7 +908,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkLabel: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     fontWeight: '600',
   },
@@ -1058,15 +920,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   infoLabel: {
-    color: Colors.textSecondary,
     fontSize: FontSize.md,
   },
   infoValue: {
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '600',
   },
@@ -1074,19 +933,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'right',
     marginLeft: Spacing.md,
-  },
-  infoValueWrap: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.xs,
-    fontWeight: '500',
-    lineHeight: 18,
-  },
-  infoRowColumn: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
   },
   infoValueRow: {
     flexDirection: 'row',
@@ -1104,7 +950,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     marginBottom: Spacing.md,
   },
   bridgeBannerText: {
@@ -1125,15 +971,13 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xs,
   },
   infoGroupLabel: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
   infoGroupSeparator: {
-    height: 1,
-    backgroundColor: Colors.border,
+    height: StyleSheet.hairlineWidth,
     marginVertical: Spacing.sm,
   },
   setupButton: {
@@ -1141,16 +985,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.full,
-    backgroundColor: Colors.accent + '15',
     borderWidth: 1,
-    borderColor: Colors.accent + '40',
   },
   setupButtonText: {
-    color: Colors.accent,
     fontSize: FontSize.xs,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
 });

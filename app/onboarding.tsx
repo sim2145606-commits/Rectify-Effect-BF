@@ -11,7 +11,8 @@ import {
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Colors, Spacing, BorderRadius, FontSize, STORAGE_KEYS } from '@/constants/theme';
+import { Spacing, BorderRadius, FontSize, STORAGE_KEYS } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import {
   checkAllPermissions,
   requestCameraPermission,
@@ -26,11 +27,11 @@ import {
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [permissions, setPermissions] = useState<AllPermissionsState | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const prevAppStateRef = useRef(AppState.currentState);
 
-  // Check permissions on mount and when app becomes active
   const checkPerms = useCallback(async () => {
     setIsChecking(true);
     try {
@@ -47,7 +48,6 @@ export default function OnboardingScreen() {
     void checkPerms();
   }, [checkPerms]);
 
-  // Re-check permissions when app becomes active (user returns from settings)
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
       if (prevAppStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
@@ -55,10 +55,7 @@ export default function OnboardingScreen() {
       }
       prevAppStateRef.current = nextAppState;
     });
-
-    return () => {
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, [checkPerms]);
 
   const handleRequestCamera = async () => {
@@ -68,12 +65,10 @@ export default function OnboardingScreen() {
 
   const handleRequestAllFiles = async () => {
     await requestAllFilesAccess();
-    // Permission will be re-checked when app becomes active
   };
 
   const handleRequestOverlay = async () => {
     await requestOverlayPermission();
-    // Permission will be re-checked when app becomes active
   };
 
   const handleOpenLSPosed = async () => {
@@ -95,23 +90,25 @@ export default function OnboardingScreen() {
 
   if (!permissions) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color={Colors.electricBlue} />
-        <Text style={styles.loadingText}>Checking system permissions...</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.electricBlue} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          Checking system permissions...
+        </Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>VirtuCam Setup</Text>
-          <Text style={styles.subtitle}>All permissions must be granted to proceed</Text>
+          <Text style={[styles.title, { color: colors.electricBlue }]}>VirtuCam Setup</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            All permissions must be granted to proceed
+          </Text>
         </View>
 
-        {/* Permission Checklist */}
         <View style={styles.permissionList}>
           <PermissionItem
             label="Root Access"
@@ -121,7 +118,6 @@ export default function OnboardingScreen() {
             onPress={permissions.rootAccess.canRequest ? handleOpenSettings : undefined}
             buttonLabel={permissions.rootAccess.canRequest ? 'Open Settings' : undefined}
           />
-
           <PermissionItem
             label="LSPosed Module"
             detail={permissions.lsposedModule.detail}
@@ -130,7 +126,6 @@ export default function OnboardingScreen() {
             onPress={permissions.lsposedModule.canRequest ? handleOpenLSPosed : undefined}
             buttonLabel={permissions.lsposedModule.canRequest ? 'Open LSPosed Manager' : undefined}
           />
-
           <PermissionItem
             label="All Files Access"
             detail={permissions.allFilesAccess.detail}
@@ -139,7 +134,6 @@ export default function OnboardingScreen() {
             onPress={permissions.allFilesAccess.canRequest ? handleRequestAllFiles : undefined}
             buttonLabel={permissions.allFilesAccess.canRequest ? 'Grant Permission' : undefined}
           />
-
           <PermissionItem
             label="Camera Permission"
             detail={permissions.cameraPermission.detail}
@@ -148,7 +142,6 @@ export default function OnboardingScreen() {
             onPress={permissions.cameraPermission.canRequest ? handleRequestCamera : undefined}
             buttonLabel={permissions.cameraPermission.canRequest ? 'Grant Permission' : undefined}
           />
-
           <PermissionItem
             label="Overlay Permission"
             detail={permissions.overlayPermission.detail}
@@ -159,28 +152,45 @@ export default function OnboardingScreen() {
           />
         </View>
 
-        {/* Refresh Button */}
-        <TouchableOpacity onPress={checkPerms} style={styles.refreshButton} disabled={isChecking}>
+        <TouchableOpacity
+          onPress={checkPerms}
+          style={[
+            styles.refreshButton,
+            { backgroundColor: colors.surfaceCard, borderColor: colors.border },
+          ]}
+          disabled={isChecking}
+        >
           {isChecking ? (
-            <ActivityIndicator size="small" color={Colors.electricBlue} />
+            <ActivityIndicator size="small" color={colors.electricBlue} />
           ) : (
-            <Ionicons name="refresh" size={20} color={Colors.electricBlue} />
+            <Ionicons name="refresh" size={20} color={colors.electricBlue} />
           )}
-          <Text style={styles.refreshText}>{isChecking ? 'Checking...' : 'Refresh Status'}</Text>
+          <Text style={[styles.refreshText, { color: colors.electricBlue }]}>
+            {isChecking ? 'Checking...' : 'Refresh Status'}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Proceed Button */}
-      <View style={styles.footer}>
+      <View style={[styles.footer, { borderTopColor: colors.border }]}>
         <TouchableOpacity
           onPress={handleProceed}
-          style={[styles.proceedButton, !allGranted && styles.proceedButtonDisabled]}
+          style={[
+            styles.proceedButton,
+            allGranted
+              ? { backgroundColor: colors.electricBlue }
+              : { backgroundColor: colors.surfaceLight, borderColor: colors.border, borderWidth: 1 },
+          ]}
           disabled={!allGranted}
         >
-          <Text style={[styles.proceedText, !allGranted && styles.proceedTextDisabled]}>
+          <Text
+            style={[
+              styles.proceedText,
+              { color: allGranted ? '#FFFFFF' : colors.textTertiary },
+            ]}
+          >
             {allGranted ? 'Proceed to App' : 'Grant All Permissions to Continue'}
           </Text>
-          {allGranted && <Ionicons name="arrow-forward" size={20} color={Colors.textPrimary} />}
+          {allGranted && <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />}
         </TouchableOpacity>
       </View>
     </View>
@@ -202,33 +212,25 @@ function PermissionItem({
   onPress?: () => void;
   buttonLabel?: string;
 }) {
+  const { colors } = useTheme();
+
   const getStatusColor = (): string => {
     switch (status) {
-      case 'granted':
-        return Colors.success;
-      case 'denied':
-        return Colors.danger;
-      case 'pending':
-        return Colors.warningAmber;
-      case 'checking':
-        return Colors.textTertiary;
-      default:
-        return Colors.textTertiary;
+      case 'granted': return colors.success;
+      case 'denied': return colors.danger;
+      case 'pending': return colors.warningAmber;
+      case 'checking': return colors.textTertiary;
+      default: return colors.textTertiary;
     }
   };
 
   const getStatusIcon = (): keyof typeof Ionicons.glyphMap => {
     switch (status) {
-      case 'granted':
-        return 'checkmark-circle';
-      case 'denied':
-        return 'close-circle';
-      case 'pending':
-        return 'alert-circle';
-      case 'checking':
-        return 'hourglass';
-      default:
-        return 'help-circle';
+      case 'granted': return 'checkmark-circle';
+      case 'denied': return 'close-circle';
+      case 'pending': return 'alert-circle';
+      case 'checking': return 'hourglass';
+      default: return 'help-circle';
     }
   };
 
@@ -236,22 +238,33 @@ function PermissionItem({
   const statusIcon = getStatusIcon();
 
   return (
-    <View style={[styles.permissionItem, { borderColor: statusColor + '30' }]}>
+    <View
+      style={[
+        styles.permissionItem,
+        { backgroundColor: colors.surfaceCard, borderColor: statusColor + '30' },
+      ]}
+    >
       <View style={styles.permissionHeader}>
-        <View style={[styles.iconCircle, { backgroundColor: statusColor + '15' }]}>
+        <View style={[styles.iconCircle, { backgroundColor: statusColor + '18' }]}>
           <Ionicons name={icon} size={20} color={statusColor} />
         </View>
         <View style={styles.permissionInfo}>
-          <Text style={styles.permissionLabel}>{label}</Text>
+          <Text style={[styles.permissionLabel, { color: colors.textPrimary }]}>{label}</Text>
           <Text style={[styles.permissionDetail, { color: statusColor }]}>{detail}</Text>
         </View>
         <Ionicons name={statusIcon} size={24} color={statusColor} />
       </View>
 
       {onPress && buttonLabel && (
-        <TouchableOpacity onPress={onPress} style={styles.actionButton}>
-          <Text style={styles.actionButtonText}>{buttonLabel}</Text>
-          <Ionicons name="arrow-forward" size={16} color={Colors.electricBlue} />
+        <TouchableOpacity
+          onPress={onPress}
+          style={[
+            styles.actionButton,
+            { backgroundColor: colors.electricBlue + '18', borderColor: colors.electricBlue + '35' },
+          ]}
+        >
+          <Text style={[styles.actionButtonText, { color: colors.electricBlue }]}>{buttonLabel}</Text>
+          <Ionicons name="arrow-forward" size={16} color={colors.electricBlue} />
         </TouchableOpacity>
       )}
     </View>
@@ -261,7 +274,6 @@ function PermissionItem({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   content: {
     flexGrow: 1,
@@ -271,7 +283,6 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: Spacing.lg,
-    color: Colors.textSecondary,
     fontSize: FontSize.md,
   },
   header: {
@@ -280,13 +291,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: FontSize.xxxl,
     fontWeight: '800',
-    color: Colors.electricBlue,
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     marginBottom: Spacing.sm,
   },
   subtitle: {
     fontSize: FontSize.md,
-    color: Colors.textSecondary,
     lineHeight: 22,
   },
   permissionList: {
@@ -294,10 +303,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   permissionItem: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.card,
     padding: Spacing.lg,
-    borderWidth: 1.5,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   permissionHeader: {
     flexDirection: 'row',
@@ -317,7 +325,6 @@ const styles = StyleSheet.create({
   permissionLabel: {
     fontSize: FontSize.md,
     fontWeight: '700',
-    color: Colors.textPrimary,
     marginBottom: 2,
   },
   permissionDetail: {
@@ -332,16 +339,13 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.electricBlue + '15',
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.electricBlue + '30',
+    borderWidth: StyleSheet.hairlineWidth,
   },
   actionButtonText: {
     fontSize: FontSize.sm,
     fontWeight: '700',
-    color: Colors.electricBlue,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   refreshButton: {
     flexDirection: 'row',
@@ -350,22 +354,18 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderRadius: BorderRadius.card,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   refreshText: {
     fontSize: FontSize.md,
     fontWeight: '600',
-    color: Colors.electricBlue,
   },
   footer: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.xxxl,
     paddingTop: Spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   proceedButton: {
     flexDirection: 'row',
@@ -373,22 +373,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.sm,
     paddingVertical: Spacing.lg,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.electricBlue,
-  },
-  proceedButtonDisabled: {
-    backgroundColor: Colors.surfaceLight,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
+    borderRadius: BorderRadius.card,
   },
   proceedText: {
     fontSize: FontSize.lg,
     fontWeight: '700',
-    color: Colors.textPrimary,
-    letterSpacing: 1,
-  },
-  proceedTextDisabled: {
-    color: Colors.textTertiary,
+    letterSpacing: 0.5,
   },
 });

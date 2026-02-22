@@ -22,8 +22,9 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useTheme } from '@/context/ThemeContext';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
 import {
@@ -39,6 +40,7 @@ import {
 export default function PresetsScreen() {
   const insets = useSafeAreaInsets();
   const { lightImpact, mediumImpact, success, warning, heavyImpact } = useHaptics();
+  const { colors, isPerformance } = useTheme();
 
   const [presets, setPresets] = useState<LocalPreset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +59,7 @@ export default function PresetsScreen() {
       const data = await fetchPresets();
       setPresets(data);
     } catch {
-      // Silently handle - empty list shown
+      // Silently handle
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -158,9 +160,7 @@ export default function PresetsScreen() {
   );
 
   const handleSaveRename = useCallback(async () => {
-    if (!renameText.trim() || !renamingId) {
-      return;
-    }
+    if (!renameText.trim() || !renamingId) return;
 
     try {
       await renamePreset(renamingId, renameText.trim(), renameDesc.trim() || undefined);
@@ -207,40 +207,50 @@ export default function PresetsScreen() {
     return parts.join(' • ');
   };
 
+  const entering = (delay: number) =>
+    isPerformance ? undefined : FadeInDown.delay(delay).duration(500);
+
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
           onRefresh={handleRefresh}
-          tintColor={Colors.electricBlue}
-          colors={[Colors.electricBlue]}
-          progressBackgroundColor={Colors.surface}
+          tintColor={colors.electricBlue}
+          colors={[colors.electricBlue]}
+          progressBackgroundColor={colors.surfaceSolid}
         />
       }
     >
       {/* Header */}
-      <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+      <Animated.View entering={entering(100)}>
         <View style={styles.headerRow}>
           <View style={styles.headerTextBlock}>
-            <Text style={styles.screenTitle}>Local Presets</Text>
-            <Text style={styles.screenSubtitle}>Save, manage & load camera configurations</Text>
+            <Text style={[styles.screenTitle, { color: colors.textPrimary }]}>Local Presets</Text>
+            <Text style={[styles.screenSubtitle, { color: colors.textSecondary }]}>
+              Save, manage &amp; load camera configurations
+            </Text>
           </View>
-          <View style={styles.presetCountBadge}>
-            <Text style={styles.presetCountValue}>{presets.length}</Text>
-            <Text style={styles.presetCountLabel}>SAVED</Text>
+          <View
+            style={[
+              styles.presetCountBadge,
+              { backgroundColor: colors.electricBlue + '18', borderColor: colors.electricBlue + '40' },
+            ]}
+          >
+            <Text style={[styles.presetCountValue, { color: colors.electricBlue }]}>{presets.length}</Text>
+            <Text style={[styles.presetCountLabel, { color: colors.electricBlue }]}>SAVED</Text>
           </View>
         </View>
       </Animated.View>
 
       {/* Save Current Config */}
-      <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+      <Animated.View entering={entering(200)}>
         <View style={styles.sectionHeader}>
-          <Ionicons name="save-outline" size={18} color={Colors.electricBlue} />
-          <Text style={styles.sectionTitle}>Capture Configuration</Text>
+          <Ionicons name="save-outline" size={16} color={colors.electricBlue} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Capture Configuration</Text>
         </View>
 
         {!showSaveForm ? (
@@ -249,51 +259,66 @@ export default function PresetsScreen() {
               lightImpact();
               setShowSaveForm(true);
             }}
-            style={styles.captureButton}
+            style={[
+              styles.captureButton,
+              {
+                backgroundColor: colors.surfaceCard,
+                borderColor: colors.electricBlue + '30',
+              },
+            ]}
           >
-            <View style={styles.captureIconCircle}>
-              <MaterialCommunityIcons
-                name="content-save-cog"
-                size={28}
-                color={Colors.electricBlue}
-              />
+            <View style={[styles.captureIconCircle, { backgroundColor: colors.electricBlue + '18' }]}>
+              <MaterialCommunityIcons name="content-save-cog" size={28} color={colors.electricBlue} />
             </View>
             <View style={styles.captureTextBlock}>
-              <Text style={styles.captureTitle}>Save Current Config as Preset</Text>
-              <Text style={styles.captureDesc}>
-                Captures scale, mirror, offset, rotation & media
+              <Text style={[styles.captureTitle, { color: colors.textPrimary }]}>
+                Save Current Config as Preset
+              </Text>
+              <Text style={[styles.captureDesc, { color: colors.textTertiary }]}>
+                Captures scale, mirror, offset, rotation &amp; media
               </Text>
             </View>
-            <Ionicons name="add-circle" size={24} color={Colors.electricBlue} />
+            <Ionicons name="add-circle" size={24} color={colors.electricBlue} />
           </Pressable>
         ) : (
-          <Animated.View entering={FadeIn.duration(300)}>
-            <Card glow glowColor={Colors.electricBlueGlow} style={styles.saveFormCard}>
+          <Animated.View entering={isPerformance ? undefined : FadeIn.duration(300)}>
+            <Card glow glowColor={colors.electricBlueGlow} style={styles.saveFormCard}>
               <View style={styles.saveFormHeader}>
-                <MaterialCommunityIcons
-                  name="content-save-cog"
-                  size={20}
-                  color={Colors.electricBlue}
-                />
-                <Text style={styles.saveFormTitle}>New Preset</Text>
+                <MaterialCommunityIcons name="content-save-cog" size={20} color={colors.electricBlue} />
+                <Text style={[styles.saveFormTitle, { color: colors.textPrimary }]}>New Preset</Text>
               </View>
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Preset Name *</Text>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Preset Name *</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[
+                    styles.textInput,
+                    {
+                      backgroundColor: colors.surfaceLight,
+                      color: colors.textPrimary,
+                      borderColor: colors.border,
+                    },
+                  ]}
                   placeholder="e.g. Meeting Ready, Selfie Mode..."
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={colors.textTertiary}
                   value={presetName}
                   onChangeText={setPresetName}
                   maxLength={50}
                 />
               </View>
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Description (optional)</Text>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Description (optional)</Text>
                 <TextInput
-                  style={[styles.textInput, styles.textArea]}
+                  style={[
+                    styles.textInput,
+                    styles.textArea,
+                    {
+                      backgroundColor: colors.surfaceLight,
+                      color: colors.textPrimary,
+                      borderColor: colors.border,
+                    },
+                  ]}
                   placeholder="Notes about this configuration..."
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={colors.textTertiary}
                   value={presetDesc}
                   onChangeText={setPresetDesc}
                   multiline
@@ -318,7 +343,7 @@ export default function PresetsScreen() {
                   size="small"
                   onPress={handleSavePreset}
                   loading={saving}
-                  icon={<Ionicons name="save" size={14} color={Colors.textPrimary} />}
+                  icon={<Ionicons name="save" size={14} color={colors.textPrimary} />}
                 />
               </View>
             </Card>
@@ -327,28 +352,24 @@ export default function PresetsScreen() {
       </Animated.View>
 
       {/* Preset Library */}
-      <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+      <Animated.View entering={entering(300)}>
         <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="folder-multiple" size={18} color={Colors.accent} />
-          <Text style={styles.sectionTitle}>Preset Library</Text>
+          <MaterialCommunityIcons name="folder-multiple" size={16} color={colors.accent} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Preset Library</Text>
         </View>
 
         {loading ? (
           <Card style={styles.loadingCard}>
-            <ActivityIndicator color={Colors.electricBlue} size="large" />
-            <Text style={styles.loadingText}>Loading presets...</Text>
+            <ActivityIndicator color={colors.electricBlue} size="large" />
+            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading presets...</Text>
           </Card>
         ) : presets.length === 0 ? (
           <Card style={styles.emptyCard}>
-            <View style={styles.emptyIconCircle}>
-              <MaterialCommunityIcons
-                name="folder-open-outline"
-                size={36}
-                color={Colors.textTertiary}
-              />
+            <View style={[styles.emptyIconCircle, { backgroundColor: colors.surfaceLight }]}>
+              <MaterialCommunityIcons name="folder-open-outline" size={36} color={colors.textTertiary} />
             </View>
-            <Text style={styles.emptyTitle}>No Presets Yet</Text>
-            <Text style={styles.emptySubtitle}>
+            <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>No Presets Yet</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textTertiary }]}>
               Save your first camera configuration to get started
             </Text>
           </Card>
@@ -356,9 +377,9 @@ export default function PresetsScreen() {
           presets.map((preset, index) => (
             <Animated.View
               key={preset.id}
-              entering={FadeInDown.delay(100 * index).duration(400)}
-              exiting={FadeOut.duration(200)}
-              layout={LinearTransition.springify()}
+              entering={isPerformance ? undefined : FadeInDown.delay(100 * index).duration(400)}
+              exiting={isPerformance ? undefined : FadeOut.duration(200)}
+              layout={isPerformance ? undefined : LinearTransition.springify()}
             >
               <PresetCard
                 preset={preset}
@@ -381,7 +402,7 @@ export default function PresetsScreen() {
         )}
       </Animated.View>
 
-      <View style={{ height: 40 }} />
+      <View style={{ height: 100 }} />
     </ScrollView>
   );
 }
@@ -417,95 +438,139 @@ function PresetCard({
   summary: string;
   dateLabel: string;
 }) {
+  const { colors, isPerformance } = useTheme();
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
   return (
-    <Animated.View style={animStyle}>
+    <Animated.View style={isPerformance ? undefined : animStyle}>
       <Pressable
         onPressIn={() => {
-          scale.value = withSpring(0.98);
+          if (!isPerformance) scale.value = withSpring(0.98);
         }}
         onPressOut={() => {
-          scale.value = withSpring(1);
+          if (!isPerformance) scale.value = withSpring(1);
         }}
-        style={styles.presetCard}
+        style={[
+          styles.presetCard,
+          { backgroundColor: colors.surfaceCard, borderColor: colors.border },
+        ]}
       >
-        {/* Header */}
         <View style={styles.presetHeader}>
-          <View style={styles.presetIconBlock}>
-            <MaterialCommunityIcons name="tune-vertical" size={20} color={Colors.electricBlue} />
+          <View
+            style={[
+              styles.presetIconBlock,
+              { backgroundColor: colors.electricBlue + '14', borderColor: colors.electricBlue + '28' },
+            ]}
+          >
+            <MaterialCommunityIcons name="tune-vertical" size={20} color={colors.electricBlue} />
           </View>
           <View style={styles.presetTextBlock}>
             {isRenaming ? (
               <View style={styles.renameInputs}>
                 <TextInput
-                  style={styles.renameInput}
+                  style={[
+                    styles.renameInput,
+                    {
+                      backgroundColor: colors.surfaceLight,
+                      color: colors.textPrimary,
+                      borderColor: colors.electricBlue + '40',
+                    },
+                  ]}
                   value={renameText}
                   onChangeText={onRenameTextChange}
                   placeholder="Preset name"
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={colors.textTertiary}
                   maxLength={50}
                 />
                 <TextInput
-                  style={[styles.renameInput, styles.renameDescInput]}
+                  style={[
+                    styles.renameInput,
+                    styles.renameDescInput,
+                    {
+                      backgroundColor: colors.surfaceLight,
+                      color: colors.textPrimary,
+                      borderColor: colors.electricBlue + '40',
+                    },
+                  ]}
                   value={renameDesc}
                   onChangeText={onRenameDescChange}
                   placeholder="Description (optional)"
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={colors.textTertiary}
                   maxLength={200}
                 />
               </View>
             ) : (
               <>
-                <Text style={styles.presetName} numberOfLines={1}>
+                <Text style={[styles.presetName, { color: colors.textPrimary }]} numberOfLines={1}>
                   {preset.name}
                 </Text>
                 {preset.description && (
-                  <Text style={styles.presetDescription} numberOfLines={1}>
+                  <Text style={[styles.presetDescription, { color: colors.textSecondary }]} numberOfLines={1}>
                     {preset.description}
                   </Text>
                 )}
               </>
             )}
-            <Text style={styles.presetSummary} numberOfLines={1}>
+            <Text style={[styles.presetSummary, { color: colors.textTertiary }]} numberOfLines={1}>
               {summary}
             </Text>
           </View>
-          <Text style={styles.presetDate}>{dateLabel}</Text>
+          <Text style={[styles.presetDate, { color: colors.textTertiary }]}>{dateLabel}</Text>
         </View>
 
-        {/* Actions */}
-        <View style={styles.presetActions}>
+        <View style={[styles.presetActions, { borderTopColor: colors.separator }]}>
           {isRenaming ? (
             <>
-              <Pressable onPress={onCancelRename} style={styles.actionButton}>
-                <Ionicons name="close" size={16} color={Colors.textSecondary} />
-                <Text style={styles.actionButtonText}>Cancel</Text>
+              <Pressable
+                onPress={onCancelRename}
+                style={[styles.actionButton, { backgroundColor: colors.surfaceLight, borderColor: colors.border }]}
+              >
+                <Ionicons name="close" size={16} color={colors.textSecondary} />
+                <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>Cancel</Text>
               </Pressable>
               <Pressable
                 onPress={onSaveRename}
-                style={[styles.actionButton, styles.actionButtonPrimary]}
+                style={[
+                  styles.actionButton,
+                  { backgroundColor: colors.electricBlue + '18', borderColor: colors.electricBlue + '40' },
+                ]}
               >
-                <Ionicons name="checkmark" size={16} color={Colors.electricBlue} />
-                <Text style={[styles.actionButtonText, { color: Colors.electricBlue }]}>Save</Text>
+                <Ionicons name="checkmark" size={16} color={colors.electricBlue} />
+                <Text style={[styles.actionButtonText, { color: colors.electricBlue }]}>Save</Text>
               </Pressable>
             </>
           ) : (
             <>
-              <Pressable onPress={onDelete} style={styles.deleteButton}>
-                <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+              <Pressable
+                onPress={onDelete}
+                style={[
+                  styles.deleteButton,
+                  { backgroundColor: colors.danger + '14', borderColor: colors.danger + '28' },
+                ]}
+              >
+                <Ionicons name="trash-outline" size={16} color={colors.danger} />
               </Pressable>
-              <Pressable onPress={onRename} style={styles.renameButton}>
-                <Ionicons name="pencil-outline" size={16} color={Colors.textSecondary} />
+              <Pressable
+                onPress={onRename}
+                style={[
+                  styles.renameButton,
+                  { backgroundColor: colors.surfaceLight, borderColor: colors.border },
+                ]}
+              >
+                <Ionicons name="pencil-outline" size={16} color={colors.textSecondary} />
               </Pressable>
-              <Pressable onPress={onApply} disabled={isApplying} style={styles.applyButton}>
+              <Pressable
+                onPress={onApply}
+                disabled={isApplying}
+                style={[styles.applyButton, { backgroundColor: colors.accent, shadowColor: colors.accent }]}
+              >
                 {isApplying ? (
-                  <ActivityIndicator size={14} color={Colors.textPrimary} />
+                  <ActivityIndicator size={14} color="#FFFFFF" />
                 ) : (
-                  <Ionicons name="flash" size={14} color={Colors.textPrimary} />
+                  <Ionicons name="flash" size={14} color="#FFFFFF" />
                 )}
                 <Text style={styles.applyButtonText}>{isApplying ? 'LOADING...' : 'LOAD'}</Text>
               </Pressable>
@@ -520,7 +585,6 @@ function PresetCard({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   content: {
     paddingHorizontal: Spacing.xl,
@@ -536,32 +600,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   screenTitle: {
-    color: Colors.textPrimary,
     fontSize: FontSize.xxxl,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   screenSubtitle: {
-    color: Colors.textSecondary,
     fontSize: FontSize.md,
     marginTop: 4,
   },
   presetCountBadge: {
-    backgroundColor: Colors.electricBlue + '15',
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '40',
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     alignItems: 'center',
   },
   presetCountValue: {
-    color: Colors.electricBlue,
     fontSize: FontSize.xxl,
     fontWeight: '800',
   },
   presetCountLabel: {
-    color: Colors.electricBlue,
     fontSize: 8,
     fontWeight: '800',
     letterSpacing: 1.5,
@@ -571,14 +629,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
     marginTop: Spacing.sm,
   },
   sectionTitle: {
-    color: Colors.textSecondary,
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     fontWeight: '700',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
     flex: 1,
   },
@@ -586,18 +643,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.card,
     padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.electricBlue + '30',
+    borderWidth: StyleSheet.hairlineWidth,
     marginBottom: Spacing.lg,
   },
   captureIconCircle: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: Colors.electricBlue + '15',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -605,12 +659,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   captureTitle: {
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
     fontWeight: '700',
   },
   captureDesc: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     marginTop: 2,
   },
@@ -624,7 +676,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   saveFormTitle: {
-    color: Colors.textPrimary,
     fontSize: FontSize.lg,
     fontWeight: '700',
   },
@@ -632,20 +683,16 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   inputLabel: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     fontWeight: '600',
     marginBottom: Spacing.xs,
   },
   textInput: {
-    backgroundColor: Colors.surfaceLight,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
-    color: Colors.textPrimary,
     fontSize: FontSize.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   textArea: {
     minHeight: 56,
@@ -664,7 +711,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xxxl,
   },
   loadingText: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
   },
   emptyCard: {
@@ -677,26 +723,21 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.surfaceLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.sm,
   },
   emptyTitle: {
-    color: Colors.textSecondary,
     fontSize: FontSize.lg,
     fontWeight: '700',
   },
   emptySubtitle: {
-    color: Colors.textTertiary,
     fontSize: FontSize.sm,
     textAlign: 'center',
   },
   presetCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderRadius: BorderRadius.card,
+    borderWidth: StyleSheet.hairlineWidth,
     marginBottom: Spacing.md,
     padding: Spacing.lg,
   },
@@ -710,46 +751,37 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: BorderRadius.md,
-    backgroundColor: Colors.electricBlue + '12',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '25',
   },
   presetTextBlock: {
     flex: 1,
   },
   presetName: {
-    color: Colors.textPrimary,
     fontSize: FontSize.lg,
     fontWeight: '700',
   },
   presetDescription: {
-    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     marginTop: 2,
   },
   presetSummary: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
     marginTop: 4,
   },
   presetDate: {
-    color: Colors.textTertiary,
     fontSize: FontSize.xs,
   },
   renameInputs: {
     gap: Spacing.xs,
   },
   renameInput: {
-    backgroundColor: Colors.surfaceLight,
     borderRadius: BorderRadius.sm,
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
-    color: Colors.textPrimary,
     fontSize: FontSize.sm,
     borderWidth: 1,
-    borderColor: Colors.electricBlue + '40',
   },
   renameDescInput: {
     fontSize: FontSize.xs,
@@ -760,16 +792,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: Spacing.sm,
     paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   deleteButton: {
     width: 36,
     height: 36,
     borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.danger + '12',
     borderWidth: 1,
-    borderColor: Colors.danger + '25',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -777,9 +806,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.surfaceLight,
     borderWidth: 1,
-    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -787,21 +814,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
-    backgroundColor: Colors.accent,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-    shadowColor: Colors.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
+    borderRadius: BorderRadius.md,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 4,
   },
   applyButtonText: {
-    color: Colors.textPrimary,
+    color: '#FFFFFF',
     fontSize: FontSize.xs,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   actionButton: {
     flexDirection: 'row',
@@ -810,16 +835,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.surfaceLight,
     borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  actionButtonPrimary: {
-    backgroundColor: Colors.electricBlue + '15',
-    borderColor: Colors.electricBlue + '40',
   },
   actionButtonText: {
-    color: Colors.textSecondary,
     fontSize: FontSize.xs,
     fontWeight: '700',
   },
