@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,8 +18,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, type Href } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { FontSize, Spacing, BorderRadius, platformShadow } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, platformShadow, STORAGE_KEYS } from '@/constants/theme';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useStorage } from '@/hooks/useStorage';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
 import { useTheme } from '@/context/ThemeContext';
 import type { ColorMode } from '@/context/ThemeContext';
@@ -37,8 +38,37 @@ import {
 } from '@/services/PermissionManager';
 import { getStatusColor } from '@/services/SystemVerification';
 import { resetToDefaults } from '@/services/ResetService';
+import { writeBridgeConfig } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
+
+type TargetMode = 'all' | 'whitelist' | 'blacklist';
+type TargetAppItem = {
+  id: string;
+  name: string;
+  packageName: string;
+  enabled: boolean;
+};
+
+const TARGET_APP_PRESETS: Array<Omit<TargetAppItem, 'enabled'>> = [
+  { id: 'camera', name: 'Camera', packageName: 'com.android.camera' },
+  { id: 'whatsapp', name: 'WhatsApp', packageName: 'com.whatsapp' },
+  { id: 'telegram', name: 'Telegram', packageName: 'org.telegram.messenger' },
+  { id: 'messenger', name: 'Messenger', packageName: 'com.facebook.orca' },
+  { id: 'meet', name: 'Google Meet', packageName: 'com.google.android.apps.meetings' },
+  { id: 'zoom', name: 'Zoom', packageName: 'us.zoom.videomeetings' },
+];
+
+function mergeTargetApps(stored: TargetAppItem[] | null | undefined): TargetAppItem[] {
+  const safeStored = Array.isArray(stored) ? stored : [];
+  return TARGET_APP_PRESETS.map(preset => {
+    const existing = safeStored.find(app => app?.packageName === preset.packageName);
+    return {
+      ...preset,
+      enabled: !!existing?.enabled,
+    };
+  });
+}
 
 
 export default function SettingsScreen() {
@@ -54,6 +84,18 @@ export default function SettingsScreen() {
   const [diagnosticsChecks, setDiagnosticsChecks] = useState<DiagnosticCheckResult[]>([]);
   const [rawXposedDebug, setRawXposedDebug] = useState<RawXposedDebugInfo | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [targetMode, setTargetMode] = useStorage<TargetMode>(STORAGE_KEYS.TARGET_MODE, 'all');
+  const [targetApps, setTargetApps] = useStorage<TargetAppItem[]>(STORAGE_KEYS.TARGET_APPS, []);
+
+  const resolvedTargetApps = useMemo(() => mergeTargetApps(targetApps), [targetApps]);
+
+  const pushTargetBridgeConfig = useCallback((mode: TargetMode, apps: TargetAppItem[]) => {
+    const enabledPackages = apps.filter(app => app.enabled).map(app => app.packageName);
+    writeBridgeConfig({
+      targetMode: mode,
+      targetPackages: enabledPackages,
+    }).catch(() => {});
+  }, []);
 
   const handleRequestPermission = useCallback(
     async (type: string) => {
@@ -93,6 +135,25 @@ export default function SettingsScreen() {
   useEffect(() => {
     void refreshSystemStatus();
   }, [refreshSystemStatus]);
+
+  useEffect(() => {
+    pushTargetBridgeConfig(targetMode, resolvedTargetApps);
+  }, [targetMode, resolvedTargetApps, pushTargetBridgeConfig]);
+
+  const handleTargetModeChange = useCallback((mode: TargetMode) => {
+    lightImpact();
+    setTargetMode(mode);
+    pushTargetBridgeConfig(mode, resolvedTargetApps);
+  }, [lightImpact, setTargetMode, resolvedTargetApps, pushTargetBridgeConfig]);
+
+  const handleToggleTargetApp = useCallback((packageName: string) => {
+    lightImpact();
+    const nextApps = resolvedTargetApps.map(app =>
+      app.packageName === packageName ? { ...app, enabled: !app.enabled } : app
+    );
+    setTargetApps(nextApps);
+    pushTargetBridgeConfig(targetMode, nextApps);
+  }, [lightImpact, resolvedTargetApps, setTargetApps, targetMode, pushTargetBridgeConfig]);
 
   const handleRunDiagnostics = useCallback(async () => {
     setIsRunningDiagnostics(true);
@@ -306,6 +367,68 @@ export default function SettingsScreen() {
               </Text>
             </View>
           </View>
+        </Card>
+      </Animated.View>
+
+      {/* Target Apps */}
+      <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(180).duration(500)}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="apps-outline" size={16} color={colors.electricBlue} />
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Target Apps</Text>
+        </View>
+        <Card>
+          <Text style={[styles.targetSectionDesc, { color: colors.textSecondary }]}>
+            Optional local app filter for VirtuCam config. LSPosed scope remains the final authority.
+          </Text>
+
+          <View style={[styles.targetModePills, { backgroundColor: colors.surfaceLighter, borderColor: colors.border }]}>
+            {([
+              ['all', 'All'],
+              ['whitelist', 'Whitelist'],
+              ['blacklist', 'Blacklist'],
+            ] as Array<[TargetMode, string]>).map(([mode, label]) => {
+              const active = targetMode === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  onPress={() => handleTargetModeChange(mode)}
+                  style={[
+                    styles.targetModePill,
+                    active && {
+                      backgroundColor: colors.electricBlue,
+                      ...(isPerformance ? {} : platformShadow(colors.electricBlue, 2, 6, 0.25, 2)),
+                    },
+                  ]}
+                >
+                  <Text style={[styles.targetModePillText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {resolvedTargetApps.map((app, index) => (
+            <View
+              key={app.packageName}
+              style={[
+                styles.targetAppRow,
+                index < resolvedTargetApps.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
+              ]}
+            >
+              <View style={styles.targetAppInfo}>
+                <Text style={[styles.targetAppName, { color: colors.textPrimary }]}>{app.name}</Text>
+                <Text style={[styles.targetAppPkg, { color: colors.textTertiary }]}>{app.packageName}</Text>
+              </View>
+              <Switch
+                value={app.enabled}
+                onValueChange={() => handleToggleTargetApp(app.packageName)}
+                trackColor={{ false: colors.inactive, true: colors.electricBlue + '60' }}
+                thumbColor={app.enabled ? colors.electricBlue : colors.textTertiary}
+                disabled={targetMode === 'all'}
+              />
+            </View>
+          ))}
         </Card>
       </Animated.View>
 
@@ -740,6 +863,49 @@ const styles = StyleSheet.create({
   lsposedNoticeDesc: {
     fontSize: FontSize.sm,
     lineHeight: 18,
+  },
+  targetSectionDesc: {
+    fontSize: FontSize.sm,
+    lineHeight: 18,
+    marginBottom: Spacing.md,
+  },
+  targetModePills: {
+    flexDirection: 'row',
+    borderRadius: BorderRadius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 3,
+    gap: 3,
+    marginBottom: Spacing.sm,
+  },
+  targetModePill: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BorderRadius.full,
+    paddingVertical: 8,
+  },
+  targetModePillText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  targetAppRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.md,
+  },
+  targetAppInfo: {
+    flex: 1,
+    paddingRight: Spacing.md,
+  },
+  targetAppName: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+  },
+  targetAppPkg: {
+    fontSize: FontSize.xs,
+    marginTop: 2,
   },
   permissionRow: {
     flexDirection: 'row',

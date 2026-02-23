@@ -133,7 +133,19 @@
         if (!raw) return "";
         try {
           const j = JSON.parse(raw);
-          return (j.stdout || "") + (j.stderr || "");
+          if (typeof j === "string") return j;
+
+          const data = (j && typeof j === "object") ? j : {};
+          const nested = (data.data && typeof data.data === "object") ? data.data : {};
+          const candidates = [
+            data.stdout, data.stderr, data.output, data.result, data.response, data.Response,
+            nested.stdout, nested.stderr, nested.output, nested.result, nested.response, nested.Response,
+          ].filter(v => typeof v === "string" && v.length > 0);
+
+          if (candidates.length > 0) {
+            return candidates.join("");
+          }
+          return raw;
         } catch {
           // Some hosts return plain text instead of JSON.
           return raw;
@@ -151,17 +163,19 @@
 
     async function loadStatus() {
       const companionStatus = await ksuExec(`cat ${IPC}/state/companion_status 2>/dev/null`);
+      const companionReady = companionStatus.trim().toLowerCase() === "ready";
       setBadge(
         "st-companion",
-        companionStatus.includes("ready") ? "Ready" : "Pending",
-        companionStatus.includes("ready") ? "ok" : "warn"
+        companionReady ? "Ready" : "Pending",
+        companionReady ? "ok" : "warn"
       );
 
       const ipcMount = await ksuExec(`mountpoint -q ${IPC} && echo "mounted" || echo "not mounted"`);
+      const ipcMounted = ipcMount.trim().toLowerCase() === "mounted";
       setBadge(
         "st-ipc",
-        ipcMount.includes("mounted") ? "Mounted" : "Not Mounted",
-        ipcMount.includes("mounted") ? "ok" : "err"
+        ipcMounted ? "Mounted" : "Not Mounted",
+        ipcMounted ? "ok" : "err"
       );
 
       const prefsPerms = await ksuExec(
@@ -175,10 +189,11 @@
       );
 
       const moduleActive = await ksuExec(`cat ${IPC}/state/module_active 2>/dev/null`);
+      const moduleActiveNow = moduleActive.trim().toLowerCase() === "active";
       setBadge(
         "st-module",
-        moduleActive.includes("active") ? "Active" : "Inactive",
-        moduleActive.includes("active") ? "ok" : "warn"
+        moduleActiveNow ? "Active" : "Inactive",
+        moduleActiveNow ? "ok" : "warn"
       );
 
       const scopeCheck = await ksuExec(
@@ -191,7 +206,7 @@
         scopeCheck.trim() === "1" ? "ok" : "warn"
       );
 
-      const logs = await ksuExec(`tail -50 ${IPC}/logs/service.log 2>/dev/null || echo "No logs yet"`);
+      const logs = await ksuExec(`tail -50 ${IPC}/logs/service.log 2>/dev/null || tail -50 /data/adb/modules/virtucam_companion/logs/service.log 2>/dev/null || echo "No logs yet"`);
       document.getElementById("log-output").textContent = logs || "No logs";
     }
 

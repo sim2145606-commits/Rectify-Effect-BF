@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { StatusBar } from 'expo-status-bar';
+import { syncAllSettings } from '@/services/ConfigBridge';
 
 const { VirtuCamSettings } = NativeModules;
 
@@ -24,22 +25,25 @@ function AppShell() {
         await AsyncStorage.setItem(STORAGE_KEYS.TARGET_MODE, 'all');
         await AsyncStorage.setItem(STORAGE_KEYS.TARGET_APPS, '[]');
         await AsyncStorage.setItem('migration_v2_done', 'true');
-        return;
+      }
+      else {
+        const [targetMode, targetApps] = await AsyncStorage.multiGet([
+          STORAGE_KEYS.TARGET_MODE,
+          STORAGE_KEYS.TARGET_APPS,
+        ]);
+
+        if (!targetMode[1]) {
+          await AsyncStorage.setItem(STORAGE_KEYS.TARGET_MODE, 'all');
+        }
+        if (!targetApps[1]) {
+          await AsyncStorage.setItem(STORAGE_KEYS.TARGET_APPS, '[]');
+        }
       }
 
-      const [targetMode, targetApps] = await AsyncStorage.multiGet([
-        STORAGE_KEYS.TARGET_MODE,
-        STORAGE_KEYS.TARGET_APPS,
-      ]);
-
-      if (!targetMode[1]) {
-        await AsyncStorage.setItem(STORAGE_KEYS.TARGET_MODE, 'all');
-      }
-      if (!targetApps[1]) {
-        await AsyncStorage.setItem(STORAGE_KEYS.TARGET_APPS, '[]');
-      }
+      // Ensure native bridge receives baseline config early, even before the Command tab opens.
+      await syncAllSettings();
     };
-    void migrate();
+    migrate().catch(() => {});
   }, []);
 
   useEffect(() => {
