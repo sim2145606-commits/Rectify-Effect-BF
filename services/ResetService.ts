@@ -24,7 +24,7 @@ export const DEFAULT_VALUES: Record<string, string | null> = {
   [STORAGE_KEYS.AI_ENHANCEMENT]: null,
   [STORAGE_KEYS.ENGINE_ACTIVE]: 'false',
   [STORAGE_KEYS.FLOATING_BUBBLE]: 'false',
-  [STORAGE_KEYS.TARGET_MODE]: 'whitelist',
+  [STORAGE_KEYS.TARGET_MODE]: 'all',
   [STORAGE_KEYS.INJECTION_METHOD]: 'camera2',
   [STORAGE_KEYS.CAMERA2_HOOK]: 'true',
   [STORAGE_KEYS.CAMERA1_HOOK]: 'true',
@@ -90,7 +90,7 @@ export async function resetToDefaults(): Promise<{
       offsetX: 0.0,
       offsetY: 0.0,
       scaleMode: 'fit',
-      targetMode: 'whitelist',
+      targetMode: 'all',
       targetPackages: [],
     });
 

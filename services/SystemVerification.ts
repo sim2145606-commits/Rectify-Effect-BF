@@ -237,7 +237,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
               ? 'Scope accepted (non-whitelist target mode)'
               : 'Scope configured'
             : scopeReason === 'whitelist_no_targets_configured'
-              ? 'Whitelist mode: add at least one target app'
+              ? 'Whitelist mode has no local targets configured'
               : 'Scope missing for target app(s)';
 
           result.moduleScoped = {
@@ -249,7 +249,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             label: 'Hook Configuration',
             detail: xposedResult.hookConfigured
               ? 'Hook config valid'
-              : 'Enable hook, select media, and configure target apps',
+              : 'Enable hook and select media source',
             status: xposedResult.hookConfigured ? 'ok' : 'warning',
           };
         } else {

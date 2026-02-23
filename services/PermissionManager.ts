@@ -76,7 +76,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       if (scopeReason === 'whitelist_no_targets_configured') {
         return {
           status: 'granted',
-          detail: 'Module loaded. No target apps configured yet; complete setup and configure targets in app.',
+          detail: 'Module loaded. No local target list configured; LSPosed scope will be used.',
           canRequest: false,
         };
       }
@@ -93,7 +93,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       };
     } else if (result.lsposedInstalled) {
       const detail = scopeReason === 'whitelist_no_targets_configured'
-        ? 'LSPosed detected. Add at least one target app to whitelist scope, then reboot.'
+        ? 'LSPosed detected. No local target list configured; use LSPosed scope or switch mode.'
         : scopeReason === 'whitelist_targets_not_in_scope'
           ? 'LSPosed detected, but selected target app(s) are not scoped yet. Update LSPosed scope and reboot.'
           : 'LSPosed detected. Module is not loaded in any hooked process yet—open a target app once after reboot.';

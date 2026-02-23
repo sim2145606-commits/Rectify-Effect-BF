@@ -568,6 +568,12 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
 
+            if (!moduleScoped && targetMode != "whitelist" && moduleLoaded) {
+                // In non-whitelist mode, LSPosed scope is managed externally and app targets are optional.
+                moduleScoped = true
+                scopeEvaluationReason = "non_whitelist_mode"
+            }
+
             if (!moduleScoped && targetMode == "whitelist") {
                 scopeEvaluationReason = if (hasTargets) {
                     "whitelist_targets_not_in_scope"

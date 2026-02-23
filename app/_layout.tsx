@@ -21,7 +21,22 @@ function AppShell() {
           STORAGE_KEYS.TARGET_APPS,
           STORAGE_KEYS.TARGET_MODE,
         ]);
+        await AsyncStorage.setItem(STORAGE_KEYS.TARGET_MODE, 'all');
+        await AsyncStorage.setItem(STORAGE_KEYS.TARGET_APPS, '[]');
         await AsyncStorage.setItem('migration_v2_done', 'true');
+        return;
+      }
+
+      const [targetMode, targetApps] = await AsyncStorage.multiGet([
+        STORAGE_KEYS.TARGET_MODE,
+        STORAGE_KEYS.TARGET_APPS,
+      ]);
+
+      if (!targetMode[1]) {
+        await AsyncStorage.setItem(STORAGE_KEYS.TARGET_MODE, 'all');
+      }
+      if (!targetApps[1]) {
+        await AsyncStorage.setItem(STORAGE_KEYS.TARGET_APPS, '[]');
       }
     };
     void migrate();

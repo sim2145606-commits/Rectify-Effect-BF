@@ -147,14 +147,17 @@ export default function Dashboard() {
   }));
 
   const allSystemsReady = systemStatus.overallReady;
+  const canEnableHook =
+    systemStatus.rootAccess.status === 'ok' &&
+    systemStatus.xposedFramework.status === 'ok' &&
+    systemStatus.storagePermission.status === 'ok';
 
   const handleMasterToggle = useCallback(async () => {
-    if (!hookEnabled && !allSystemsReady) {
+    if (!hookEnabled && !canEnableHook) {
       warning();
       const failed = [
         systemStatus.rootAccess.status !== 'ok' ? '• Root / KernelSU not detected' : null,
         systemStatus.xposedFramework.status !== 'ok' ? '• LSPosed framework inactive' : null,
-        systemStatus.moduleActive.status !== 'ok' ? '• VirtuCam module not scoped' : null,
         systemStatus.storagePermission.status !== 'ok' ? '• Storage permission missing' : null,
       ].filter(Boolean).join('\n');
       Alert.alert('Prerequisites Not Met', `Cannot enable hook:\n\n${failed}\n\nOpen Setup to resolve.`);
@@ -168,7 +171,7 @@ export default function Dashboard() {
       setTimeout(() => success(), 200);
     }
     setHookEnabled(!hookEnabled);
-  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning, allSystemsReady, systemStatus]);
+  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning, canEnableHook, systemStatus]);
 
   const handleRefreshStatus = useCallback(async () => {
     mediumImpact();

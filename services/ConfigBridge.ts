@@ -61,22 +61,27 @@ export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<
   }
 
   try {
-    await VirtuCamSettings.writeConfig({
-      enabled: config.enabled ?? false,
-      mediaSourcePath: config.mediaSourcePath ?? null,
-      mediaSourceType: config.mediaSourceType ?? 'file',
-      cameraTarget: config.cameraTarget ?? 'front',
-      mirrored: config.mirrored ?? false,
-      rotation: config.rotation ?? 0,
-      scaleX: config.scaleX ?? 1.0,
-      scaleY: config.scaleY ?? 1.0,
-      offsetX: config.offsetX ?? 0.0,
-      offsetY: config.offsetY ?? 0.0,
-      scaleMode: config.scaleMode ?? 'fit',
-      targetMode: config.targetMode ?? 'whitelist',
-      sourceMode: config.sourceMode ?? 'black',
-      targetPackages: config.targetPackages ?? [],
-    });
+    const payload: Record<string, unknown> = {};
+
+    // Keep partial updates truly partial to avoid wiping unrelated settings.
+    if (Object.prototype.hasOwnProperty.call(config, 'enabled')) payload.enabled = config.enabled;
+    if (Object.prototype.hasOwnProperty.call(config, 'mediaSourcePath')) payload.mediaSourcePath = config.mediaSourcePath;
+    if (Object.prototype.hasOwnProperty.call(config, 'mediaSourceType')) payload.mediaSourceType = config.mediaSourceType;
+    if (Object.prototype.hasOwnProperty.call(config, 'cameraTarget')) payload.cameraTarget = config.cameraTarget;
+    if (Object.prototype.hasOwnProperty.call(config, 'mirrored')) payload.mirrored = config.mirrored;
+    if (Object.prototype.hasOwnProperty.call(config, 'rotation')) payload.rotation = config.rotation;
+    if (Object.prototype.hasOwnProperty.call(config, 'scaleX')) payload.scaleX = config.scaleX;
+    if (Object.prototype.hasOwnProperty.call(config, 'scaleY')) payload.scaleY = config.scaleY;
+    if (Object.prototype.hasOwnProperty.call(config, 'offsetX')) payload.offsetX = config.offsetX;
+    if (Object.prototype.hasOwnProperty.call(config, 'offsetY')) payload.offsetY = config.offsetY;
+    if (Object.prototype.hasOwnProperty.call(config, 'scaleMode')) payload.scaleMode = config.scaleMode;
+    if (Object.prototype.hasOwnProperty.call(config, 'targetMode')) payload.targetMode = config.targetMode;
+    if (Object.prototype.hasOwnProperty.call(config, 'sourceMode')) payload.sourceMode = config.sourceMode;
+    if (Object.prototype.hasOwnProperty.call(config, 'targetPackages')) payload.targetPackages = config.targetPackages;
+
+    if (Object.keys(payload).length === 0) return;
+
+    await VirtuCamSettings.writeConfig(payload);
   } catch (err: unknown) {
     logger.error('Failed to write config', 'ConfigBridge', err);
     throw err;
@@ -196,6 +201,17 @@ export async function syncAllSettings(): Promise<void> {
       .filter(app => app.enabled)
       .map(app => app.packageName);
 
+    let effectiveTargetMode: 'all' | 'whitelist' | 'blacklist' =
+      (targetModeRaw === 'all' || targetModeRaw === 'whitelist' || targetModeRaw === 'blacklist')
+        ? targetModeRaw
+        : 'whitelist';
+
+    // Current UI no longer exposes target package management; when no targets are defined,
+    // avoid impossible whitelist gating and let LSPosed scope drive targeting.
+    if (effectiveTargetMode === 'whitelist' && enabledPackages.length === 0) {
+      effectiveTargetMode = 'all';
+    }
+
     const config: Partial<BridgeConfig> = {
       enabled: enabled === 'true',
       mediaSourcePath: mediaPath,
@@ -206,7 +222,7 @@ export async function syncAllSettings(): Promise<void> {
       scaleY: scaleY ? parseFloat(scaleY) : 1.0,
       offsetX: offsetX ? parseFloat(offsetX) : 0.0,
       offsetY: offsetY ? parseFloat(offsetY) : 0.0,
-      targetMode: (targetModeRaw === 'all' || targetModeRaw === 'whitelist' || targetModeRaw === 'blacklist') ? targetModeRaw : 'whitelist',
+      targetMode: effectiveTargetMode,
       sourceMode: mediaPath ? (mediaPath.startsWith('rtmp://') || mediaPath.startsWith('rtsp://') || mediaPath.startsWith('http://') || mediaPath.startsWith('https://') ? 'stream' : 'file') : 'black',
       targetPackages: enabledPackages,
     };
