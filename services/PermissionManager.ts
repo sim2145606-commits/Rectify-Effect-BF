@@ -60,16 +60,26 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     const moduleScoped = !!result.moduleScoped;
     const hookConfigured = !!result.hookConfigured;
     const hookReady = !!result.hookReady;
+    const scopeReason = String(result.scopeEvaluationReason ?? '');
 
     if (hookReady) {
       return { status: 'granted', detail: 'Module active in LSPosed', canRequest: false };
-    } else if (moduleLoaded && moduleScoped && !hookConfigured) {
+    } else if (moduleLoaded && moduleScoped) {
       return {
-        status: 'pending',
-        detail: 'Module + scope detected. Configure hook (enable module switch, select media, add targets).',
-        canRequest: true,
+        status: 'granted',
+        detail: hookConfigured
+          ? 'Module loaded and scoped in LSPosed'
+          : 'Module + scope detected. Finish hook configuration in VirtuCam app.',
+        canRequest: false,
       };
     } else if (moduleLoaded && !moduleScoped) {
+      if (scopeReason === 'whitelist_no_targets_configured') {
+        return {
+          status: 'granted',
+          detail: 'Module loaded. No target apps configured yet; complete setup and configure targets in app.',
+          canRequest: false,
+        };
+      }
       return {
         status: 'denied',
         detail: 'Module loaded, but scope missing for configured target app(s). Add scope in LSPosed and reboot.',
@@ -82,7 +92,6 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
         canRequest: true,
       };
     } else if (result.lsposedInstalled) {
-      const scopeReason = result.scopeEvaluationReason;
       const detail = scopeReason === 'whitelist_no_targets_configured'
         ? 'LSPosed detected. Add at least one target app to whitelist scope, then reboot.'
         : scopeReason === 'whitelist_targets_not_in_scope'
