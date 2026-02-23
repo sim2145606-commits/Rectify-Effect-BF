@@ -197,6 +197,20 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                         writer.write(fallbackConfig.toString())
                     }
                     fallbackFile.setReadable(true, false)
+
+                    // New files written by app context can be labeled app_data_file on some ROMs.
+                    // Relabel to tmpfs so system_server / hooked processes can read IPC config.
+                    try {
+                        val escapedConfigDir = escapeShellArg(VirtuCamIPC.CONFIG_DIR)
+                        val escapedConfigFile = escapeShellArg(fallbackFile.absolutePath)
+                        executeRootCommand("chmod 0777 $escapedConfigDir")
+                        executeRootCommand("chmod 0644 $escapedConfigFile")
+                        executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedConfigDir")
+                        executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedConfigFile")
+                    } catch (e: Exception) {
+                        android.util.Log.w("VirtuCamSettings", "Could not relabel IPC config file: ${e.message}")
+                    }
+
                     android.util.Log.d("VirtuCamSettings", "Fallback JSON config written successfully")
                 }
             } catch (e: Exception) {
@@ -1305,6 +1319,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             "magisk ", "ksud ", "apd ", "ls ", "chmod ", "unzip ", "su ",
             "/data/adb/", "pm ", "sqlite3 ", "cat ", "grep ", "strings ", "find ",
             "logcat ", "tail ", "getenforce", "uname ", "sh ", "id",
+            "chcon ",
             "cmd appops",
             "am ",
             "mountpoint"

@@ -45,9 +45,12 @@ log "IPC subdirectories created"
 
 # 3. Set SELinux contexts
 if command -v chcon >/dev/null 2>&1; then
-    chcon -R u:object_r:app_data_file:s0 "$IPC_DIR" 2>/dev/null \
-        || chcon -R u:object_r:tmpfs:s0 "$IPC_DIR" 2>/dev/null
-    log "SELinux context applied to $IPC_DIR"
+    # Keep IPC tree as tmpfs label so system_server + hooked processes can read it.
+    if chcon -R u:object_r:tmpfs:s0 "$IPC_DIR" 2>/dev/null; then
+        log "SELinux context applied to $IPC_DIR (tmpfs)"
+    else
+        log "WARNING: Failed to apply tmpfs SELinux context to $IPC_DIR"
+    fi
 fi
 
 # 4. Write boot timestamp

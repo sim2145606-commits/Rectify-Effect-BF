@@ -170,6 +170,21 @@ fix_ipc_ownership() {
     log "IPC dir ownership fixed: UID=$uid"
 }
 
+# Keep IPC tree readable to system_server / hooked processes.
+fix_ipc_contexts() {
+    if ! command -v chcon >/dev/null 2>&1; then
+        return
+    fi
+
+    if [ -d "$IPC_DIR" ]; then
+        if chcon -R u:object_r:tmpfs:s0 "$IPC_DIR" 2>/dev/null; then
+            log "IPC SELinux context normalized (tmpfs)"
+        else
+            log "WARNING: Failed to normalize IPC SELinux context"
+        fi
+    fi
+}
+
 # Restore FloatingOverlayService if it was running
 restore_overlay_service() {
     local prefs_file="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
@@ -212,10 +227,12 @@ VIRTUCAM_UID="$(get_virtucam_uid)"
 log "VirtuCam UID resolved: '${VIRTUCAM_UID}'"
 
 fix_ipc_ownership "$VIRTUCAM_UID"
+fix_ipc_contexts
 fix_shared_prefs
 grant_permissions
 ensure_lsposed_scope
 sync_persistent_store
+fix_ipc_contexts
 
 # Write companion ready status to IPC
 printf 'ready\n' > "$IPC_DIR/state/companion_status"

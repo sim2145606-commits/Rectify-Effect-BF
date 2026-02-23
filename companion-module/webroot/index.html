@@ -129,8 +129,15 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ cmd })
         });
-        const j = await res.json();
-        return (j.stdout || "") + (j.stderr || "");
+        const raw = await res.text();
+        if (!raw) return "";
+        try {
+          const j = JSON.parse(raw);
+          return (j.stdout || "") + (j.stderr || "");
+        } catch {
+          // Some hosts return plain text instead of JSON.
+          return raw;
+        }
       } catch (e) {
         return "exec_error: " + e.message;
       }

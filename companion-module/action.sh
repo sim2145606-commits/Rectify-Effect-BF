@@ -19,6 +19,15 @@ else
     echo "[WARN] virtucam_config.xml not found (app not configured yet)"
 fi
 
+# Normalize SELinux label on IPC dir/files
+if command -v chcon >/dev/null 2>&1; then
+    if chcon -R u:object_r:tmpfs:s0 "$IPC_DIR" 2>/dev/null; then
+        echo "[OK] IPC SELinux context normalized (tmpfs)"
+    else
+        echo "[WARN] Failed to normalize IPC SELinux context"
+    fi
+fi
+
 # Re-grant SYSTEM_ALERT_WINDOW
 cmd appops set "$VIRTUCAM_PKG" SYSTEM_ALERT_WINDOW allow 2>/dev/null
 echo "[OK] SYSTEM_ALERT_WINDOW re-granted"
