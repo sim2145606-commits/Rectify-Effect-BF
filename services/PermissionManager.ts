@@ -64,7 +64,9 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
 
     if (hookReady) {
       return { status: 'granted', detail: 'Module active in LSPosed', canRequest: false };
-    } else if (moduleLoaded && moduleScoped) {
+    }
+
+    if (moduleLoaded && moduleScoped) {
       return {
         status: 'granted',
         detail: hookConfigured
@@ -72,7 +74,9 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
           : 'Module + scope detected. Finish hook configuration in VirtuCam app.',
         canRequest: false,
       };
-    } else if (moduleLoaded && !moduleScoped) {
+    }
+
+    if (moduleLoaded && !moduleScoped) {
       if (scopeReason === 'whitelist_no_targets_configured') {
         return {
           status: 'granted',
@@ -85,31 +89,41 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
         detail: 'Module loaded, but scope missing for configured target app(s). Add scope in LSPosed and reboot.',
         canRequest: true,
       };
-    } else if (!moduleLoaded && moduleScoped) {
+    }
+
+    if (!moduleLoaded && moduleScoped) {
       return {
         status: 'pending',
         detail: 'Scope configured, but module not loaded in any hooked process yet. Open a target app after reboot.',
         canRequest: true,
       };
-    } else if (result.lsposedInstalled) {
-      const detail = scopeReason === 'whitelist_no_targets_configured'
-        ? 'LSPosed detected. No local target list configured; use LSPosed scope or switch mode.'
-        : scopeReason === 'whitelist_targets_not_in_scope'
-          ? 'LSPosed detected, but selected target app(s) are not scoped yet. Update LSPosed scope and reboot.'
-          : 'LSPosed detected. Module is not loaded in any hooked process yet—open a target app once after reboot.';
+    }
+
+    if (result.lsposedInstalled) {
+      if (scopeReason === 'whitelist_no_targets_configured') {
+        return {
+          status: 'granted',
+          detail: 'LSPosed detected. No local target list configured; LSPosed scope will be used.',
+          canRequest: false,
+        };
+      }
+
+      const detail = scopeReason === 'whitelist_targets_not_in_scope'
+        ? 'LSPosed detected, but selected target app(s) are not scoped yet. Update LSPosed scope and reboot.'
+        : 'LSPosed detected. Module is not loaded in any hooked process yet. Open a target app once after reboot.';
+
       return {
         status: 'denied',
         detail,
         canRequest: true,
       };
-    } else {
-      return { status: 'denied', detail: 'LSPosed not installed', canRequest: false };
     }
+
+    return { status: 'denied', detail: 'LSPosed not installed', canRequest: false };
   } catch {
     return { status: 'denied', detail: 'LSPosed check failed', canRequest: false };
   }
 }
-
 /**
  * Check MANAGE_EXTERNAL_STORAGE permission (All Files Access)
  */
@@ -347,3 +361,4 @@ export function areAllPermissionsGranted(state: AllPermissionsState): boolean {
     state.overlayPermission.status === 'granted'
   );
 }
+

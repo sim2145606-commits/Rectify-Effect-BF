@@ -98,7 +98,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 editor.putString("targetPackages", packageList.joinToString(","))
             }
             
-            editor.apply()
+            val committed = editor.commit()
+            if (!committed) {
+                android.util.Log.w("VirtuCamSettings", "SharedPreferences commit returned false")
+            }
             
             // ISSUE 1 FIX: Dual-strategy approach for Android 9+ compatibility
             // Strategy A: Use root to chmod the SharedPreferences file and directory
@@ -252,7 +255,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             config.putDouble("offsetX", prefs.getFloat("offsetX", 0.0f).toDouble())
             config.putDouble("offsetY", prefs.getFloat("offsetY", 0.0f).toDouble())
             config.putString("scaleMode", prefs.getString("scaleMode", "fit"))
-            config.putString("targetMode", prefs.getString("targetMode", "whitelist"))
+            config.putString("targetMode", prefs.getString("targetMode", "all"))
             config.putString("sourceMode", prefs.getString("sourceMode", "black"))
             config.putString("targetPackages", prefs.getString("targetPackages", ""))
             
@@ -578,11 +581,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
             val enabled = prefs.getBoolean("enabled", false)
             val mediaSourcePath = prefs.getString("mediaSourcePath", null)
-            val targetMode = prefs.getString("targetMode", "whitelist") ?: "whitelist"
+            val targetMode = prefs.getString("targetMode", "all") ?: "all"
             val sourceMode = prefs.getString("sourceMode", "black") ?: "black"
             val hasTargets = configuredTargets.isNotEmpty()
 
-            if (!moduleScoped && targetMode != "whitelist" && moduleLoaded) {
+            if (!moduleScoped && targetMode != "whitelist" && lsposedExists) {
                 // In non-whitelist mode, LSPosed scope is managed externally and app targets are optional.
                 moduleScoped = true
                 scopeEvaluationReason = "non_whitelist_mode"
@@ -593,6 +596,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     "whitelist_targets_not_in_scope"
                 } else {
                     "whitelist_no_targets_configured"
+                }
+            }
+
+            // If the module package is installed + LSPosed exists, treat module as loaded
+            // even when runtime marker writes are blocked on strict SELinux ROMs.
+            if (!moduleLoaded && lsposedExists && checkModulesDirectory(modulePackageName)) {
+                moduleLoaded = true
+                if (detectionMethod == "none") {
+                    detectionMethod = "modules_dir"
                 }
             }
 
@@ -771,6 +783,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         if (!apkHasXposedInit(apkPath)) {
             return false
         }
+
+        // Modern LSPosed forks can hide/relocate granular config entries behind SELinux.
+        // If LSPosed base path exists and APK is a valid Xposed module, treat as registered.
+        val lsposedBaseExists = executeRootCommand(
+            "ls -d /data/adb/lspd /data/adb/modules/zygisk_lsposed /data/adb/modules/riru_lsposed 2>/dev/null | head -1"
+        )
+        if (lsposedBaseExists.isNotEmpty()) return true
         
         val lspdConfigCheck = executeRootCommand("ls /data/adb/lspd/config/ 2>/dev/null | grep '$packageName'")
         if (lspdConfigCheck.contains(packageName)) return true

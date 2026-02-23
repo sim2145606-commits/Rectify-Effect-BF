@@ -100,10 +100,10 @@ public final class ConfigLoader {
         }
 
         try {
-            String[] candidates = new String[] {
-                    FALLBACK_JSON_PATH,
-                    LEGACY_FALLBACK_JSON_PATH
-            };
+            final boolean ipcReady = VirtuCamIPC.INSTANCE.isIpcReady();
+            String[] candidates = ipcReady
+                    ? new String[] { FALLBACK_JSON_PATH }
+                    : new String[] { FALLBACK_JSON_PATH, LEGACY_FALLBACK_JSON_PATH };
 
             for (String candidate : candidates) {
                 File f = new File(candidate).getCanonicalFile();

@@ -104,7 +104,7 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
     offsetX: 0.0,
     offsetY: 0.0,
     scaleMode: 'fit',
-    targetMode: 'whitelist',
+    targetMode: 'all',
     sourceMode: 'black',
     targetPackages: [],
   };
@@ -204,7 +204,7 @@ export async function syncAllSettings(): Promise<void> {
     let effectiveTargetMode: 'all' | 'whitelist' | 'blacklist' =
       (targetModeRaw === 'all' || targetModeRaw === 'whitelist' || targetModeRaw === 'blacklist')
         ? targetModeRaw
-        : 'whitelist';
+        : 'all';
 
     // Current UI no longer exposes target package management; when no targets are defined,
     // avoid impossible whitelist gating and let LSPosed scope drive targeting.
