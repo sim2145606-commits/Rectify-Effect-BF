@@ -25,6 +25,12 @@ object VirtuCamIPC {
     // State files
     const val MODULE_ACTIVE = "$STATE_DIR/module_active"
     const val COMPANION_STATUS = "$STATE_DIR/companion_status"
+    const val CONFIG_STATUS = "$STATE_DIR/config_status"
+    const val MARKER_STATUS = "$STATE_DIR/marker_status"
+    const val MARKER_SOURCE = "$STATE_DIR/marker_source"
+    const val SCOPE_STATUS = "$STATE_DIR/scope_status"
+    const val RUNTIME_STATUS = "$STATE_DIR/runtime_status"
+    const val SERVICE_COMPLETE_TIME = "$STATE_DIR/service_complete_time"
     const val BOOT_TIME = "$STATE_DIR/boot_time"
 
     // Persistent root-only fallback store

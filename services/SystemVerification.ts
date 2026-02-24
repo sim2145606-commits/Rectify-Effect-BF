@@ -70,24 +70,34 @@ type XposedStatusResult = {
   configuredTargets?: string;
   broadScopeDetected?: boolean;
   broadScopePackages?: string;
+  markerRequired?: boolean;
+  runtimeObservedAt?: number;
+  mappingFailureReason?: string;
 };
 
 type IpcStatusResult = {
   configJsonExists?: boolean;
   configJsonReadable?: boolean;
+  configStatus?: string;
   companionStatus?: string;
+  markerStatus?: string;
+  runtimeStatus?: string;
+  prefsPathResolved?: string;
   moduleMarkerSource?: string;
   moduleMarkerExistsIpc?: boolean;
   moduleMarkerExistsLegacy?: boolean;
   stagedMediaPath?: string;
   stagedMediaExists?: boolean;
   stagedMediaReadable?: boolean;
+  stagedMediaHookReadable?: boolean;
 };
 
 type MappingLogStatus = {
+  source: string;
   hasMappingLog: boolean;
   latestMappedCount: number | null;
   latestZeroReason: string | null;
+  latestFailureReason: string | null;
 };
 
 const CACHE_KEY = STORAGE_KEYS.SYSTEM_STATUS;
@@ -134,20 +144,29 @@ export function getStatusIcon(status: SystemCheckStatus): IoniconsName {
   }
 }
 
-function parseMappingLogStatus(logs: string): MappingLogStatus {
+function parseMappingLogStatus(logs: string, source: string): MappingLogStatus {
   if (!logs) {
     return {
+      source,
       hasMappingLog: false,
       latestMappedCount: null,
       latestZeroReason: null,
+      latestFailureReason: null,
     };
   }
 
   const lines = logs.split(/\r?\n/);
   let latestMappedCount: number | null = null;
   let latestZeroReason: string | null = null;
+  let latestFailureReason: string | null = null;
 
   for (const line of lines) {
+    if (line.includes('NoSuchMethodError: android.hardware.camera2.params.OutputConfiguration#setSurface')) {
+      latestFailureReason = 'output_configuration_setsurface_missing';
+    } else if (line.includes('failed to set mapped surface; rolled back')) {
+      latestFailureReason = 'mapped_surface_mutation_failed';
+    }
+
     const mappedMatch = line.match(/mapped=(\d+)/);
     if (!mappedMatch) continue;
     const mapped = Number(mappedMatch[1]);
@@ -163,9 +182,11 @@ function parseMappingLogStatus(logs: string): MappingLogStatus {
   }
 
   return {
+    source,
     hasMappingLog: latestMappedCount !== null,
     latestMappedCount,
     latestZeroReason,
+    latestFailureReason,
   };
 }
 
@@ -190,6 +211,9 @@ function getScopeDetail(scopeReason: string, hasTargets: boolean): string {
 
 function getMappingQuickFix(reason: string | null): string {
   const normalized = String(reason ?? '').toLowerCase();
+  if (normalized.includes('setsurface') || normalized.includes('nosuchmethoderror')) {
+    return 'Enable compatibility fallback for SessionConfiguration output replacement';
+  }
   if (normalized.includes('enabled=false')) {
     return 'Enable Hook Enabled and run sync from dashboard';
   }
@@ -205,12 +229,25 @@ function getMappingQuickFix(reason: string | null): string {
 async function getMappingStatus(): Promise<MappingLogStatus> {
   try {
     if (!VirtuCamSettings?.getXposedLogs) {
-      return { hasMappingLog: false, latestMappedCount: null, latestZeroReason: null };
+      return {
+        source: 'unavailable',
+        hasMappingLog: false,
+        latestMappedCount: null,
+        latestZeroReason: null,
+        latestFailureReason: null,
+      };
     }
-    const logsResult = (await VirtuCamSettings.getXposedLogs()) as { logs?: string };
-    return parseMappingLogStatus(String(logsResult?.logs ?? ''));
+    const logsResult = (await VirtuCamSettings.getXposedLogs()) as { logs?: string; source?: string };
+    const source = String(logsResult?.source ?? 'unknown');
+    return parseMappingLogStatus(String(logsResult?.logs ?? ''), source);
   } catch {
-    return { hasMappingLog: false, latestMappedCount: null, latestZeroReason: null };
+    return {
+      source: 'error',
+      hasMappingLog: false,
+      latestMappedCount: null,
+      latestZeroReason: null,
+      latestFailureReason: null,
+    };
   }
 }
 
@@ -325,22 +362,31 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         const broadScopeDetected = xposedResult.broadScopeDetected === true;
         const broadScopePackages = String(xposedResult.broadScopePackages ?? '').trim();
 
+        const companionState = ipcStatus
+          ? String(ipcStatus.companionStatus ?? '').trim().toLowerCase()
+          : '';
+        const companionReady = companionState === 'ready';
+        const companionWaitingRuntime = companionState === 'waiting_runtime';
+        const runtimeState = ipcStatus
+          ? String(ipcStatus.runtimeStatus ?? '').trim().toLowerCase()
+          : '';
         const configJsonReady = ipcStatus
-          ? ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true
-          : null;
-        const companionReady = ipcStatus
-          ? String(ipcStatus.companionStatus ?? '').trim().toLowerCase() === 'ready'
+          ? (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
+            String(ipcStatus.configStatus ?? '').trim().toLowerCase() === 'config_ready'
           : null;
         const stagedMediaPath = String(ipcStatus?.stagedMediaPath ?? '').trim();
         const stagedMediaReadable =
           stagedMediaPath.length === 0
             ? null
             : ipcStatus?.stagedMediaExists === true && ipcStatus?.stagedMediaReadable === true;
+        const stagedMediaHookReadable =
+          stagedMediaPath.length === 0 ? null : ipcStatus?.stagedMediaHookReadable === true;
         const moduleLoaded = xposedResult.moduleLoaded === true;
         const hookConfigured = xposedResult.hookConfigured === true;
         const ipcConfigReadyFlag = xposedResult.ipcConfigReady === true;
         const stagedMediaReadyFlag = xposedResult.stagedMediaReady === true;
         const runtimeHookObserved = xposedResult.runtimeHookObserved === true;
+        const mappingFailureReason = String(xposedResult.mappingFailureReason ?? '').trim();
         const markerSource = String(
           xposedResult.markerSource ?? ipcStatus?.moduleMarkerSource ?? 'unknown'
         );
@@ -353,7 +399,17 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status: 'ok',
           };
 
-          if (mappingStatus.hasMappingLog && (mappingStatus.latestMappedCount ?? 0) === 0) {
+          if (
+            mappingStatus.latestFailureReason === 'output_configuration_setsurface_missing' ||
+            mappingFailureReason === 'output_configuration_setsurface_missing'
+          ) {
+            result.moduleActive = {
+              label: 'VirtuCam Module',
+              detail:
+                'Session output mutation failed (OutputConfiguration#setSurface unavailable). Compatibility fallback required.',
+              status: 'error',
+            };
+          } else if (mappingStatus.hasMappingLog && (mappingStatus.latestMappedCount ?? 0) === 0) {
             const reasonSuffix = mappingStatus.latestZeroReason
               ? ` (${mappingStatus.latestZeroReason})`
               : '';
@@ -406,18 +462,29 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           if (configJsonReady === false) {
             hookConfigStatus = 'warning';
             hookConfigNotes.push(
-              companionReady === true
+              companionReady
                 ? 'Companion ready but config not staged'
                 : 'IPC config missing/unreadable'
             );
           }
-          if (companionReady === false) {
+          if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
             hookConfigStatus = 'error';
-            hookConfigNotes.push('Companion not ready');
+            hookConfigNotes.push(`Companion state: ${companionState}`);
+          } else if (companionWaitingRuntime) {
+            hookConfigStatus = 'warning';
+            hookConfigNotes.push(
+              runtimeState === 'runtime_observed'
+                ? 'Companion waiting state is stale; runtime already observed'
+                : 'Companion waiting for first runtime hook observation'
+            );
           }
           if (stagedMediaReadable === false) {
             hookConfigStatus = 'error';
             hookConfigNotes.push('Staged media missing/unreadable');
+          }
+          if (stagedMediaHookReadable === false) {
+            hookConfigStatus = 'error';
+            hookConfigNotes.push('Staged media is not hook-readable');
           }
           if (!ipcConfigReadyFlag) {
             hookConfigStatus = 'error';
@@ -426,6 +493,10 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           if (!stagedMediaReadyFlag) {
             hookConfigStatus = 'error';
             hookConfigNotes.push('Source media file is not readable by hook');
+          }
+          if (mappingFailureReason.length > 0) {
+            hookConfigStatus = 'error';
+            hookConfigNotes.push(`Runtime mapping failure: ${mappingFailureReason}`);
           }
           if (!runtimeHookObserved) {
             hookConfigStatus = hookConfigStatus === 'error' ? 'error' : 'warning';
@@ -444,17 +515,25 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           };
           result.moduleActive = {
             label: 'VirtuCam Module',
-            detail: moduleLoaded && !hookConfigured
-              ? 'Hook engine loaded but disabled by config'
-              : moduleLoaded &&
-                  hookConfigured &&
-                  mappingStatus.hasMappingLog &&
-                  (mappingStatus.latestMappedCount ?? 0) === 0
-                ? `Hook configured but no mapped surfaces yet; ${mappingFix}`
-                : moduleLoaded
-                  ? 'Module loaded but not fully ready'
-                  : 'Module not loaded in hooked process yet',
-            status: 'warning',
+            detail:
+              mappingStatus.latestFailureReason === 'output_configuration_setsurface_missing' ||
+              mappingFailureReason === 'output_configuration_setsurface_missing'
+                ? 'Session output mutation failed (OutputConfiguration#setSurface unavailable)'
+                : moduleLoaded && !hookConfigured
+                  ? 'Hook engine loaded but disabled by config'
+                  : moduleLoaded &&
+                      hookConfigured &&
+                      mappingStatus.hasMappingLog &&
+                      (mappingStatus.latestMappedCount ?? 0) === 0
+                    ? `Hook configured but no mapped surfaces yet; ${mappingFix}`
+                    : moduleLoaded
+                      ? 'Module loaded but not fully ready'
+                      : 'Module not loaded in hooked process yet',
+            status:
+              mappingStatus.latestFailureReason === 'output_configuration_setsurface_missing' ||
+              mappingFailureReason === 'output_configuration_setsurface_missing'
+                ? 'error'
+                : 'warning',
           };
 
           if (broadScopeDetected) {
@@ -481,16 +560,25 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           }
           if (configJsonReady === false) {
             notes.push(
-              companionReady === true
+              companionReady
                 ? 'Companion ready but config not staged'
                 : 'IPC config missing/unreadable'
             );
           }
-          if (companionReady === false) {
-            notes.push('Companion not ready');
+          if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
+            notes.push(`Companion state: ${companionState}`);
+          } else if (companionWaitingRuntime) {
+            notes.push(
+              runtimeState === 'runtime_observed'
+                ? 'Companion waiting state is stale; runtime already observed'
+                : 'Companion waiting for first runtime hook observation'
+            );
           }
           if (stagedMediaReadable === false) {
             notes.push('Staged media missing/unreadable');
+          }
+          if (stagedMediaHookReadable === false) {
+            notes.push('Staged media is not hook-readable');
           }
           if (!ipcConfigReadyFlag) {
             notes.push('IPC config not ready');
@@ -498,15 +586,24 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           if (!stagedMediaReadyFlag) {
             notes.push('Source media file is not readable by hook');
           }
+          if (mappingFailureReason.length > 0) {
+            notes.push(`Runtime mapping failure: ${mappingFailureReason}`);
+          }
           if (!runtimeHookObserved) {
             notes.push('Runtime hook not yet observed in target process');
           }
           result.hookConfigured = {
             label: 'Hook Configuration',
             detail: notes.join(' - '),
-            status: hookConfigured && ipcConfigReadyFlag && stagedMediaReadyFlag
-              ? runtimeHookObserved ? 'ok' : 'warning'
-              : 'error',
+            status:
+              hookConfigured &&
+              ipcConfigReadyFlag &&
+              stagedMediaReadyFlag &&
+              mappingFailureReason.length === 0
+                ? runtimeHookObserved
+                  ? 'ok'
+                  : 'warning'
+                : 'error',
           };
         } else {
           result.xposedFramework = {

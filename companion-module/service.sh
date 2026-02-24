@@ -16,6 +16,7 @@ CONFIG_STATE_FILE="$IPC_DIR/state/config_status"
 MARKER_STATE_FILE="$IPC_DIR/state/marker_status"
 MARKER_SOURCE_FILE="$IPC_DIR/state/marker_source"
 SCOPE_STATE_FILE="$IPC_DIR/state/scope_status"
+RUNTIME_STATE_FILE="$IPC_DIR/state/runtime_status"
 COMPLETE_FILE="$IPC_DIR/state/service_complete_time"
 
 log() {
@@ -32,6 +33,49 @@ write_state_file() {
     local value="$2"
     printf '%s\n' "$value" > "$file" 2>/dev/null
     chmod 0644 "$file" 2>/dev/null
+}
+
+discover_prefs_file() {
+    local user0="/data/user/0/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
+    local legacy="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
+    local modern=""
+
+    if [ -f "$user0" ]; then
+        echo "$user0"
+        return
+    fi
+
+    if [ -f "$legacy" ]; then
+        echo "$legacy"
+        return
+    fi
+
+    modern="$(find /data/misc -type f -path "*/prefs/$VIRTUCAM_PKG/virtucam_config.xml" 2>/dev/null | head -n 1)"
+    if [ -n "$modern" ] && [ -f "$modern" ]; then
+        echo "$modern"
+        return
+    fi
+
+    echo ""
+}
+
+has_runtime_observation() {
+    local active_line
+    local mapping_line
+
+    active_line="$(grep -h 'VirtuCam/XposedEntry: module active in process:' \
+        /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1)"
+    if [ -n "$active_line" ]; then
+        return 0
+    fi
+
+    mapping_line="$(grep -h 'VirtuCam/XposedEntry: createCaptureSession' \
+        /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1)"
+    if [ -n "$mapping_line" ]; then
+        return 0
+    fi
+
+    return 1
 }
 
 wait_for_boot() {
@@ -162,24 +206,28 @@ is_scope_enabled() {
 }
 
 fix_shared_prefs() {
-    local prefs_dir="/data/data/$VIRTUCAM_PKG/shared_prefs"
-    local prefs_file="$prefs_dir/virtucam_config.xml"
+    local prefs_file
+    local prefs_dir=""
     local persistent_dir="/data/adb/virtucam"
     local persistent_json="$persistent_dir/virtucam_config.json"
     local persistent_xml="$persistent_dir/virtucam_config.xml"
+    prefs_file="$(discover_prefs_file)"
+    if [ -n "$prefs_file" ]; then
+        prefs_dir="$(dirname "$prefs_file" 2>/dev/null)"
+    fi
 
-    if [ -d "$prefs_dir" ]; then
+    if [ -n "$prefs_dir" ] && [ -d "$prefs_dir" ]; then
         chmod 0771 "$prefs_dir" 2>/dev/null
         restorecon -R "$prefs_dir" 2>/dev/null
     fi
 
-    if [ -f "$prefs_file" ]; then
+    if [ -n "$prefs_file" ] && [ -f "$prefs_file" ]; then
         chmod 0644 "$prefs_file" 2>/dev/null
         cp "$prefs_file" "$CFG_XML" 2>/dev/null
         chmod 0644 "$CFG_XML" 2>/dev/null
-        log "SharedPreferences config synced to IPC"
+        log "SharedPreferences config synced to IPC ($prefs_file)"
     else
-        log "WARNING: SharedPreferences config missing ($prefs_file)"
+        log "WARNING: SharedPreferences config missing (searched user0/data/misc prefs)"
     fi
 
     if [ -f "$persistent_json" ]; then
@@ -225,13 +273,14 @@ fix_ipc_contexts() {
 }
 
 sync_persistent_store() {
-    local prefs_file="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
+    local prefs_file
     local persistent_dir="/data/adb/virtucam"
+    prefs_file="$(discover_prefs_file)"
 
     mkdir -p "$persistent_dir"
     chmod 0700 "$persistent_dir"
 
-    if [ -f "$prefs_file" ]; then
+    if [ -n "$prefs_file" ] && [ -f "$prefs_file" ]; then
         cp "$prefs_file" "$persistent_dir/virtucam_config.xml" 2>/dev/null
     fi
 
@@ -241,8 +290,9 @@ sync_persistent_store() {
 }
 
 restore_overlay_service() {
-    local prefs_file="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
-    if [ ! -f "$prefs_file" ]; then
+    local prefs_file
+    prefs_file="$(discover_prefs_file)"
+    if [ -z "$prefs_file" ] || [ ! -f "$prefs_file" ]; then
         return
     fi
 
@@ -260,6 +310,7 @@ update_companion_state() {
     local marker_state="marker_missing"
     local marker_source="none"
     local scope_state="scope_mismatch"
+    local runtime_state="runtime_missing"
     local companion_state="pending"
 
     if [ -r "$CFG_JSON" ] || [ -r "$CFG_XML" ]; then
@@ -278,14 +329,18 @@ update_companion_state() {
         scope_state="scope_ok"
     fi
 
+    if has_runtime_observation; then
+        runtime_state="runtime_observed"
+    fi
+
     if [ "$scope_state" != "scope_ok" ]; then
         companion_state="scope_mismatch"
     elif [ "$config_state" != "config_ready" ]; then
         companion_state="config_missing"
-    elif [ "$marker_state" != "marker_present" ]; then
-        companion_state="marker_missing"
-    else
+    elif [ "$marker_state" = "marker_present" ] || [ "$runtime_state" = "runtime_observed" ]; then
         companion_state="ready"
+    else
+        companion_state="waiting_runtime"
     fi
 
     write_state_file "$STATUS_FILE" "$companion_state"
@@ -293,14 +348,15 @@ update_companion_state() {
     write_state_file "$MARKER_STATE_FILE" "$marker_state"
     write_state_file "$MARKER_SOURCE_FILE" "$marker_source"
     write_state_file "$SCOPE_STATE_FILE" "$scope_state"
+    write_state_file "$RUNTIME_STATE_FILE" "$runtime_state"
     write_state_file "$COMPLETE_FILE" "$(date '+%s')"
     if [ -n "$VIRTUCAM_UID" ]; then
         chown "$VIRTUCAM_UID:$VIRTUCAM_UID" \
             "$STATUS_FILE" "$CONFIG_STATE_FILE" "$MARKER_STATE_FILE" \
-            "$MARKER_SOURCE_FILE" "$SCOPE_STATE_FILE" "$COMPLETE_FILE" 2>/dev/null
+            "$MARKER_SOURCE_FILE" "$SCOPE_STATE_FILE" "$RUNTIME_STATE_FILE" "$COMPLETE_FILE" 2>/dev/null
     fi
 
-    log "Companion status: $companion_state (config=$config_state marker=$marker_state/$marker_source scope=$scope_state)"
+    log "Companion status: $companion_state (config=$config_state marker=$marker_state/$marker_source scope=$scope_state runtime=$runtime_state)"
 }
 
 log_ipc_snapshot() {

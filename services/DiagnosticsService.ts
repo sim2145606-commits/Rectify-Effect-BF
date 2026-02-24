@@ -22,6 +22,9 @@ type XposedStatusResult = {
   ipcConfigReady?: boolean;
   stagedMediaReady?: boolean;
   runtimeHookObserved?: boolean;
+  markerRequired?: boolean;
+  runtimeObservedAt?: number;
+  mappingFailureReason?: string;
 };
 
 type IpcStatusResult = {
@@ -36,18 +39,25 @@ type IpcStatusResult = {
   moduleMarkerExistsLegacy?: boolean;
   moduleMarkerSource?: string;
   companionStatus?: string;
+  configStatus?: string;
+  markerStatus?: string;
+  runtimeStatus?: string;
+  prefsPathResolved?: string;
   configStaged?: boolean;
   stagedMediaPath?: string;
   stagedMediaExists?: boolean;
   stagedMediaReadable?: boolean;
+  stagedMediaHookReadable?: boolean;
 };
 
 type MappingLogStatus = {
+  source: string;
   hasMappingLog: boolean;
   latestMappedCount: number | null;
   sawZeroMapping: boolean;
   sawPositiveMapping: boolean;
   latestZeroReason: string | null;
+  latestFailureReason: string | null;
 };
 
 export type DiagnosticCheckResult = {
@@ -83,20 +93,26 @@ export type RawXposedDebugInfo = {
   ipcConfigReady: boolean;
   stagedMediaReady: boolean;
   runtimeHookObserved: boolean;
+  markerRequired: boolean;
+  runtimeObservedAt: number;
+  mappingFailureReason: string;
+  mappingLogSource: string;
   latestMappedCount: number | null;
   latestZeroReason: string;
   mappingHint: string;
   quickFixHint: string;
 };
 
-function parseMappingLogStatus(logs: string): MappingLogStatus {
+function parseMappingLogStatus(logs: string, source: string): MappingLogStatus {
   if (!logs) {
     return {
+      source,
       hasMappingLog: false,
       latestMappedCount: null,
       sawZeroMapping: false,
       sawPositiveMapping: false,
       latestZeroReason: null,
+      latestFailureReason: null,
     };
   }
 
@@ -105,8 +121,15 @@ function parseMappingLogStatus(logs: string): MappingLogStatus {
   let sawZeroMapping = false;
   let sawPositiveMapping = false;
   let latestZeroReason: string | null = null;
+  let latestFailureReason: string | null = null;
 
   for (const line of lines) {
+    if (line.includes('NoSuchMethodError: android.hardware.camera2.params.OutputConfiguration#setSurface')) {
+      latestFailureReason = 'output_configuration_setsurface_missing';
+    } else if (line.includes('failed to set mapped surface; rolled back')) {
+      latestFailureReason = 'mapped_surface_mutation_failed';
+    }
+
     const mappedMatch = line.match(/mapped=(\d+)/);
     if (!mappedMatch) continue;
 
@@ -127,11 +150,13 @@ function parseMappingLogStatus(logs: string): MappingLogStatus {
   }
 
   return {
+    source,
     hasMappingLog: latestMappedCount !== null,
     latestMappedCount,
     sawZeroMapping,
     sawPositiveMapping,
     latestZeroReason,
+    latestFailureReason,
   };
 }
 
@@ -189,22 +214,27 @@ async function fetchMappingLogStatus(): Promise<MappingLogStatus> {
   try {
     if (!VirtuCamSettings?.getXposedLogs) {
       return {
+        source: 'unavailable',
         hasMappingLog: false,
         latestMappedCount: null,
         sawZeroMapping: false,
         sawPositiveMapping: false,
         latestZeroReason: null,
+        latestFailureReason: null,
       };
     }
-    const logsResult = (await VirtuCamSettings.getXposedLogs()) as { logs?: string };
-    return parseMappingLogStatus(String(logsResult?.logs ?? ''));
+    const logsResult = (await VirtuCamSettings.getXposedLogs()) as { logs?: string; source?: string };
+    const source = String(logsResult?.source ?? 'unknown');
+    return parseMappingLogStatus(String(logsResult?.logs ?? ''), source);
   } catch {
     return {
+      source: 'error',
       hasMappingLog: false,
       latestMappedCount: null,
       sawZeroMapping: false,
       sawPositiveMapping: false,
       latestZeroReason: null,
+      latestFailureReason: null,
     };
   }
 }
@@ -376,6 +406,7 @@ export async function runDiagnostics(
     const ipcConfigReady = xposedStatus.ipcConfigReady === true;
     const stagedMediaReady = xposedStatus.stagedMediaReady === true;
     const runtimeHookObserved = xposedStatus.runtimeHookObserved === true;
+    const mappingFailureReason = String(xposedStatus.mappingFailureReason ?? '').trim();
     const scopeHint = readScopeMismatchHint(String(xposedStatus.scopeEvaluationReason ?? ''));
     let detailStatus: 'pass' | 'warn' | 'fail' = ready ? 'pass' : 'fail';
     let baseDetail = ready
@@ -394,6 +425,16 @@ export async function runDiagnostics(
     } else if (!ready && moduleLoaded && hookConfigured && !runtimeHookObserved) {
       detailStatus = 'warn';
       baseDetail = 'Config is ready but runtime hook has not been observed yet';
+    } else if (
+      !ready &&
+      hookConfigured &&
+      mappingFailureReason === 'output_configuration_setsurface_missing'
+    ) {
+      detailStatus = 'fail';
+      baseDetail = 'OutputConfiguration mutation is unsupported on this camera stack';
+    } else if (!ready && hookConfigured && mappingFailureReason.length > 0) {
+      detailStatus = 'warn';
+      baseDetail = `Mapping pipeline reported runtime error (${mappingFailureReason})`;
     } else if (
       !ready &&
       hookConfigured &&
@@ -422,13 +463,33 @@ export async function runDiagnostics(
     });
   } else {
     const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
-    const configReady = ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true;
+    const runtimeState = String(ipcStatus.runtimeStatus ?? '').trim().toLowerCase();
+    const configReady =
+      (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
+      String(ipcStatus.configStatus ?? '').trim().toLowerCase() === 'config_ready';
     if (companionState === 'ready') {
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
         status: configReady ? 'pass' : 'fail',
         detail: configReady ? 'Companion ready' : 'Companion ready but config not staged',
+      });
+    } else if (companionState === 'waiting_runtime') {
+      pushCheck({
+        name: 'Companion Status',
+        description: '/dev/virtucam_ipc/state/companion_status',
+        status: 'warn',
+        detail:
+          runtimeState === 'runtime_observed'
+            ? 'Companion waiting state is stale; runtime hook is already observed'
+            : 'Companion config/scope ready; waiting for first runtime hook observation',
+      });
+    } else if (companionState === 'marker_missing' && runtimeState === 'runtime_observed') {
+      pushCheck({
+        name: 'Companion Status',
+        description: '/dev/virtucam_ipc/state/companion_status',
+        status: 'warn',
+        detail: 'Marker missing, but runtime hook was observed in LSPosed logs',
       });
     } else if (!companionState) {
       pushCheck({
@@ -492,6 +553,7 @@ export async function runDiagnostics(
     });
   } else {
     const stagedPath = String(ipcStatus.stagedMediaPath ?? '').trim();
+    const stagedHookReadable = ipcStatus.stagedMediaHookReadable === true;
     if (!stagedPath) {
       pushCheck({
         name: 'Staged Media',
@@ -499,12 +561,19 @@ export async function runDiagnostics(
         status: 'warn',
         detail: 'No staged media selected yet',
       });
-    } else if (ipcStatus.stagedMediaExists && ipcStatus.stagedMediaReadable) {
+    } else if (stagedHookReadable) {
       pushCheck({
         name: 'Staged Media',
         description: '/dev/virtucam_ipc/media/*',
         status: 'pass',
-        detail: `Staged media readable: ${stagedPath}`,
+        detail: `Staged media is hook-readable: ${stagedPath}`,
+      });
+    } else if (ipcStatus.stagedMediaExists && ipcStatus.stagedMediaReadable) {
+      pushCheck({
+        name: 'Staged Media',
+        description: '/dev/virtucam_ipc/media/*',
+        status: 'fail',
+        detail: `Media is app-readable but not hook-readable: ${stagedPath}`,
       });
     } else {
       pushCheck({
@@ -522,14 +591,29 @@ export async function runDiagnostics(
       name: 'Camera Mapping',
       description: 'createCaptureSession... mapped=<n>',
       status: 'warn',
-      detail: 'No mapping log yet - open a scoped target camera app and retry',
+      detail: `No mapping log yet in ${mappingStatus.source} - open a scoped target camera app and retry`,
+    });
+  } else if (mappingStatus.latestFailureReason === 'output_configuration_setsurface_missing') {
+    pushCheck({
+      name: 'Camera Mapping',
+      description: 'createCaptureSession... mapped=<n>',
+      status: 'fail',
+      detail:
+        'Session output mutation failed (OutputConfiguration#setSurface unavailable). Compatibility fallback is required.',
+    });
+  } else if (mappingStatus.latestFailureReason === 'mapped_surface_mutation_failed') {
+    pushCheck({
+      name: 'Camera Mapping',
+      description: 'createCaptureSession... mapped=<n>',
+      status: 'warn',
+      detail: 'Surface mutation failed in runtime logs; fallback path may still be initializing.',
     });
   } else if ((mappingStatus.latestMappedCount ?? 0) > 0 || mappingStatus.sawPositiveMapping) {
     pushCheck({
       name: 'Camera Mapping',
       description: 'createCaptureSession... mapped=<n>',
       status: 'pass',
-      detail: `Mapped surfaces detected (latest=${mappingStatus.latestMappedCount ?? 0})`,
+      detail: `Mapped surfaces detected (latest=${mappingStatus.latestMappedCount ?? 0}, source=${mappingStatus.source})`,
     });
   } else {
     const reasonRaw = mappingStatus.latestZeroReason ?? '';
@@ -579,16 +663,20 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
     if (!xposedStatus) return null;
 
     const mappingStatus = await fetchMappingLogStatus();
+    const mappingFailureReason = String(xposedStatus.mappingFailureReason ?? '').trim();
     const quickFixHint = getMappingQuickFixHint(mappingStatus.latestZeroReason);
-    const mappingHint = !mappingStatus.hasMappingLog
-      ? 'No mapping logs yet; open a scoped target camera app'
-      : (mappingStatus.latestMappedCount ?? 0) > 0
-        ? `Mapped surfaces active (latest=${mappingStatus.latestMappedCount ?? 0})`
-        : `Mapped=0. ${
-            mappingStatus.latestZeroReason
-              ? `Reason: ${mappingStatus.latestZeroReason}`
-              : 'Likely scope/config/surface classification mismatch'
-          }`;
+    const mappingHint =
+      mappingFailureReason === 'output_configuration_setsurface_missing'
+        ? 'OutputConfiguration#setSurface is unavailable; compatibility fallback needed'
+        : !mappingStatus.hasMappingLog
+          ? `No mapping logs yet in ${mappingStatus.source}; open a scoped target camera app`
+          : (mappingStatus.latestMappedCount ?? 0) > 0
+            ? `Mapped surfaces active (latest=${mappingStatus.latestMappedCount ?? 0})`
+            : `Mapped=0. ${
+                mappingStatus.latestZeroReason
+                  ? `Reason: ${mappingStatus.latestZeroReason}`
+                  : 'Likely scope/config/surface classification mismatch'
+              }`;
 
     return {
       detectionMethod: String(xposedStatus.detectionMethod ?? 'unknown'),
@@ -612,6 +700,11 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
       ipcConfigReady: xposedStatus.ipcConfigReady === true,
       stagedMediaReady: xposedStatus.stagedMediaReady === true,
       runtimeHookObserved: xposedStatus.runtimeHookObserved === true,
+      markerRequired: xposedStatus.markerRequired === true,
+      runtimeObservedAt:
+        typeof xposedStatus.runtimeObservedAt === 'number' ? xposedStatus.runtimeObservedAt : 0,
+      mappingFailureReason,
+      mappingLogSource: mappingStatus.source,
       latestMappedCount: mappingStatus.latestMappedCount,
       latestZeroReason: String(mappingStatus.latestZeroReason ?? ''),
       mappingHint,

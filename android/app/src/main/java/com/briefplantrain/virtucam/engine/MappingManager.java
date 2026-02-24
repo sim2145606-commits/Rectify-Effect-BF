@@ -98,6 +98,10 @@ public final class MappingManager {
         return new ArrayList<>(byOriginal.keySet());
     }
 
+    public boolean hasMappings() {
+        return !byOriginal.isEmpty();
+    }
+
     public void removeMapping(Surface original) {
         SurfaceMapping m = byOriginal.remove(original);
         if (m == null) return;

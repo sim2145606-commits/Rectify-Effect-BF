@@ -20,6 +20,29 @@ export type AllPermissionsState = {
   overlayPermission: PermissionCheckResult;
 };
 
+type XposedStatusResult = {
+  hookReady?: boolean;
+  lsposedInstalled?: boolean;
+  moduleLoaded?: boolean;
+  moduleScoped?: boolean;
+  hookConfigured?: boolean;
+  runtimeHookObserved?: boolean;
+  scopeEvaluationReason?: string;
+  mappingFailureReason?: string;
+};
+
+type IpcStatusResult = {
+  companionStatus?: string;
+  configStatus?: string;
+  runtimeStatus?: string;
+  configJsonExists?: boolean;
+  configJsonReadable?: boolean;
+};
+
+function normalizeState(raw: unknown): string {
+  return String(raw ?? '').trim().toLowerCase();
+}
+
 /**
  * Check root access by actually executing su command
  */
@@ -54,17 +77,85 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       return { status: 'denied', detail: 'Native module not available', canRequest: false };
     }
 
-    const result = await VirtuCamSettings.checkXposedStatus();
+    const result = (await VirtuCamSettings.checkXposedStatus()) as XposedStatusResult;
+    const ipcResult = VirtuCamSettings.getIpcStatus
+      ? ((await VirtuCamSettings.getIpcStatus()) as IpcStatusResult)
+      : null;
 
-    const moduleLoaded = !!result.moduleLoaded;
-    const moduleScoped = !!result.moduleScoped;
-    const hookConfigured = !!result.hookConfigured;
-    const hookReady = !!result.hookReady;
-    const runtimeHookObserved = !!result.runtimeHookObserved;
-    const scopeReason = String(result.scopeEvaluationReason ?? '');
+    const moduleLoaded = result.moduleLoaded === true;
+    const moduleScoped = result.moduleScoped === true;
+    const hookConfigured = result.hookConfigured === true;
+    const hookReady = result.hookReady === true;
+    const runtimeHookObserved = result.runtimeHookObserved === true;
+    const scopeReason = normalizeState(result.scopeEvaluationReason);
+    const mappingFailureReason = normalizeState(result.mappingFailureReason);
+    const companionState = normalizeState(ipcResult?.companionStatus);
+    const runtimeState = normalizeState(ipcResult?.runtimeStatus);
+    const configState = normalizeState(ipcResult?.configStatus);
+    const configReady =
+      (ipcResult?.configJsonExists === true && ipcResult?.configJsonReadable === true) ||
+      configState === 'config_ready';
+
+    if (!result.lsposedInstalled) {
+      return { status: 'denied', detail: 'LSPosed not installed', canRequest: false };
+    }
+
+    if (
+      mappingFailureReason === 'output_configuration_setsurface_missing' ||
+      mappingFailureReason === 'mapped_surface_mutation_failed'
+    ) {
+      return {
+        status: 'denied',
+        detail: 'Camera hook compatibility failure detected. Update hook compatibility path.',
+        canRequest: false,
+      };
+    }
+
+    if (mappingFailureReason.length > 0) {
+      return {
+        status: 'denied',
+        detail: `Camera mapping failure: ${mappingFailureReason}`,
+        canRequest: false,
+      };
+    }
+
+    if (scopeReason === 'whitelist_targets_not_in_scope' || companionState === 'scope_mismatch') {
+      return {
+        status: 'denied',
+        detail: 'Scoped target app(s) missing in LSPosed scope. Update scope and reboot.',
+        canRequest: true,
+      };
+    }
+
+    if (!configReady && companionState === 'config_missing' && hookConfigured) {
+      return {
+        status: 'denied',
+        detail: 'Hook config exists but IPC config is missing/unreadable.',
+        canRequest: true,
+      };
+    }
 
     if (hookReady) {
       return { status: 'granted', detail: 'Module active in LSPosed', canRequest: false };
+    }
+
+    if (companionState === 'waiting_runtime') {
+      return {
+        status: 'granted',
+        detail:
+          runtimeState === 'runtime_observed'
+            ? 'Companion waiting state is stale; runtime hook already observed.'
+            : 'Module configured; waiting for first runtime hook observation in a scoped app.',
+        canRequest: false,
+      };
+    }
+
+    if (companionState === 'marker_missing' && runtimeHookObserved) {
+      return {
+        status: 'granted',
+        detail: 'Runtime hook observed despite missing marker; module communication is active.',
+        canRequest: false,
+      };
     }
 
     if (moduleLoaded && moduleScoped) {
@@ -102,27 +193,20 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       };
     }
 
-    if (result.lsposedInstalled) {
-      if (scopeReason === 'whitelist_no_targets_configured') {
-        return {
-          status: 'granted',
-          detail: 'LSPosed detected. No local target list configured; LSPosed scope will be used.',
-          canRequest: false,
-        };
-      }
-
-      const detail = scopeReason === 'whitelist_targets_not_in_scope'
-        ? 'LSPosed detected, but selected target app(s) are not scoped yet. Update LSPosed scope and reboot.'
-        : 'LSPosed detected. Module is not loaded in any hooked process yet. Open a target app once after reboot.';
-
+    if (scopeReason === 'whitelist_no_targets_configured') {
       return {
-        status: 'denied',
-        detail,
-        canRequest: true,
+        status: 'granted',
+        detail: 'LSPosed detected. No local target list configured; LSPosed scope will be used.',
+        canRequest: false,
       };
     }
 
-    return { status: 'denied', detail: 'LSPosed not installed', canRequest: false };
+    return {
+      status: 'pending',
+      detail:
+        'LSPosed detected. Module has not been observed in target process yet. Open a scoped target app and retry.',
+      canRequest: true,
+    };
   } catch {
     return { status: 'denied', detail: 'LSPosed check failed', canRequest: false };
   }

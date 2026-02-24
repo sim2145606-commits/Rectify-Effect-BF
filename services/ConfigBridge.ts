@@ -41,6 +41,9 @@ let latestBridgeSyncState: BridgeSyncState = {
   timestamp: 0,
   attempts: 0,
 };
+let syncAllInFlight: Promise<void> | null = null;
+let lastSyncCompletedAt = 0;
+const MIN_SYNC_INTERVAL_MS = 500;
 
 function parseStoredJson<T>(raw: string | null, fallback: T): T {
   if (raw === null) return fallback;
@@ -132,6 +135,21 @@ function normalizeBridgeError(err: unknown): { code: BridgeSyncFailureCode; mess
   }
   if (nativeCode === 'UNAUTHORIZED') {
     return { code: 'unauthorized', message: 'Native bridge rejected call (UNAUTHORIZED)' };
+  }
+  if (
+    nativeCode === 'CONFIG_SYNC_FAILED' ||
+    nativeCode === 'COMPANION_REFRESH_ERROR' ||
+    nativeCode === 'IPC_STATUS_ERROR' ||
+    nativeCode.startsWith('IPC_')
+  ) {
+    return { code: 'ipc_unready', message };
+  }
+  if (
+    nativeCode === 'PREFS_WRITE_FAILED' ||
+    nativeCode === 'PREFS_COMMIT_FALSE' ||
+    nativeCode === 'WRITE_ERROR'
+  ) {
+    return { code: 'write_failed', message };
   }
   const lowerMessage = message.toLowerCase();
   if (lowerMessage.includes('ipc') || lowerMessage.includes('companion')) {
@@ -371,7 +389,16 @@ export async function getConfigPath(): Promise<string | null> {
 /**
  * Sync all settings from AsyncStorage to SharedPreferences
  */
-export async function syncAllSettings(): Promise<void> {
+export async function syncAllSettings(force = false): Promise<void> {
+  if (syncAllInFlight) {
+    return syncAllInFlight;
+  }
+
+  if (!force && Date.now() - lastSyncCompletedAt < MIN_SYNC_INTERVAL_MS) {
+    return;
+  }
+
+  const run = (async () => {
   try {
     const [
       enabled,
@@ -471,7 +498,7 @@ export async function syncAllSettings(): Promise<void> {
       } catch (err: unknown) {
         lastError = err;
         const normalized = normalizeBridgeError(err);
-        const retryable = normalized.code === 'write_failed' || normalized.code === 'ipc_unready';
+        const retryable = normalized.code === 'ipc_unready';
         if (retryable && attempt < maxAttempts) {
           logger.warn(
             `Bridge sync attempt ${attempt} failed (${normalized.code}), retrying`,
@@ -504,6 +531,15 @@ export async function syncAllSettings(): Promise<void> {
   } catch (err: unknown) {
     logger.error('Failed to sync settings', 'ConfigBridge', err);
     throw err;
+  }
+  })();
+
+  syncAllInFlight = run;
+  try {
+    await run;
+    lastSyncCompletedAt = Date.now();
+  } finally {
+    syncAllInFlight = null;
   }
 }
 

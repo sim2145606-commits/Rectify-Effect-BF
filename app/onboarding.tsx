@@ -89,9 +89,11 @@ function evaluateDemoResult(
   }
 
   const findCheck = (name: string) => report.checks.find(check => check.name === name);
-  const companionReady = findCheck('Companion Status')?.status === 'pass';
+  const companionCheck = findCheck('Companion Status');
   const ipcReady = findCheck('IPC Config')?.status === 'pass' && rawInfo.ipcConfigReady;
   const runtimeObserved = rawInfo.runtimeHookObserved;
+  const companionReady =
+    companionCheck?.status === 'pass' || (companionCheck?.status === 'warn' && runtimeObserved);
   const mappedPositive = (rawInfo.latestMappedCount ?? 0) > 0;
   const hookReadyPath =
     rawInfo.hookReady ||
@@ -102,7 +104,10 @@ function evaluateDemoResult(
   if (!companionReady || !ipcReady) {
     return {
       pass: false,
-      detail: 'Companion/config not ready. Fix IPC config staging in Settings > Diagnostics.',
+      detail:
+        companionCheck?.status === 'warn' && !runtimeObserved
+          ? 'Companion is waiting for first runtime observation. Open stock camera and retry verify.'
+          : 'Companion/config not ready. Fix IPC config staging in Settings > Diagnostics.',
     };
   }
   if (!hookReadyPath) {
@@ -445,7 +450,7 @@ export default function OnboardingScreen() {
   };
 
   const allGranted = permissions ? areAllPermissionsGranted(permissions) : false;
-  const showTutorial = tutorialVisible && !tutorialSkippedThisSession;
+  const showTutorial = (isSetupReopen || allGranted) && tutorialVisible && !tutorialSkippedThisSession;
 
   if (!permissions || !entryReady) {
     return (

@@ -2,7 +2,7 @@ import { Stack } from 'expo-router';
 import { AppState, NativeModules, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
@@ -14,6 +14,7 @@ const { VirtuCamSettings } = NativeModules;
 
 function AppShell() {
   const { colors, isDark } = useTheme();
+  const lastForegroundSyncAtRef = useRef(0);
 
   useEffect(() => {
     const migrate = async () => {
@@ -42,7 +43,7 @@ function AppShell() {
       }
 
       // Ensure native bridge receives baseline config early, even before the Command tab opens.
-      await syncAllSettings();
+      await syncAllSettings(true);
     };
     migrate().catch((err: unknown) => {
       logger.error('Startup bridge sync failed', 'RootLayout', err);
@@ -64,8 +65,12 @@ function AppShell() {
         const alreadyRunning = await VirtuCamSettings.isOverlayRunning();
 
         if (nextState === 'active') {
+          const now = Date.now();
           try {
-            await syncAllSettings();
+            if (now - lastForegroundSyncAtRef.current > 1200) {
+              lastForegroundSyncAtRef.current = now;
+              await syncAllSettings();
+            }
           } catch (err: unknown) {
             logger.warn('Foreground bridge sync failed', 'RootLayout', err);
           }

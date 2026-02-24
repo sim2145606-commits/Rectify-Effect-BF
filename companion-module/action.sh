@@ -13,6 +13,7 @@ CONFIG_STATE_FILE="$IPC_DIR/state/config_status"
 MARKER_STATE_FILE="$IPC_DIR/state/marker_status"
 MARKER_SOURCE_FILE="$IPC_DIR/state/marker_source"
 SCOPE_STATE_FILE="$IPC_DIR/state/scope_status"
+RUNTIME_STATE_FILE="$IPC_DIR/state/runtime_status"
 COMPLETE_FILE="$IPC_DIR/state/service_complete_time"
 PERSISTENT_DIR="/data/adb/virtucam"
 PERSISTENT_JSON="$PERSISTENT_DIR/virtucam_config.json"
@@ -23,6 +24,49 @@ write_state_file() {
     local value="$2"
     printf '%s\n' "$value" > "$file" 2>/dev/null
     chmod 0644 "$file" 2>/dev/null
+}
+
+discover_prefs_file() {
+    local user0="/data/user/0/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
+    local legacy="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
+    local modern=""
+
+    if [ -f "$user0" ]; then
+        echo "$user0"
+        return
+    fi
+
+    if [ -f "$legacy" ]; then
+        echo "$legacy"
+        return
+    fi
+
+    modern="$(find /data/misc -type f -path "*/prefs/$VIRTUCAM_PKG/virtucam_config.xml" 2>/dev/null | head -n 1)"
+    if [ -n "$modern" ] && [ -f "$modern" ]; then
+        echo "$modern"
+        return
+    fi
+
+    echo ""
+}
+
+has_runtime_observation() {
+    local active_line
+    local mapping_line
+
+    active_line="$(grep -h 'VirtuCam/XposedEntry: module active in process:' \
+        /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1)"
+    if [ -n "$active_line" ]; then
+        return 0
+    fi
+
+    mapping_line="$(grep -h 'VirtuCam/XposedEntry: createCaptureSession' \
+        /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1)"
+    if [ -n "$mapping_line" ]; then
+        return 0
+    fi
+
+    return 1
 }
 
 find_lspd_config() {
@@ -71,6 +115,7 @@ update_companion_state() {
     local marker_state="marker_missing"
     local marker_source="none"
     local scope_state="scope_mismatch"
+    local runtime_state="runtime_missing"
     local companion_state="pending"
 
     if [ -r "$CFG_JSON" ] || [ -r "$CFG_XML" ]; then
@@ -89,14 +134,18 @@ update_companion_state() {
         scope_state="scope_ok"
     fi
 
+    if has_runtime_observation; then
+        runtime_state="runtime_observed"
+    fi
+
     if [ "$scope_state" != "scope_ok" ]; then
         companion_state="scope_mismatch"
     elif [ "$config_state" != "config_ready" ]; then
         companion_state="config_missing"
-    elif [ "$marker_state" != "marker_present" ]; then
-        companion_state="marker_missing"
-    else
+    elif [ "$marker_state" = "marker_present" ] || [ "$runtime_state" = "runtime_observed" ]; then
         companion_state="ready"
+    else
+        companion_state="waiting_runtime"
     fi
 
     write_state_file "$STATUS_FILE" "$companion_state"
@@ -104,13 +153,14 @@ update_companion_state() {
     write_state_file "$MARKER_STATE_FILE" "$marker_state"
     write_state_file "$MARKER_SOURCE_FILE" "$marker_source"
     write_state_file "$SCOPE_STATE_FILE" "$scope_state"
+    write_state_file "$RUNTIME_STATE_FILE" "$runtime_state"
     write_state_file "$COMPLETE_FILE" "$(date '+%s')"
     local state_uid
     state_uid="$(stat -c '%u' "$IPC_DIR/state/boot_time" 2>/dev/null)"
     if [ -n "$state_uid" ]; then
         chown "$state_uid:$state_uid" \
             "$STATUS_FILE" "$CONFIG_STATE_FILE" "$MARKER_STATE_FILE" \
-            "$MARKER_SOURCE_FILE" "$SCOPE_STATE_FILE" "$COMPLETE_FILE" 2>/dev/null
+            "$MARKER_SOURCE_FILE" "$SCOPE_STATE_FILE" "$RUNTIME_STATE_FILE" "$COMPLETE_FILE" 2>/dev/null
     fi
 
     echo "[STATE] companion_status=$companion_state"
@@ -118,6 +168,7 @@ update_companion_state() {
     echo "[STATE] marker_state=$marker_state"
     echo "[STATE] marker_source=$marker_source"
     echo "[STATE] scope_state=$scope_state"
+    echo "[STATE] runtime_state=$runtime_state"
 }
 
 echo "======================================"
@@ -127,14 +178,14 @@ echo "======================================"
 mkdir -p "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" 2>/dev/null
 chmod 0777 "$IPC_DIR" "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" 2>/dev/null
 
-PREFS_FILE="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
-if [ -f "$PREFS_FILE" ]; then
+PREFS_FILE="$(discover_prefs_file)"
+if [ -n "$PREFS_FILE" ] && [ -f "$PREFS_FILE" ]; then
     chmod 0644 "$PREFS_FILE"
     cp "$PREFS_FILE" "$CFG_XML" 2>/dev/null
     chmod 0644 "$CFG_XML" 2>/dev/null
-    echo "[OK] SharedPrefs permissions fixed and XML synced"
+    echo "[OK] SharedPrefs permissions fixed and XML synced ($PREFS_FILE)"
 else
-    echo "[WARN] SharedPrefs config missing ($PREFS_FILE)"
+    echo "[WARN] SharedPrefs config missing (searched user0/data/misc prefs)"
 fi
 
 if [ -f "$PERSISTENT_JSON" ]; then

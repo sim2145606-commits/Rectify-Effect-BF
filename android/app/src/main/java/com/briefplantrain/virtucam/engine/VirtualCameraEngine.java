@@ -217,7 +217,16 @@ public final class VirtualCameraEngine {
 
             ConfigSnapshot cfg = configLoader.getSnapshot();
             int fps = cfg.fps > 0 ? cfg.fps : 30;
-            long delayMs = Math.max(5, 1000 / fps);
+            boolean activeRoute = cfg.enabled && cfg.isTargeted(packageName);
+            boolean hasMappings = mappingManager.hasMappings();
+            long delayMs;
+            if (!activeRoute) {
+                delayMs = 750;
+            } else if (!hasMappings) {
+                delayMs = 220;
+            } else {
+                delayMs = Math.max(5, 1000 / fps);
+            }
 
             if (started && handler != null) {
                 handler.postDelayed(this, delayMs);
@@ -230,11 +239,11 @@ public final class VirtualCameraEngine {
         if (!cfg.enabled) return;
         if (!cfg.isTargeted(packageName)) return;
 
-        Bitmap frame = getFrameBitmap(cfg);
-        if (frame == null) return;
-
         List<Surface> originals = mappingManager.listOriginalSurfaces();
         if (originals.isEmpty()) return;
+
+        Bitmap frame = getFrameBitmap(cfg);
+        if (frame == null) return;
 
         Transform t = Transform.identity();
 

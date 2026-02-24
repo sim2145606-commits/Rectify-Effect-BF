@@ -18,6 +18,29 @@ log() {
     printf '[%s] [post-fs-data] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null
 }
 
+discover_prefs_file() {
+    local user0="/data/user/0/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
+    local legacy="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
+    local modern=""
+
+    if [ -f "$user0" ]; then
+        echo "$user0"
+        return
+    fi
+    if [ -f "$legacy" ]; then
+        echo "$legacy"
+        return
+    fi
+
+    modern="$(find /data/misc -type f -path "*/prefs/$VIRTUCAM_PKG/virtucam_config.xml" 2>/dev/null | head -n 1)"
+    if [ -n "$modern" ] && [ -f "$modern" ]; then
+        echo "$modern"
+        return
+    fi
+
+    echo ""
+}
+
 log "=== Started ==="
 
 # 1. Create and mount IPC tmpfs
@@ -56,16 +79,25 @@ fi
 # 4. Write boot timestamp
 printf '%s\n' "$(date '+%s')" > "$IPC_DIR/state/boot_time"
 printf 'pending\n' > "$IPC_DIR/state/companion_status"
+printf 'config_missing\n' > "$IPC_DIR/state/config_status"
+printf 'marker_missing\n' > "$IPC_DIR/state/marker_status"
+printf 'none\n' > "$IPC_DIR/state/marker_source"
+printf 'scope_mismatch\n' > "$IPC_DIR/state/scope_status"
+printf 'runtime_missing\n' > "$IPC_DIR/state/runtime_status"
 chmod 0644 "$IPC_DIR/state/boot_time"
 chmod 0644 "$IPC_DIR/state/companion_status"
+chmod 0644 "$IPC_DIR/state/config_status" "$IPC_DIR/state/marker_status" "$IPC_DIR/state/marker_source" \
+    "$IPC_DIR/state/scope_status" "$IPC_DIR/state/runtime_status"
 log "Boot timestamp written"
 
 # 5. Pre-copy last known config to IPC dir
-PREFS_FILE="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
-if [ -f "$PREFS_FILE" ]; then
+PREFS_FILE="$(discover_prefs_file)"
+if [ -n "$PREFS_FILE" ] && [ -f "$PREFS_FILE" ]; then
     cp "$PREFS_FILE" "$IPC_DIR/config/virtucam_config.xml" 2>/dev/null
     chmod 0644 "$IPC_DIR/config/virtucam_config.xml" 2>/dev/null
-    log "Pre-staged config from SharedPreferences"
+    log "Pre-staged config from SharedPreferences: $PREFS_FILE"
+else
+    log "SharedPreferences config not found during pre-stage"
 fi
 
 FALLBACK_JSON="/data/adb/virtucam/virtucam_config.json"

@@ -209,12 +209,22 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                             @SuppressWarnings("unchecked")
                             List<Object> in = (List<Object>) arg0;
                             if (in.isEmpty()) return;
+                            List<Object> remapped = new ArrayList<>(in.size());
                             int replaced = 0;
                             for (Object item : in) {
-                                if (!(item instanceof OutputConfiguration)) continue;
-                                if (tryMapOutputConfigurationSurface(engine, (OutputConfiguration) item,
-                                        "createCaptureSessionByOutputConfigurations")) replaced++;
+                                if (item instanceof OutputConfiguration) {
+                                    MappedOutputConfigResult mapped = mapOutputConfiguration(
+                                            engine,
+                                            (OutputConfiguration) item,
+                                            "createCaptureSessionByOutputConfigurations"
+                                    );
+                                    remapped.add(mapped.outputConfig);
+                                    replaced += mapped.replacedCount;
+                                } else {
+                                    remapped.add(item);
+                                }
                             }
+                            param.args[0] = remapped;
                             logMappingSummary(
                                     engine,
                                     "createCaptureSessionByOutputConfigurations",
@@ -238,10 +248,26 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                 SessionConfiguration sc = (SessionConfiguration) arg0;
                                 List<OutputConfiguration> outputs = sc.getOutputConfigurations();
                                 if (outputs == null || outputs.isEmpty()) return;
+                                List<OutputConfiguration> remapped = new ArrayList<>(outputs.size());
                                 int replaced = 0;
                                 for (OutputConfiguration oc : outputs) {
-                                    if (tryMapOutputConfigurationSurface(engine, oc,
-                                            "createCaptureSession(SessionConfiguration)")) replaced++;
+                                    MappedOutputConfigResult mapped = mapOutputConfiguration(
+                                            engine,
+                                            oc,
+                                            "createCaptureSession(SessionConfiguration)"
+                                    );
+                                    if (mapped.outputConfig instanceof OutputConfiguration) {
+                                        remapped.add((OutputConfiguration) mapped.outputConfig);
+                                    } else {
+                                        remapped.add(oc);
+                                    }
+                                    replaced += mapped.replacedCount;
+                                }
+                                if (replaced > 0) {
+                                    SessionConfiguration rebuilt = rebuildSessionConfiguration(sc, remapped);
+                                    if (rebuilt != null) {
+                                        param.args[0] = rebuilt;
+                                    }
                                 }
                                 logMappingSummary(
                                         engine,
@@ -260,21 +286,145 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
     }
 
 
-    private static boolean tryMapOutputConfigurationSurface(
+    private static final class MappedOutputConfigResult {
+        final Object outputConfig;
+        final int replacedCount;
+
+        MappedOutputConfigResult(Object outputConfig, int replacedCount) {
+            this.outputConfig = outputConfig;
+            this.replacedCount = replacedCount;
+        }
+    }
+
+    private static MappedOutputConfigResult mapOutputConfiguration(
             VirtualCameraEngine engine, OutputConfiguration oc, String hookName) {
-        if (oc == null) return false;
-        Surface original = oc.getSurface();
-        if (original == null) return false;
+        if (oc == null) return new MappedOutputConfigResult(oc, 0);
+        Surface original = null;
+        try {
+            original = oc.getSurface();
+        } catch (Throwable ignored) {
+        }
+        if (original == null) return new MappedOutputConfigResult(oc, 0);
         SurfaceInfo info = engine.inferSurfaceInfo(original);
         Surface mapped = engine.mapOutputSurface(original, info);
-        if (mapped == original) return false;
+        if (mapped == original) return new MappedOutputConfigResult(oc, 0);
         try {
             XposedHelpers.callMethod(oc, "setSurface", mapped);
-            return true;
+            return new MappedOutputConfigResult(oc, 1);
         } catch (Throwable t) {
+            OutputConfiguration rebuilt = buildOutputConfigurationFallback(oc, original, mapped);
+            if (rebuilt != null) {
+                LogUtil.iRateLimited(
+                        "output-config-rebuild:" + hookName,
+                        5000L,
+                        TAG,
+                        hookName + ": setSurface unavailable; using rebuild fallback"
+                );
+                return new MappedOutputConfigResult(rebuilt, 1);
+            }
             engine.rollbackOutputSurfaceMapping(original);
             LogUtil.e(TAG, hookName + ": failed to set mapped surface; rolled back", t);
-            return false;
+            return new MappedOutputConfigResult(oc, 0);
+        }
+    }
+
+    private static OutputConfiguration buildOutputConfigurationFallback(
+            OutputConfiguration originalConfig,
+            Surface originalSurface,
+            Surface mappedSurface
+    ) {
+        try {
+            Object rebuiltObj = XposedHelpers.newInstance(originalConfig.getClass(), mappedSurface);
+            if (!(rebuiltObj instanceof OutputConfiguration)) {
+                return null;
+            }
+            OutputConfiguration rebuilt = (OutputConfiguration) rebuiltObj;
+
+            try {
+                Object physicalCameraId = XposedHelpers.callMethod(originalConfig, "getPhysicalCameraId");
+                if (physicalCameraId instanceof String && !((String) physicalCameraId).isEmpty()) {
+                    XposedHelpers.callMethod(rebuilt, "setPhysicalCameraId", physicalCameraId);
+                }
+            } catch (Throwable ignored) {
+            }
+
+            try {
+                @SuppressWarnings("unchecked")
+                List<Surface> surfaces = (List<Surface>) XposedHelpers.callMethod(originalConfig, "getSurfaces");
+                if (surfaces != null && surfaces.size() > 1) {
+                    try {
+                        XposedHelpers.callMethod(rebuilt, "enableSurfaceSharing");
+                    } catch (Throwable ignored) {
+                    }
+                    for (Surface extra : surfaces) {
+                        if (extra == null || extra == originalSurface || extra == mappedSurface) continue;
+                        try {
+                            XposedHelpers.callMethod(rebuilt, "addSurface", extra);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+
+            copyOutputConfigurationField(originalConfig, rebuilt, "getStreamUseCase", "setStreamUseCase");
+            copyOutputConfigurationField(originalConfig, rebuilt, "getTimestampBase", "setTimestampBase");
+            copyOutputConfigurationField(originalConfig, rebuilt, "getMirrorMode", "setMirrorMode");
+            copyOutputConfigurationField(originalConfig, rebuilt, "getDynamicRangeProfile", "setDynamicRangeProfile");
+            copyOutputConfigurationField(originalConfig, rebuilt, "isReadoutTimestampEnabled", "setReadoutTimestampEnabled");
+
+            return rebuilt;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static void copyOutputConfigurationField(
+            OutputConfiguration source,
+            OutputConfiguration target,
+            String getter,
+            String setter
+    ) {
+        try {
+            Object value = XposedHelpers.callMethod(source, getter);
+            if (value != null) {
+                XposedHelpers.callMethod(target, setter, value);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static SessionConfiguration rebuildSessionConfiguration(
+            SessionConfiguration original,
+            List<OutputConfiguration> outputs
+    ) {
+        try {
+            Object sessionType = XposedHelpers.callMethod(original, "getSessionType");
+            Object executor = XposedHelpers.callMethod(original, "getExecutor");
+            Object callback = XposedHelpers.callMethod(original, "getStateCallback");
+            Object rebuiltObj = XposedHelpers.newInstance(
+                    original.getClass(),
+                    sessionType,
+                    outputs,
+                    executor,
+                    callback
+            );
+            if (!(rebuiltObj instanceof SessionConfiguration)) {
+                return null;
+            }
+
+            SessionConfiguration rebuilt = (SessionConfiguration) rebuiltObj;
+            try {
+                Object sessionParams = XposedHelpers.callMethod(original, "getSessionParameters");
+                if (sessionParams != null) {
+                    XposedHelpers.callMethod(rebuilt, "setSessionParameters", sessionParams);
+                }
+            } catch (Throwable ignored) {
+            }
+            return rebuilt;
+        } catch (Throwable t) {
+            LogUtil.e(TAG, "createCaptureSession(SessionConfiguration): rebuild failed", t);
+            return null;
         }
     }
 

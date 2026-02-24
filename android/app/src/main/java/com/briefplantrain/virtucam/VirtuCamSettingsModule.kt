@@ -17,6 +17,9 @@ import java.io.File
 import java.io.FileWriter
 import java.io.InputStreamReader
 import java.io.IOException
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.zip.ZipFile
 import java.util.concurrent.TimeUnit
 
@@ -50,6 +53,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         try {
             val editor = prefs.edit()
+            val writeEpoch = System.currentTimeMillis()
+            editor.putLong("_bridge_write_epoch", writeEpoch)
             
             if (config.hasKey("enabled")) {
                 editor.putBoolean("enabled", config.getBoolean("enabled"))
@@ -100,13 +105,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
             val result = Arguments.createMap()
             val committed = editor.commit()
-            val prefsFile = File(
-                reactApplicationContext.applicationInfo.dataDir,
-                "shared_prefs/virtucam_config.xml"
-            )
-            val prefsDir = File(reactApplicationContext.applicationInfo.dataDir, "shared_prefs")
-            val prefsWritten = committed && prefsFile.exists() && prefsFile.canRead()
+            val readbackEpoch = prefs.getLong("_bridge_write_epoch", -1L)
+            val prefsWritten = committed && readbackEpoch == writeEpoch
+            val resolvedPrefsPath = resolveSharedPrefsXmlPath()
             result.putBoolean("prefsWritten", prefsWritten)
+            result.putString("prefsPathResolved", resolvedPrefsPath ?: "")
 
             var ipcJsonWritten = false
             var persistentFallbackWritten = false
@@ -118,11 +121,15 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
             if (committed) {
                 try {
-                    prefsFile.setReadable(true, false)
-                    val escapedPrefsDir = escapeShellArg(prefsDir.absolutePath)
-                    val escapedPrefsFile = escapeShellArg(prefsFile.absolutePath)
-                    executeRootCommand("chmod 755 $escapedPrefsDir")
-                    executeRootCommand("chmod 644 $escapedPrefsFile")
+                    if (!resolvedPrefsPath.isNullOrBlank()) {
+                        val prefsFile = File(resolvedPrefsPath).canonicalFile
+                        val prefsDir = prefsFile.parentFile
+                        prefsFile.setReadable(true, false)
+                        if (prefsDir != null) {
+                            executeRootCommand("chmod 755 ${escapeShellArg(prefsDir.absolutePath)}")
+                        }
+                        executeRootCommand("chmod 644 ${escapeShellArg(prefsFile.absolutePath)}")
+                    }
                 } catch (e: Exception) {
                     android.util.Log.w("VirtuCamSettings", "Could not normalize prefs readability: ${e.message}")
                 }
@@ -220,9 +227,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             return
         }
         try {
-            val prefsPath = File(reactApplicationContext.applicationInfo.dataDir, 
-                "shared_prefs/virtucam_config.xml").absolutePath
-            promise.resolve(prefsPath)
+            promise.resolve(resolveSharedPrefsXmlPath())
         } catch (e: Exception) {
             promise.reject("PATH_ERROR", "Failed to get config path: ${e.message}", e)
         }
@@ -331,6 +336,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val markerFile = File(VirtuCamIPC.MODULE_ACTIVE)
             val legacyMarkerFile = File(VirtuCamIPC.LEGACY_TMP_ACTIVE)
             val companionStatus = File(VirtuCamIPC.COMPANION_STATUS)
+            val configStatus = File(VirtuCamIPC.CONFIG_STATUS)
+            val markerStatus = File(VirtuCamIPC.MARKER_STATUS)
+            val runtimeStatus = File(VirtuCamIPC.RUNTIME_STATUS)
+            val prefsPathResolved = resolveSharedPrefsXmlPath()
 
             val stagedPath = prefs.getString("mediaSourcePath", null)
             val stagedFile = if (!stagedPath.isNullOrBlank()) {
@@ -358,10 +367,18 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("moduleMarkerExistsLegacy", markerExistsLegacy)
             result.putString("moduleMarkerSource", markerSource)
             result.putString("companionStatus", safeReadSmallFile(companionStatus))
+            result.putString("configStatus", safeReadSmallFile(configStatus))
+            result.putString("markerStatus", safeReadSmallFile(markerStatus))
+            result.putString("runtimeStatus", safeReadSmallFile(runtimeStatus))
             result.putString("stagedMediaPath", stagedPath ?: "")
             result.putBoolean("stagedMediaExists", stagedFile?.exists() == true)
             result.putBoolean("stagedMediaReadable", stagedFile?.canRead() == true)
+            result.putBoolean(
+                "stagedMediaHookReadable",
+                !stagedPath.isNullOrBlank() && isHookReadableMediaPath(stagedPath)
+            )
             result.putBoolean("configStaged", configJson.exists() && configJson.canRead())
+            result.putString("prefsPathResolved", prefsPathResolved ?: "")
 
             promise.resolve(result)
         } catch (e: Exception) {
@@ -675,11 +692,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 scopeEvaluationReason = "configured_targets_scoped"
             }
 
-            val runtimeHookObserved = hasRuntimeHookObservation()
+            val runtimeObservation = getRuntimeHookObservation()
+            val runtimeHookObserved = runtimeObservation.observed
+            val runtimeObservedAt = runtimeObservation.epochMillis
             if (runtimeHookObserved && detectionMethod == "none") {
                 detectionMethod = "runtime_log"
             }
             moduleLoaded = moduleLoaded || runtimeHookObserved
+            val mappingFailureReason = getLatestMappingFailureReason()
 
             val enabled = prefs.getBoolean("enabled", false)
             val mediaSourcePath = prefs.getString("mediaSourcePath", null)
@@ -720,12 +740,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val stagedMediaReady = if (!sourceNeedsFile) {
                 true
             } else {
-                !mediaSourcePath.isNullOrBlank() && try {
-                    val staged = File(normalizeFilePath(mediaSourcePath)).canonicalFile
-                    staged.exists() && staged.canRead()
-                } catch (_: Exception) {
-                    false
-                }
+                !mediaSourcePath.isNullOrBlank() && isHookReadableMediaPath(mediaSourcePath)
             }
             val ipcConfigReady = try {
                 (File(VirtuCamIPC.CONFIG_JSON).exists() && File(VirtuCamIPC.CONFIG_JSON).canRead()) ||
@@ -754,6 +769,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("ipcConfigReady", ipcConfigReady)
             result.putBoolean("stagedMediaReady", stagedMediaReady)
             result.putBoolean("runtimeHookObserved", runtimeHookObserved)
+            result.putBoolean("markerRequired", false)
+            result.putDouble("runtimeObservedAt", runtimeObservedAt.toDouble())
+            result.putString("mappingFailureReason", mappingFailureReason ?: "")
             result.putString("detectionMethod", detectionMethod)
             result.putString("markerSource", markerSource)
             result.putInt("configuredTargetsCount", configuredTargets.size)
@@ -769,7 +787,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 "hookConfigured=$hookConfigured, hookReady=$hookReady, lsposedInstalled=$lsposedExists, " +
                 "ipcConfigReady=$ipcConfigReady, stagedMediaReady=$stagedMediaReady, runtimeHookObserved=$runtimeHookObserved, " +
                 "method=$detectionMethod, markerSource=$markerSource, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets, " +
-                "broadScope=$broadScopePackages")
+                "broadScope=$broadScopePackages, runtimeObservedAt=$runtimeObservedAt, mappingFailureReason=${mappingFailureReason ?: "none"}")
             
             promise.resolve(result)
         } catch (e: Exception) {
@@ -785,6 +803,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("ipcConfigReady", false)
             result.putBoolean("stagedMediaReady", false)
             result.putBoolean("runtimeHookObserved", false)
+            result.putBoolean("markerRequired", false)
+            result.putDouble("runtimeObservedAt", 0.0)
+            result.putString("mappingFailureReason", "")
             result.putString("detectionMethod", "error")
             result.putString("markerSource", "none")
             result.putInt("configuredTargetsCount", 0)
@@ -868,13 +889,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 return true
             }
             
-            // If sqlite3 is not available, try using grep/strings on the database file
-            val grepFallback = executeRootCommand(
-                "strings $dbPath 2>/dev/null | grep $escapedPkg"
-            )
-            if (grepFallback.contains(packageName)) {
-                return true
-            }
         }
         
         return false
@@ -1139,12 +1153,22 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         Thread {
             try {
-                val prefsFile = File(reactApplicationContext.applicationInfo.dataDir,
-                    "shared_prefs/virtucam_config.xml")
+                val resolvedPath = resolveSharedPrefsXmlPath() ?: ""
+                val prefsFile = if (resolvedPath.isNotBlank()) {
+                    File(resolvedPath)
+                } else {
+                    File(reactApplicationContext.applicationInfo.dataDir, "shared_prefs/virtucam_config.xml")
+                }
+                val rootReadable = if (resolvedPath.isNotBlank()) {
+                    executeRootCommand("ls -l ${escapeShellArg(resolvedPath)} 2>/dev/null").isNotBlank()
+                } else {
+                    false
+                }
                 
                 val result = Arguments.createMap()
                 result.putBoolean("exists", prefsFile.exists())
-                result.putBoolean("readable", prefsFile.canRead())
+                result.putBoolean("readable", prefsFile.canRead() || rootReadable)
+                result.putBoolean("rootReadable", rootReadable)
                 result.putString("path", prefsFile.absolutePath)
                 
                 val permissions = executeCommand("ls -l ${escapeShellArg(prefsFile.absolutePath)}")
@@ -1173,17 +1197,28 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         try {
             val result = Arguments.createMap()
-            
-            // Try to get logcat entries related to VirtuCam and Xposed
-            val logcatCommand = "logcat -d -s VirtuCam:* Xposed:* LSPosed:* | tail -n 500"
-            val logs = executeCommand(logcatCommand)
-            
+
+            val modulesLogs = executeRootCommand(
+                "grep -h 'VirtuCam/XposedEntry:' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 800"
+            )
+            val source: String
+            val logs: String
+            if (modulesLogs.isNotBlank()) {
+                source = "lsposed_modules"
+                logs = modulesLogs
+            } else {
+                source = "logcat"
+                logs = executeCommand("logcat -d -s VirtuCam:* Xposed:* LSPosed:* | tail -n 500")
+            }
+
+            result.putString("source", source)
             result.putString("logs", logs)
             result.putBoolean("success", logs.isNotEmpty())
             
             promise.resolve(result)
         } catch (e: Exception) {
             val result = Arguments.createMap()
+            result.putString("source", "unknown")
             result.putString("logs", "")
             result.putBoolean("success", false)
             putErrorMessage(result, e)
@@ -1694,11 +1729,114 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         return markerRootCheck.contains(expectedToken)
     }
 
-    private fun hasRuntimeHookObservation(): Boolean {
-        val query = executeRootCommand(
-            "grep -h 'VirtuCam/XposedEntry: module active in process:' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null"
+    private data class RuntimeObservation(
+        val observed: Boolean,
+        val epochMillis: Long,
+        val line: String
+    )
+
+    private fun getRuntimeHookObservation(): RuntimeObservation {
+        val line = executeRootCommand(
+            "grep -h 'VirtuCam/XposedEntry: module active in process:' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1"
+        ).trim()
+        if (line.isBlank()) {
+            return RuntimeObservation(false, 0L, "")
+        }
+        return RuntimeObservation(
+            observed = true,
+            epochMillis = parseLsposedTimestampEpoch(line),
+            line = line
         )
-        return query.contains("VirtuCam/XposedEntry: module active in process:")
+    }
+
+    private fun parseLsposedTimestampEpoch(line: String): Long {
+        return try {
+            val match = Regex("\\[\\s*(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2})(?:\\.\\d+)?").find(line)
+                ?: return 0L
+            val parsed = LocalDateTime.parse(
+                match.groupValues[1],
+                DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
+            )
+            parsed.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    private fun getLatestMappingFailureReason(): String? {
+        val line = executeRootCommand(
+            "grep -h -E 'failed to set mapped surface; rolled back|NoSuchMethodError: android.hardware.camera2.params.OutputConfiguration#setSurface' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1"
+        ).trim()
+        if (line.isBlank()) return null
+        return when {
+            line.contains("NoSuchMethodError: android.hardware.camera2.params.OutputConfiguration#setSurface") ->
+                "output_configuration_setsurface_missing"
+            line.contains("failed to set mapped surface; rolled back") ->
+                "mapped_surface_mutation_failed"
+            else -> line
+        }
+    }
+
+    private fun resolveSharedPrefsXmlPath(): String? {
+        val pkg = reactApplicationContext.packageName
+        val localCandidates = listOf(
+            File(reactApplicationContext.applicationInfo.dataDir, "shared_prefs/virtucam_config.xml").absolutePath,
+            "/data/user/0/$pkg/shared_prefs/virtucam_config.xml",
+            "/data/data/$pkg/shared_prefs/virtucam_config.xml"
+        )
+        for (candidate in localCandidates) {
+            try {
+                val file = File(candidate).canonicalFile
+                if (file.exists() && file.canRead()) {
+                    return file.absolutePath
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        val escapedPkg = sanitizePackageName(pkg)
+        if (escapedPkg.isNotBlank()) {
+            val sharedPrefsQuery = executeRootCommand(
+                "find /data/user /data/data -type f -path '*/$escapedPkg/shared_prefs/virtucam_config.xml' 2>/dev/null | tail -n 1"
+            ).trim()
+            if (sharedPrefsQuery.isNotBlank()) {
+                return sharedPrefsQuery.lineSequence().lastOrNull()?.trim()
+            }
+
+            val modernPrefsQuery = executeRootCommand(
+                "find /data/misc -type f -path '*/prefs/$escapedPkg/virtucam_config.xml' 2>/dev/null | tail -n 1"
+            ).trim()
+            if (modernPrefsQuery.isNotBlank()) {
+                return modernPrefsQuery.lineSequence().lastOrNull()?.trim()
+            }
+        }
+
+        return null
+    }
+
+    private fun isHookReadableMediaPath(rawPath: String?): Boolean {
+        if (rawPath.isNullOrBlank()) return false
+        return try {
+            val staged = File(normalizeFilePath(rawPath)).canonicalFile
+            val stagedPath = staged.absolutePath
+            if (stagedPath.startsWith(VirtuCamIPC.MEDIA_DIR)) {
+                return staged.exists() && staged.canRead()
+            }
+
+            val privateAppPath = stagedPath.startsWith("/data/user/") || stagedPath.startsWith("/data/data/")
+            if (privateAppPath) {
+                return false
+            }
+
+            if (staged.exists() && staged.canRead()) {
+                return true
+            }
+
+            val rootVisible = executeRootCommand("ls ${escapeShellArg(stagedPath)} 2>/dev/null")
+            rootVisible.isNotBlank() && !rootVisible.contains("No such")
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun isValidPackageName(packageName: String): Boolean {

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, type ReactNode } from 'react';
+import { useEffect, useCallback, useState, useRef, type ReactNode } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -70,6 +70,8 @@ export default function Dashboard() {
   const [bridgeSyncState, setBridgeSyncState] = useState<BridgeSyncState>(() =>
     getLatestBridgeSyncState()
   );
+  const bridgeSyncInFlightRef = useRef<Promise<void> | null>(null);
+  const lastBridgeSyncAtRef = useRef(0);
 
   const masterGlow = useSharedValue(0);
   const masterScale = useSharedValue(1);
@@ -95,26 +97,46 @@ export default function Dashboard() {
     }
   }, []);
 
-  const syncBridgeState = useCallback(async () => {
+  const syncBridgeState = useCallback(async (force = false) => {
+    if (bridgeSyncInFlightRef.current) {
+      await bridgeSyncInFlightRef.current;
+      return;
+    }
+
+    const now = Date.now();
+    if (!force && now - lastBridgeSyncAtRef.current < 400) {
+      return;
+    }
+
+    const run = (async () => {
+      try {
+        await syncAllSettings(force);
+        const bridgeSt = await getBridgeStatus();
+        setBridgeVersion(bridgeSt.version);
+        setBridgePath(bridgeSt.path);
+        setBridgeReadable(bridgeSt.readable);
+        setBridgeSyncState(bridgeSt.syncState);
+        setLastSyncTime(new Date().toLocaleTimeString());
+        await applyBridgeConfig();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        setLastSyncTime(`Failed (${new Date().toLocaleTimeString()})`);
+        setBridgeSyncState({
+          ok: false,
+          code: 'write_failed',
+          message,
+          timestamp: Date.now(),
+          attempts: 1,
+        });
+      }
+    })();
+
+    bridgeSyncInFlightRef.current = run;
     try {
-      await syncAllSettings();
-      const bridgeSt = await getBridgeStatus();
-      setBridgeVersion(bridgeSt.version);
-      setBridgePath(bridgeSt.path);
-      setBridgeReadable(bridgeSt.readable);
-      setBridgeSyncState(bridgeSt.syncState);
-      setLastSyncTime(new Date().toLocaleTimeString());
-      await applyBridgeConfig();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastSyncTime(`Failed (${new Date().toLocaleTimeString()})`);
-      setBridgeSyncState({
-        ok: false,
-        code: 'write_failed',
-        message,
-        timestamp: Date.now(),
-        attempts: 1,
-      });
+      await run;
+    } finally {
+      lastBridgeSyncAtRef.current = Date.now();
+      bridgeSyncInFlightRef.current = null;
     }
   }, [applyBridgeConfig]);
 
@@ -131,7 +153,7 @@ export default function Dashboard() {
 
   useFocusEffect(
     useCallback(() => {
-      void syncBridgeState();
+      void syncBridgeState(true);
     }, [syncBridgeState])
   );
 
@@ -213,7 +235,7 @@ export default function Dashboard() {
     } catch {
       // syncBridgeState surfaces bridge failures in UI state
     }
-    await syncBridgeState();
+    await syncBridgeState(true);
   }, [
     hookEnabled,
     setHookEnabled,
@@ -228,7 +250,7 @@ export default function Dashboard() {
   const handleRefreshStatus = useCallback(async () => {
     mediumImpact();
     await refreshSystemStatus();
-    await syncBridgeState();
+    await syncBridgeState(true);
     setLoadingSystemInfo(true);
     const info = await getSystemInfo();
     setSystemInfo(info);
