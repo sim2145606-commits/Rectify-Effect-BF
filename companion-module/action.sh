@@ -18,6 +18,21 @@ COMPLETE_FILE="$IPC_DIR/state/service_complete_time"
 PERSISTENT_DIR="/data/adb/virtucam"
 PERSISTENT_JSON="$PERSISTENT_DIR/virtucam_config.json"
 PERSISTENT_XML="$PERSISTENT_DIR/virtucam_config.xml"
+LOCK_DIR="$IPC_DIR/state/.action_lock"
+
+release_lock() {
+    rm -f "$LOCK_DIR/pid" 2>/dev/null
+    rmdir "$LOCK_DIR" 2>/dev/null
+}
+
+acquire_lock() {
+    mkdir -p "$IPC_DIR/state" 2>/dev/null
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        printf '%s\n' "$$" > "$LOCK_DIR/pid" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
 
 write_state_file() {
     local file="$1"
@@ -177,6 +192,12 @@ echo "======================================"
 
 mkdir -p "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" 2>/dev/null
 chmod 0777 "$IPC_DIR" "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" 2>/dev/null
+
+if ! acquire_lock; then
+    echo "[INFO] Companion refresh already in progress; skipping overlap."
+    exit 0
+fi
+trap 'release_lock' EXIT INT TERM
 
 PREFS_FILE="$(discover_prefs_file)"
 if [ -n "$PREFS_FILE" ] && [ -f "$PREFS_FILE" ]; then

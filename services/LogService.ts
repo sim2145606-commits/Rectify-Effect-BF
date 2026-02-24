@@ -1,7 +1,10 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getSystemInfo } from './SystemVerification';
+import { getRawXposedDebugInfo, runDiagnostics } from './DiagnosticsService';
+
+const { VirtuCamSettings } = NativeModules;
 
 export type LogEntry = {
   timestamp: number;
@@ -146,6 +149,84 @@ class LogService {
     lines.push('-'.repeat(60));
     lines.push(`Platform: ${Platform.OS} ${Platform.Version}`);
     lines.push(`Total Logs: ${this.logs.length}`);
+
+    lines.push('');
+    lines.push('-'.repeat(60));
+    lines.push('DIAGNOSTICS SNAPSHOT');
+    lines.push('-'.repeat(60));
+    try {
+      const [report, rawInfo] = await Promise.all([runDiagnostics(), getRawXposedDebugInfo()]);
+      lines.push(
+        `Checks: ${report.passCount} passed, ${report.failCount} failed, ${report.warnCount} warned`
+      );
+      if (rawInfo) {
+        lines.push(`Hook Ready: ${rawInfo.hookReady}`);
+        lines.push(`Runtime Observed: ${rawInfo.runtimeHookObserved}`);
+        lines.push(`Mapping Source: ${rawInfo.mappingLogSource}`);
+        lines.push(`Latest Mapped Count: ${rawInfo.latestMappedCount ?? 'none'}`);
+        if (rawInfo.latestZeroReason) {
+          lines.push(`Latest Zero Reason: ${rawInfo.latestZeroReason}`);
+        }
+        if (rawInfo.mappingFailureReason) {
+          lines.push(`Mapping Failure Reason: ${rawInfo.mappingFailureReason}`);
+        }
+        lines.push(`Quick Fix: ${rawInfo.quickFixHint}`);
+      } else {
+        lines.push('Raw hook debug info unavailable');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      lines.push(`Diagnostics snapshot failed: ${message}`);
+    }
+
+    lines.push('');
+    lines.push('-'.repeat(60));
+    lines.push('IPC & XPOSED SNAPSHOT');
+    lines.push('-'.repeat(60));
+    try {
+      if (VirtuCamSettings?.getIpcStatus) {
+        const ipcStatus = (await VirtuCamSettings.getIpcStatus()) as Record<string, unknown>;
+        lines.push(`Companion State: ${String(ipcStatus?.companionStatus ?? '')}`);
+        lines.push(`Config State: ${String(ipcStatus?.configStatus ?? '')}`);
+        lines.push(`Runtime State: ${String(ipcStatus?.runtimeStatus ?? '')}`);
+        lines.push(`State Read Source: ${String(ipcStatus?.stateReadSource ?? '')}`);
+        lines.push(`Companion Version: ${String(ipcStatus?.companionVersion ?? '')}`);
+        lines.push(`Staged Media Path: ${String(ipcStatus?.stagedMediaPath ?? '')}`);
+        lines.push(`Staged Hook Readable: ${String(ipcStatus?.stagedMediaHookReadable ?? '')}`);
+      } else {
+        lines.push('IPC status unavailable (native method missing)');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      lines.push(`IPC snapshot failed: ${message}`);
+    }
+
+    try {
+      if (VirtuCamSettings?.getXposedLogs) {
+        const xposedResult = (await VirtuCamSettings.getXposedLogs()) as {
+          logs?: string;
+          source?: string;
+        };
+        const source = String(xposedResult?.source ?? 'unknown');
+        const rawLogs = String(xposedResult?.logs ?? '');
+        const tailLines = rawLogs
+          .split(/\r?\n/)
+          .filter(line => line.trim().length > 0)
+          .slice(-120);
+        lines.push(`Xposed Log Source: ${source}`);
+        if (tailLines.length > 0) {
+          lines.push('Xposed Log Tail:');
+          tailLines.forEach(line => lines.push(`  ${line}`));
+        } else {
+          lines.push('Xposed Log Tail: (empty)');
+        }
+      } else {
+        lines.push('Xposed logs unavailable (native method missing)');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      lines.push(`Xposed log snapshot failed: ${message}`);
+    }
     lines.push('');
     lines.push('-'.repeat(60));
     lines.push('APPLICATION LOGS');

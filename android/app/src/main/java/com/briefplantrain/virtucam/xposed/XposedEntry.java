@@ -323,7 +323,13 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                 return new MappedOutputConfigResult(rebuilt, 1);
             }
             engine.rollbackOutputSurfaceMapping(original);
-            LogUtil.e(TAG, hookName + ": failed to set mapped surface; rolled back", t);
+            String summary = summarizeThrowable(t);
+            LogUtil.iRateLimited(
+                    "output-config-rollback:" + hookName + ":" + summary,
+                    4000L,
+                    TAG,
+                    hookName + ": failed to set mapped surface; rolled back (" + summary + ")"
+            );
             return new MappedOutputConfigResult(oc, 0);
         }
     }
@@ -334,7 +340,29 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             Surface mappedSurface
     ) {
         try {
-            Object rebuiltObj = XposedHelpers.newInstance(originalConfig.getClass(), mappedSurface);
+            Object rebuiltObj = null;
+            try {
+                rebuiltObj = XposedHelpers.newInstance(originalConfig.getClass(), mappedSurface);
+            } catch (Throwable ignored) {
+            }
+            if (!(rebuiltObj instanceof OutputConfiguration)) {
+                try {
+                    int surfaceGroupId = -1;
+                    try {
+                        Object groupId = XposedHelpers.callMethod(originalConfig, "getSurfaceGroupId");
+                        if (groupId instanceof Integer) {
+                            surfaceGroupId = (Integer) groupId;
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    rebuiltObj = XposedHelpers.newInstance(
+                            originalConfig.getClass(),
+                            surfaceGroupId,
+                            mappedSurface
+                    );
+                } catch (Throwable ignored) {
+                }
+            }
             if (!(rebuiltObj instanceof OutputConfiguration)) {
                 return null;
             }
@@ -377,6 +405,15 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    private static String summarizeThrowable(Throwable t) {
+        if (t == null) return "unknown";
+        String message = t.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return t.getClass().getSimpleName();
+        }
+        return t.getClass().getSimpleName() + ":" + message.trim();
     }
 
     private static void copyOutputConfigurationField(

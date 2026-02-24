@@ -55,7 +55,7 @@ export default function Dashboard() {
   const [selectedMedia] = useStorage<string | null>(STORAGE_KEYS.SELECTED_MEDIA, null);
   const [aiEnhancement] = useStorage<string | null>(STORAGE_KEYS.AI_ENHANCEMENT, null);
 
-  const { status: systemStatus, isChecking, refresh: refreshSystemStatus } = useSystemStatus(30000);
+  const { status: systemStatus, isChecking, refresh: refreshSystemStatus } = useSystemStatus(60000);
   const [bridgeVersion, setBridgeVersion] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
   const [, setBridgePath] = useState<string | null>(null);
@@ -104,7 +104,7 @@ export default function Dashboard() {
     }
 
     const now = Date.now();
-    if (!force && now - lastBridgeSyncAtRef.current < 400) {
+    if (!force && now - lastBridgeSyncAtRef.current < 1200) {
       return;
     }
 

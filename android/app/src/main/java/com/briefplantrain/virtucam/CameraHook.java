@@ -60,6 +60,8 @@ import com.briefplantrain.virtucam.hooks.*;
  * Hooks Camera1 API, Camera2 API (ImageReader listener interception + Surface replacement),
  * for comprehensive virtual camera injection.
  */
+// Legacy hook path retained for compatibility; xposed_init uses xposed/XposedEntry.
+@Deprecated
 public class CameraHook implements IXposedHookLoadPackage, IXposedHookZygoteInit {
 
     private static final String PACKAGE_NAME = "com.briefplantrain.virtucam";

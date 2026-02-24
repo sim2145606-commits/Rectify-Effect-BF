@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -77,6 +77,8 @@ export default function StudioScreen() {
   const [loading, setLoading] = useState(false);
   const [resolvedPath, setResolvedPath] = useState<ResolvedPath | null>(null);
   const [bridgeWriteError, setBridgeWriteError] = useState<string | null>(null);
+  const offsetCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingOffsetRef = useRef<{ x: number; y: number } | null>(null);
 
   // Transform state
   const [rotation, setRotation] = useStorage(STORAGE_KEYS.ROTATION, 0);
@@ -109,25 +111,42 @@ export default function StudioScreen() {
   );
 
   useEffect(() => {
-    if (selectedMedia && recentFiles.length > 0) {
-      const found = recentFiles.find(f => f.uri === selectedMedia);
-      if (found) {
-        setSelectedType(found.type);
-      }
+    if (!selectedMedia || recentFiles.length === 0) return;
+    const found = recentFiles.find(f => f.uri === selectedMedia);
+    if (found) {
+      setSelectedType(found.type);
     }
+  }, [selectedMedia, recentFiles]);
+
+  useEffect(() => {
     // Resolve path whenever media changes
     if (selectedMedia) {
       resolveMediaPath(selectedMedia)
         .then(resolved => {
           setResolvedPath(resolved);
-          setHookMediaPath(resolved.absolutePath);
-          // Update bridge config with resolved absolute path
+          if (resolved.hookReadable) {
+            setHookMediaPath(resolved.absolutePath);
+            void commitBridgeUpdate(
+              {
+                mediaSourcePath: resolved.absolutePath,
+                sourceMode: 'file',
+              },
+              'set media source',
+              { quiet: true }
+            );
+            return;
+          }
+
+          setHookMediaPath(null);
+          setBridgeWriteError(
+            `Selected media is not hook-readable (${resolved.stageReason}). Re-stage media in IPC first.`
+          );
           void commitBridgeUpdate(
             {
-              mediaSourcePath: resolved.absolutePath,
-              sourceMode: 'file',
+              mediaSourcePath: null,
+              sourceMode: 'black',
             },
-            'set media source',
+            'set media source (fallback black)',
             { quiet: true }
           );
         })
@@ -146,7 +165,16 @@ export default function StudioScreen() {
         { quiet: true }
       );
     }
-  }, [selectedMedia, recentFiles, commitBridgeUpdate, setHookMediaPath]);
+  }, [selectedMedia, commitBridgeUpdate, setHookMediaPath]);
+
+  useEffect(() => {
+    return () => {
+      if (offsetCommitTimerRef.current) {
+        clearTimeout(offsetCommitTimerRef.current);
+        offsetCommitTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const refreshOverlayRuntimeState = useCallback(async () => {
     if (!VirtuCamSettings) {
@@ -289,9 +317,34 @@ export default function StudioScreen() {
     (x: number, y: number) => {
       setOffsetX(x);
       setOffsetY(y);
-      void commitBridgeUpdate({ offsetX: x, offsetY: y }, 'update position', { quiet: true });
+      pendingOffsetRef.current = { x, y };
+      if (offsetCommitTimerRef.current) {
+        clearTimeout(offsetCommitTimerRef.current);
+      }
+      offsetCommitTimerRef.current = setTimeout(() => {
+        const pending = pendingOffsetRef.current;
+        if (!pending) return;
+        pendingOffsetRef.current = null;
+        void commitBridgeUpdate(
+          { offsetX: pending.x, offsetY: pending.y },
+          'update position',
+          { quiet: true }
+        );
+      }, 180);
     },
     [setOffsetX, setOffsetY, commitBridgeUpdate]
+  );
+
+  const handleOffsetCommit = useCallback(
+    (x: number, y: number) => {
+      if (offsetCommitTimerRef.current) {
+        clearTimeout(offsetCommitTimerRef.current);
+        offsetCommitTimerRef.current = null;
+      }
+      pendingOffsetRef.current = null;
+      void commitBridgeUpdate({ offsetX: x, offsetY: y }, 'commit position', { quiet: true });
+    },
+    [commitBridgeUpdate]
   );
 
   const handleResetAll = useCallback(() => {
@@ -723,10 +776,16 @@ export default function StudioScreen() {
               <Text
                 style={[
                   styles.detailValue,
-                  { color: resolvedPath?.isAccessible ? colors.electricBlue : colors.warningAmber },
+                  { color: resolvedPath?.hookReadable ? colors.electricBlue : colors.warningAmber },
                 ]}
               >
-                {resolvedPath?.isAccessible ? 'Accessible' : 'Inaccessible'}
+                {resolvedPath?.hookReadable ? 'Hook-Readable' : 'Not Hook-Readable'}
+              </Text>
+            </View>
+            <View style={[styles.detailRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Stage</Text>
+              <Text style={[styles.detailValue, { color: colors.textPrimary }]}>
+                {resolvedPath.stageStatus}
               </Text>
             </View>
             {resolvedPath && resolvedPath.fileSize > 0 && (
@@ -734,6 +793,14 @@ export default function StudioScreen() {
                 <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>File Size</Text>
                 <Text style={[styles.detailValue, { color: colors.textPrimary }]}>
                   {(resolvedPath.fileSize / 1024).toFixed(1)} KB
+                </Text>
+              </View>
+            )}
+            {!resolvedPath.hookReadable && (
+              <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Reason</Text>
+                <Text style={[styles.detailValue, { color: colors.warningAmber }]}>
+                  {resolvedPath.stageReason}
                 </Text>
               </View>
             )}
@@ -773,7 +840,12 @@ export default function StudioScreen() {
       />
 
       {/* Position Control */}
-      <PositionControl offsetX={offsetX} offsetY={offsetY} onOffsetChange={handleOffsetChange} />
+      <PositionControl
+        offsetX={offsetX}
+        offsetY={offsetY}
+        onOffsetChange={handleOffsetChange}
+        onOffsetCommit={handleOffsetCommit}
+      />
 
       {/* Footer spacer */}
       <View style={{ height: 60 }} />

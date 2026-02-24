@@ -15,6 +15,7 @@ const { VirtuCamSettings } = NativeModules;
 function AppShell() {
   const { colors, isDark } = useTheme();
   const lastForegroundSyncAtRef = useRef(0);
+  const foregroundSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const migrate = async () => {
@@ -65,15 +66,23 @@ function AppShell() {
         const alreadyRunning = await VirtuCamSettings.isOverlayRunning();
 
         if (nextState === 'active') {
-          const now = Date.now();
-          try {
-            if (now - lastForegroundSyncAtRef.current > 1200) {
-              lastForegroundSyncAtRef.current = now;
-              await syncAllSettings();
-            }
-          } catch (err: unknown) {
-            logger.warn('Foreground bridge sync failed', 'RootLayout', err);
+          if (foregroundSyncTimerRef.current) {
+            clearTimeout(foregroundSyncTimerRef.current);
+            foregroundSyncTimerRef.current = null;
           }
+          foregroundSyncTimerRef.current = setTimeout(() => {
+            void (async () => {
+              const now = Date.now();
+              try {
+                if (now - lastForegroundSyncAtRef.current > 2500) {
+                  lastForegroundSyncAtRef.current = now;
+                  await syncAllSettings();
+                }
+              } catch (err: unknown) {
+                logger.warn('Foreground bridge sync failed', 'RootLayout', err);
+              }
+            })();
+          }, 350);
           if (alreadyRunning) {
             await VirtuCamSettings.stopFloatingOverlay();
           }
@@ -101,7 +110,13 @@ function AppShell() {
       void syncOverlayWithAppState(state);
     });
 
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      if (foregroundSyncTimerRef.current) {
+        clearTimeout(foregroundSyncTimerRef.current);
+        foregroundSyncTimerRef.current = null;
+      }
+    };
   }, []);
 
   const screenOptions = {

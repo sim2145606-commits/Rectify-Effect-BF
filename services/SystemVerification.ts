@@ -82,6 +82,8 @@ type IpcStatusResult = {
   companionStatus?: string;
   markerStatus?: string;
   runtimeStatus?: string;
+  stateReadSource?: string;
+  companionVersion?: string;
   prefsPathResolved?: string;
   moduleMarkerSource?: string;
   moduleMarkerExistsIpc?: boolean;
@@ -365,6 +367,11 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         const companionState = ipcStatus
           ? String(ipcStatus.companionStatus ?? '').trim().toLowerCase()
           : '';
+        const stateReadSource = ipcStatus
+          ? String(ipcStatus.stateReadSource ?? '').trim().toLowerCase()
+          : '';
+        const companionVersion = ipcStatus ? String(ipcStatus.companionVersion ?? '').trim() : '';
+        const readSourceHint = stateReadSource === 'root_read' ? ' (root state-read)' : '';
         const companionReady = companionState === 'ready';
         const companionWaitingRuntime = companionState === 'waiting_runtime';
         const runtimeState = ipcStatus
@@ -469,14 +476,16 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           }
           if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
             hookConfigStatus = 'error';
-            hookConfigNotes.push(`Companion state: ${companionState}`);
+            hookConfigNotes.push(`Companion state: ${companionState}${readSourceHint}`);
           } else if (companionWaitingRuntime) {
             hookConfigStatus = 'warning';
             hookConfigNotes.push(
               runtimeState === 'runtime_observed'
-                ? 'Companion waiting state is stale; runtime already observed'
-                : 'Companion waiting for first runtime hook observation'
+                ? `Companion waiting state is stale; runtime already observed${readSourceHint}`
+                : `Companion waiting for first runtime hook observation${readSourceHint}`
             );
+          } else if (companionReady && companionVersion.length > 0) {
+            hookConfigNotes.push(`Companion version ${companionVersion}`);
           }
           if (stagedMediaReadable === false) {
             hookConfigStatus = 'error';
@@ -566,13 +575,15 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             );
           }
           if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
-            notes.push(`Companion state: ${companionState}`);
+            notes.push(`Companion state: ${companionState}${readSourceHint}`);
           } else if (companionWaitingRuntime) {
             notes.push(
               runtimeState === 'runtime_observed'
-                ? 'Companion waiting state is stale; runtime already observed'
-                : 'Companion waiting for first runtime hook observation'
+                ? `Companion waiting state is stale; runtime already observed${readSourceHint}`
+                : `Companion waiting for first runtime hook observation${readSourceHint}`
             );
+          } else if (companionReady && companionVersion.length > 0) {
+            notes.push(`Companion version ${companionVersion}`);
           }
           if (stagedMediaReadable === false) {
             notes.push('Staged media missing/unreadable');

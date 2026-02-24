@@ -29,6 +29,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private val prefs: SharedPreferences by lazy {
         reactContext.getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
     }
+    private val writeConfigLock = Any()
+    private val companionRefreshLock = Any()
+    @Volatile private var companionRefreshInFlight = false
+    @Volatile private var companionRefreshLastScheduledAt = 0L
     
     companion object {
         private val PACKAGE_NAME_REGEX = Regex("^[a-zA-Z0-9._]+$")
@@ -52,114 +56,117 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             return
         }
         try {
-            val editor = prefs.edit()
-            val writeEpoch = System.currentTimeMillis()
-            editor.putLong("_bridge_write_epoch", writeEpoch)
-            
-            if (config.hasKey("enabled")) {
-                editor.putBoolean("enabled", config.getBoolean("enabled"))
-            }
-            if (config.hasKey("mediaSourcePath")) {
-                editor.putString("mediaSourcePath", config.getString("mediaSourcePath"))
-            }
-            if (config.hasKey("cameraTarget")) {
-                editor.putString("cameraTarget", config.getString("cameraTarget"))
-            }
-            if (config.hasKey("mirrored")) {
-                editor.putBoolean("mirrored", config.getBoolean("mirrored"))
-            }
-            if (config.hasKey("rotation")) {
-                editor.putInt("rotation", config.getInt("rotation"))
-            }
-            if (config.hasKey("scaleX")) {
-                editor.putFloat("scaleX", config.getDouble("scaleX").toFloat())
-            }
-            if (config.hasKey("scaleY")) {
-                editor.putFloat("scaleY", config.getDouble("scaleY").toFloat())
-            }
-            if (config.hasKey("offsetX")) {
-                editor.putFloat("offsetX", config.getDouble("offsetX").toFloat())
-            }
-            if (config.hasKey("offsetY")) {
-                editor.putFloat("offsetY", config.getDouble("offsetY").toFloat())
-            }
-            if (config.hasKey("scaleMode")) {
-                editor.putString("scaleMode", config.getString("scaleMode"))
-            }
-            if (config.hasKey("targetMode")) {
-                editor.putString("targetMode", config.getString("targetMode"))
-            }
-            if (config.hasKey("sourceMode")) {
-                editor.putString("sourceMode", config.getString("sourceMode"))
-            }
-            if (config.hasKey("targetPackages")) {
-                val packages = config.getArray("targetPackages")
-                val packageList = mutableListOf<String>()
-                if (packages != null) {
-                    for (i in 0 until packages.size()) {
-                        packageList.add(packages.getString(i))
-                    }
-                }
-                editor.putString("targetPackages", packageList.joinToString(","))
-            }
-
-            val result = Arguments.createMap()
-            val committed = editor.commit()
-            val readbackEpoch = prefs.getLong("_bridge_write_epoch", -1L)
-            val prefsWritten = committed && readbackEpoch == writeEpoch
-            val resolvedPrefsPath = resolveSharedPrefsXmlPath()
-            result.putBoolean("prefsWritten", prefsWritten)
-            result.putString("prefsPathResolved", resolvedPrefsPath ?: "")
-
+            var prefsCommitted = false
+            var prefsEpochMatched = false
             var ipcJsonWritten = false
             var persistentFallbackWritten = false
             var errorCode: String? = null
+            var warningCode: String? = null
+            var resolvedPrefsPath: String? = null
 
-            if (!committed) {
-                errorCode = "PREFS_COMMIT_FALSE"
-            }
+            synchronized(writeConfigLock) {
+                val editor = prefs.edit()
+                val writeEpoch = System.currentTimeMillis()
+                editor.putLong("_bridge_write_epoch", writeEpoch)
 
-            if (committed) {
-                try {
-                    if (!resolvedPrefsPath.isNullOrBlank()) {
-                        val prefsFile = File(resolvedPrefsPath).canonicalFile
-                        val prefsDir = prefsFile.parentFile
-                        prefsFile.setReadable(true, false)
-                        if (prefsDir != null) {
-                            executeRootCommand("chmod 755 ${escapeShellArg(prefsDir.absolutePath)}")
+                if (config.hasKey("enabled")) {
+                    editor.putBoolean("enabled", config.getBoolean("enabled"))
+                }
+                if (config.hasKey("mediaSourcePath")) {
+                    editor.putString("mediaSourcePath", config.getString("mediaSourcePath"))
+                }
+                if (config.hasKey("cameraTarget")) {
+                    editor.putString("cameraTarget", config.getString("cameraTarget"))
+                }
+                if (config.hasKey("mirrored")) {
+                    editor.putBoolean("mirrored", config.getBoolean("mirrored"))
+                }
+                if (config.hasKey("rotation")) {
+                    editor.putInt("rotation", config.getInt("rotation"))
+                }
+                if (config.hasKey("scaleX")) {
+                    editor.putFloat("scaleX", config.getDouble("scaleX").toFloat())
+                }
+                if (config.hasKey("scaleY")) {
+                    editor.putFloat("scaleY", config.getDouble("scaleY").toFloat())
+                }
+                if (config.hasKey("offsetX")) {
+                    editor.putFloat("offsetX", config.getDouble("offsetX").toFloat())
+                }
+                if (config.hasKey("offsetY")) {
+                    editor.putFloat("offsetY", config.getDouble("offsetY").toFloat())
+                }
+                if (config.hasKey("scaleMode")) {
+                    editor.putString("scaleMode", config.getString("scaleMode"))
+                }
+                if (config.hasKey("targetMode")) {
+                    editor.putString("targetMode", config.getString("targetMode"))
+                }
+                if (config.hasKey("sourceMode")) {
+                    editor.putString("sourceMode", config.getString("sourceMode"))
+                }
+                if (config.hasKey("targetPackages")) {
+                    val packages = config.getArray("targetPackages")
+                    val packageList = mutableListOf<String>()
+                    if (packages != null) {
+                        for (i in 0 until packages.size()) {
+                            val pkg = packages.getString(i)
+                            if (!pkg.isNullOrBlank()) {
+                                packageList.add(pkg)
+                            }
                         }
-                        executeRootCommand("chmod 644 ${escapeShellArg(prefsFile.absolutePath)}")
                     }
-                } catch (e: Exception) {
-                    android.util.Log.w("VirtuCamSettings", "Could not normalize prefs readability: ${e.message}")
+                    editor.putString("targetPackages", packageList.joinToString(","))
                 }
-            }
 
-            val serializedConfig = buildPersistedConfigJson().toString()
+                prefsCommitted = editor.commit()
+                val readbackEpoch = prefs.getLong("_bridge_write_epoch", -1L)
+                prefsEpochMatched = prefsCommitted && readbackEpoch == writeEpoch
+                resolvedPrefsPath = resolveSharedPrefsXmlPath()
 
-            try {
-                ipcJsonWritten = writeConfigJsonToIpc(serializedConfig)
-            } catch (e: Exception) {
-                android.util.Log.w("VirtuCamSettings", "IPC config write failed: ${e.message}")
-                if (errorCode == null) errorCode = "IPC_WRITE_FAILED"
-            }
+                if (!prefsCommitted) {
+                    errorCode = "PREFS_COMMIT_FALSE"
+                }
 
-            if (!ipcJsonWritten) {
+                if (prefsCommitted) {
+                    try {
+                        if (!resolvedPrefsPath.isNullOrBlank()) {
+                            val prefsFile = File(resolvedPrefsPath).canonicalFile
+                            val prefsDir = prefsFile.parentFile
+                            prefsFile.setReadable(true, false)
+                            if (prefsDir != null) {
+                                executeRootCommand("chmod 755 ${escapeShellArg(prefsDir.absolutePath)}")
+                            }
+                            executeRootCommand("chmod 644 ${escapeShellArg(prefsFile.absolutePath)}")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("VirtuCamSettings", "Could not normalize prefs readability: ${e.message}")
+                    }
+                }
+
+                val serializedConfig = buildPersistedConfigJson().toString()
+
                 try {
-                    persistentFallbackWritten = writePersistentFallbackJson(serializedConfig)
+                    ipcJsonWritten = writeConfigJsonToIpc(serializedConfig)
                 } catch (e: Exception) {
-                    android.util.Log.w("VirtuCamSettings", "Persistent fallback write failed: ${e.message}")
-                    if (errorCode == null) errorCode = "PERSISTENT_FALLBACK_FAILED"
+                    android.util.Log.w("VirtuCamSettings", "IPC config write failed: ${e.message}")
+                    if (errorCode == null) errorCode = "IPC_WRITE_FAILED"
                 }
-            }
 
-            result.putBoolean("ipcJsonWritten", ipcJsonWritten)
-            result.putBoolean("persistentFallbackWritten", persistentFallbackWritten)
-            result.putString("errorCode", errorCode)
+                if (!ipcJsonWritten) {
+                    try {
+                        persistentFallbackWritten = writePersistentFallbackJson(serializedConfig)
+                    } catch (e: Exception) {
+                        android.util.Log.w("VirtuCamSettings", "Persistent fallback write failed: ${e.message}")
+                        if (errorCode == null) errorCode = "PERSISTENT_FALLBACK_FAILED"
+                    }
+                }
 
-            if (!prefsWritten) {
-                promise.reject("PREFS_WRITE_FAILED", "SharedPreferences write verification failed")
-                return
+                if ((ipcJsonWritten || persistentFallbackWritten) && !prefsCommitted) {
+                    warningCode = "prefs_commit_unconfirmed"
+                } else if ((ipcJsonWritten || persistentFallbackWritten) && prefsCommitted && !prefsEpochMatched) {
+                    warningCode = "prefs_epoch_mismatch"
+                }
             }
 
             if (!ipcJsonWritten && !persistentFallbackWritten) {
@@ -170,7 +177,22 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 return
             }
 
-            refreshCompanionInternal()
+            val companionRefreshScheduled = scheduleCompanionRefresh()
+            if (!companionRefreshScheduled && warningCode == null) {
+                warningCode = "companion_refresh_deferred"
+            }
+
+            val result = Arguments.createMap()
+            result.putBoolean("prefsWritten", prefsCommitted && prefsEpochMatched)
+            result.putBoolean("prefsCommitted", prefsCommitted)
+            result.putBoolean("prefsEpochMatched", prefsEpochMatched)
+            result.putBoolean("ipcJsonWritten", ipcJsonWritten)
+            result.putBoolean("persistentFallbackWritten", persistentFallbackWritten)
+            result.putBoolean("companionRefreshScheduled", companionRefreshScheduled)
+            result.putString("prefsPathResolved", resolvedPrefsPath ?: "")
+            result.putString("warningCode", warningCode ?: "")
+            result.putString("errorCode", errorCode ?: "")
+
             promise.resolve(result)
         } catch (e: Exception) {
             promise.reject("WRITE_ERROR", "Failed to write config: ${e.message}", e)
@@ -302,7 +324,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     android.util.Log.w("VirtuCamSettings", "Failed to normalize staged media context: ${e.message}")
                 }
 
-                refreshCompanionInternal()
+                cleanupStagedMediaFiles(mediaDir)
+                scheduleCompanionRefresh()
 
                 if (reactApplicationContext.hasActiveCatalystInstance()) {
                     promise.resolve(stagedFile.absolutePath)
@@ -366,10 +389,24 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("moduleMarkerExistsIpc", markerExistsIpc)
             result.putBoolean("moduleMarkerExistsLegacy", markerExistsLegacy)
             result.putString("moduleMarkerSource", markerSource)
-            result.putString("companionStatus", safeReadSmallFile(companionStatus))
-            result.putString("configStatus", safeReadSmallFile(configStatus))
-            result.putString("markerStatus", safeReadSmallFile(markerStatus))
-            result.putString("runtimeStatus", safeReadSmallFile(runtimeStatus))
+            val companionRead = safeReadStateFile(companionStatus)
+            val configRead = safeReadStateFile(configStatus)
+            val markerRead = safeReadStateFile(markerStatus)
+            val runtimeRead = safeReadStateFile(runtimeStatus)
+            val stateReadSource = when {
+                listOf(companionRead, configRead, markerRead, runtimeRead).any { it.source == "app_read" } ->
+                    "app_read"
+                listOf(companionRead, configRead, markerRead, runtimeRead).any { it.source == "root_read" } ->
+                    "root_read"
+                else -> "unreadable"
+            }
+
+            result.putString("companionStatus", companionRead.value)
+            result.putString("configStatus", configRead.value)
+            result.putString("markerStatus", markerRead.value)
+            result.putString("runtimeStatus", runtimeRead.value)
+            result.putString("stateReadSource", stateReadSource)
+            result.putString("companionVersion", readCompanionVersion())
             result.putString("stagedMediaPath", stagedPath ?: "")
             result.putBoolean("stagedMediaExists", stagedFile?.exists() == true)
             result.putBoolean("stagedMediaReadable", stagedFile?.canRead() == true)
@@ -1588,6 +1625,35 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         return verifyOutput.contains("virtucam_config.json")
     }
 
+    private fun scheduleCompanionRefresh(): Boolean {
+        synchronized(companionRefreshLock) {
+            val now = System.currentTimeMillis()
+            if (companionRefreshInFlight) {
+                return false
+            }
+            if (now - companionRefreshLastScheduledAt < 600L) {
+                return false
+            }
+            companionRefreshInFlight = true
+            companionRefreshLastScheduledAt = now
+        }
+
+        Thread {
+            try {
+                refreshCompanionInternal()
+            } catch (e: Exception) {
+                android.util.Log.w("VirtuCamSettings", "Async companion refresh failed: ${e.message}")
+            } finally {
+                synchronized(companionRefreshLock) {
+                    companionRefreshInFlight = false
+                    companionRefreshLastScheduledAt = System.currentTimeMillis()
+                }
+            }
+        }.start()
+
+        return true
+    }
+
     private fun refreshCompanionInternal(): Boolean {
         val actionScript = "/data/adb/modules/virtucam_companion/action.sh"
         val escapedAction = escapeShellArg(actionScript)
@@ -1595,9 +1661,107 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         if (!scriptExists.contains("action.sh")) {
             return false
         }
-        executeRootCommand("sh $escapedAction")
-        val statusOutput = executeRootCommand("cat ${escapeShellArg(VirtuCamIPC.COMPANION_STATUS)} 2>/dev/null")
-        return statusOutput.trim().isNotEmpty()
+        val exitCode = executeRootScript(actionScript, timeoutSeconds = 20)
+        if (exitCode != 0) {
+            android.util.Log.w("VirtuCamSettings", "Companion action script exited with code $exitCode")
+            return false
+        }
+        val statusOutput = safeReadStateFile(File(VirtuCamIPC.COMPANION_STATUS))
+        if (statusOutput.value.isBlank()) {
+            android.util.Log.w(
+                "VirtuCamSettings",
+                "Companion action executed but status file is unreadable in app context"
+            )
+        }
+        return true
+    }
+
+    private fun executeRootScript(scriptPath: String, timeoutSeconds: Long = 15L): Int {
+        return try {
+            val escapedScript = escapeShellArg(scriptPath)
+            val process = ProcessBuilder("su", "-c", "sh $escapedScript")
+                .redirectErrorStream(true)
+                .start()
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                return -1
+            }
+            process.exitValue()
+        } catch (e: IOException) {
+            android.util.Log.w("VirtuCamSettings", "Root script I/O error: ${e.message}", e)
+            -1
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            android.util.Log.w("VirtuCamSettings", "Root script interrupted", e)
+            -1
+        }
+    }
+
+    private fun cleanupStagedMediaFiles(mediaDir: File) {
+        try {
+            val files = mediaDir.listFiles()?.filter { it.isFile } ?: return
+            if (files.isEmpty()) return
+
+            val now = System.currentTimeMillis()
+            val maxKeep = 16
+            val maxAgeMs = 2L * 24L * 60L * 60L * 1000L
+            val sorted = files.sortedByDescending { it.lastModified() }
+
+            sorted.forEachIndexed { index, file ->
+                val tooOld = (now - file.lastModified()) > maxAgeMs
+                val overLimit = index >= maxKeep
+                if (tooOld || overLimit) {
+                    runCatching { file.delete() }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VirtuCamSettings", "Failed staged media cleanup: ${e.message}")
+        }
+    }
+
+    private data class StateFileRead(
+        val value: String,
+        val source: String
+    )
+
+    private fun safeReadStateFile(file: File): StateFileRead {
+        return try {
+            if (file.exists() && file.canRead() && file.length() in 1..4096) {
+                StateFileRead(file.readText().trim(), "app_read")
+            } else {
+                val rootRead = executeRootCommand(
+                    "cat ${escapeShellArg(file.absolutePath)} 2>/dev/null | head -c 4096"
+                ).trim()
+                if (rootRead.isNotBlank()) {
+                    StateFileRead(rootRead, "root_read")
+                } else {
+                    StateFileRead("", "unreadable")
+                }
+            }
+        } catch (_: Exception) {
+            val rootRead = executeRootCommand(
+                "cat ${escapeShellArg(file.absolutePath)} 2>/dev/null | head -c 4096"
+            ).trim()
+            if (rootRead.isNotBlank()) {
+                StateFileRead(rootRead, "root_read")
+            } else {
+                StateFileRead("", "unreadable")
+            }
+        }
+    }
+
+    private fun safeReadSmallFile(file: File): String {
+        return safeReadStateFile(file).value
+    }
+
+    private fun readCompanionVersion(): String {
+        val versionLine = executeRootCommand(
+            "grep '^version=' /data/adb/modules/virtucam_companion/module.prop 2>/dev/null | head -n 1"
+        ).trim()
+        if (versionLine.startsWith("version=")) {
+            return versionLine.substringAfter("version=").trim()
+        }
+        return ""
     }
 
     /**
@@ -1697,18 +1861,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private fun sanitizeFileName(raw: String): String {
         val cleaned = raw.replace(Regex("[^a-zA-Z0-9._-]"), "_")
         return cleaned.take(64).ifEmpty { "media" }
-    }
-
-    private fun safeReadSmallFile(file: File): String {
-        return try {
-            if (!file.exists() || !file.canRead() || file.length() > 4096) {
-                ""
-            } else {
-                file.readText().trim()
-            }
-        } catch (_: Exception) {
-            ""
-        }
     }
 
     private fun hasMarkerFile(path: String, expectedPath: String, expectedName: String): Boolean {

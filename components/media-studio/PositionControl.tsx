@@ -1,5 +1,5 @@
-import React, { useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, PanResponder, Platform } from 'react-native';
+import React, { useRef, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, Pressable, PanResponder } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -15,14 +15,20 @@ type Props = {
   offsetX: number;
   offsetY: number;
   onOffsetChange: (x: number, y: number) => void;
+  onOffsetCommit?: (x: number, y: number) => void;
 };
 
 const GRID_SIZE = 160;
 const MAX_OFFSET = 100;
 
-export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Props) {
+export default function PositionControl({ offsetX, offsetY, onOffsetChange, onOffsetCommit }: Props) {
   const { colors } = useTheme();
   const { selection, mediumImpact, heavyImpact } = useHaptics();
+  const lastOffsetRef = useRef({ x: offsetX, y: offsetY });
+
+  useEffect(() => {
+    lastOffsetRef.current = { x: offsetX, y: offsetY };
+  }, [offsetX, offsetY]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -41,9 +47,11 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
           Math.min(MAX_OFFSET, Math.round((gestureState.dy / GRID_SIZE) * MAX_OFFSET * 2))
         );
         onOffsetChange(normX, normY);
+        lastOffsetRef.current = { x: normX, y: normY };
       },
       onPanResponderRelease: () => {
         mediumImpact();
+        onOffsetCommit?.(lastOffsetRef.current.x, lastOffsetRef.current.y);
       },
     })
   ).current;
@@ -54,14 +62,16 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange }: Pr
       const newX = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, offsetX + dx));
       const newY = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, offsetY + dy));
       onOffsetChange(newX, newY);
+      onOffsetCommit?.(newX, newY);
     },
-    [offsetX, offsetY, onOffsetChange, selection]
+    [offsetX, offsetY, onOffsetChange, onOffsetCommit, selection]
   );
 
   const handleReset = useCallback(() => {
     heavyImpact();
     onOffsetChange(0, 0);
-  }, [onOffsetChange, heavyImpact]);
+    onOffsetCommit?.(0, 0);
+  }, [onOffsetChange, onOffsetCommit, heavyImpact]);
 
   const indicatorX = ((offsetX + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE;
   const indicatorY = ((offsetY + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE;

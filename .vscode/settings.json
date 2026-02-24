@@ -23,5 +23,6 @@
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "[jsonc]": {
     "editor.defaultFormatter": "vscode.json-language-features"
-  }
+  },
+  "chatgpt.openOnStartup": true
 }

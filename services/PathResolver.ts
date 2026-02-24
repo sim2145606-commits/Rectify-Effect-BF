@@ -18,6 +18,8 @@ const MIME_MAP: Record<string, string> = {
   avi: 'video/x-msvideo',
 };
 
+export type StageStatus = 'staged' | 'fallback_public' | 'fallback_private' | 'failed';
+
 export type ResolvedPath = {
   absolutePath: string;
   fileName: string;
@@ -25,9 +27,62 @@ export type ResolvedPath = {
   mimeType: string;
   fileSize: number;
   isAccessible: boolean;
+  hookReadable: boolean;
+  stageStatus: StageStatus;
+  stageReason: string;
   stagedPath?: string | null;
   originalPath?: string | null;
 };
+
+type StageOutcome = Pick<
+  ResolvedPath,
+  'absolutePath' | 'isAccessible' | 'hookReadable' | 'stageStatus' | 'stageReason'
+>;
+
+function isPrivateAppPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.startsWith('/data/user/') || normalized.startsWith('/data/data/');
+}
+
+function toStageOutcome(originalPath: string, stagedPath: string | null): StageOutcome {
+  if (stagedPath) {
+    return {
+      absolutePath: stagedPath,
+      isAccessible: true,
+      hookReadable: true,
+      stageStatus: 'staged',
+      stageReason: 'staged_to_ipc',
+    };
+  }
+
+  if (!originalPath) {
+    return {
+      absolutePath: originalPath,
+      isAccessible: false,
+      hookReadable: false,
+      stageStatus: 'failed',
+      stageReason: 'stage_failed_empty_path',
+    };
+  }
+
+  if (isPrivateAppPath(originalPath)) {
+    return {
+      absolutePath: originalPath,
+      isAccessible: false,
+      hookReadable: false,
+      stageStatus: 'fallback_private',
+      stageReason: 'stage_failed_private_path',
+    };
+  }
+
+  return {
+    absolutePath: originalPath,
+    isAccessible: true,
+    hookReadable: true,
+    stageStatus: 'fallback_public',
+    stageReason: 'stage_failed_public_fallback',
+  };
+}
 
 /**
  * Convert a URI-based media selection to an absolute file path
@@ -41,6 +96,9 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
     mimeType: guessMimeType(uri),
     fileSize: 0,
     isAccessible: false,
+    hookReadable: false,
+    stageStatus: 'failed',
+    stageReason: 'source_unresolved',
     stagedPath: null,
     originalPath: null,
   };
@@ -51,11 +109,11 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
       if (info.exists) {
         const absolutePath = uri.replace('file://', '');
         const stagedPath = await stageMediaForHook(absolutePath);
+        const stageOutcome = toStageOutcome(absolutePath, stagedPath);
         return {
           ...defaultResult,
-          absolutePath: stagedPath || absolutePath,
+          ...stageOutcome,
           fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
-          isAccessible: true,
           stagedPath,
           originalPath: absolutePath,
         };
@@ -78,11 +136,11 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
     if (info.exists) {
       const absolutePath = info.uri.replace('file://', '');
       const stagedPath = await stageMediaForHook(absolutePath);
+      const stageOutcome = toStageOutcome(absolutePath, stagedPath);
       return {
         ...defaultResult,
-        absolutePath: stagedPath || absolutePath,
+        ...stageOutcome,
         fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
-        isAccessible: true,
         stagedPath,
         originalPath: absolutePath,
       };
@@ -108,14 +166,14 @@ async function resolveContentUri(uri: string): Promise<ResolvedPath> {
     const info = await FileSystem.getInfoAsync(destPath);
     const absolutePath = destPath.replace('file://', '');
     const stagedPath = await stageMediaForHook(absolutePath);
+    const stageOutcome = toStageOutcome(absolutePath, stagedPath);
 
     return {
-      absolutePath: stagedPath || absolutePath,
+      ...stageOutcome,
       fileName,
       fileExtension: extractExtension(fileName),
       mimeType: guessMimeType(fileName),
       fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
-      isAccessible: true,
       stagedPath,
       originalPath: absolutePath,
     };
@@ -131,6 +189,9 @@ async function resolveContentUri(uri: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(uri),
       fileSize: 0,
       isAccessible: false,
+      hookReadable: false,
+      stageStatus: 'failed',
+      stageReason: 'content_uri_resolve_failed',
       stagedPath: null,
       originalPath: null,
     };
@@ -146,13 +207,13 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
       const info = await FileSystem.getInfoAsync(asset.localUri);
       const absolutePath = asset.localUri.replace('file://', '');
       const stagedPath = await stageMediaForHook(absolutePath);
+      const stageOutcome = toStageOutcome(absolutePath, stagedPath);
       return {
-        absolutePath: stagedPath || absolutePath,
+        ...stageOutcome,
         fileName: asset.filename,
         fileExtension: extractExtension(asset.filename),
         mimeType: guessMimeType(asset.filename),
         fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
-        isAccessible: true,
         stagedPath,
         originalPath: absolutePath,
       };
@@ -165,6 +226,9 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(asset.filename),
       fileSize: 0,
       isAccessible: false,
+      hookReadable: false,
+      stageStatus: 'failed',
+      stageReason: 'photo_uri_missing_local_path',
       stagedPath: null,
       originalPath: null,
     };
@@ -180,6 +244,9 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(uri),
       fileSize: 0,
       isAccessible: false,
+      hookReadable: false,
+      stageStatus: 'failed',
+      stageReason: 'photo_uri_resolve_failed',
       stagedPath: null,
       originalPath: null,
     };
@@ -195,6 +262,9 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(url),
       fileSize: 0,
       isAccessible: false,
+      hookReadable: false,
+      stageStatus: 'failed',
+      stageReason: 'remote_url_blocked',
     };
   }
 
@@ -207,14 +277,14 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
     const info = await FileSystem.getInfoAsync(result.uri);
     const absolutePath = result.uri.replace('file://', '');
     const stagedPath = await stageMediaForHook(absolutePath);
+    const stageOutcome = toStageOutcome(absolutePath, stagedPath);
 
     return {
-      absolutePath: stagedPath || absolutePath,
+      ...stageOutcome,
       fileName,
       fileExtension: ext,
       mimeType: result.headers?.['content-type'] || guessMimeType(fileName),
       fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
-      isAccessible: true,
       stagedPath,
       originalPath: absolutePath,
     };
@@ -230,6 +300,9 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(url),
       fileSize: 0,
       isAccessible: false,
+      hookReadable: false,
+      stageStatus: 'failed',
+      stageReason: 'download_resolve_failed',
       stagedPath: null,
       originalPath: null,
     };

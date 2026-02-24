@@ -14,12 +14,19 @@ export type BridgeSyncFailureCode =
   | 'write_failed'
   | 'ipc_unready';
 
+export type BridgeWriteWarningCode = 'prefs_epoch_mismatch' | 'companion_refresh_deferred';
+
 export type BridgeSyncState = {
   ok: boolean;
   code: BridgeSyncFailureCode | null;
   message: string;
   timestamp: number;
   attempts: number;
+  warningCode?: BridgeWriteWarningCode | null;
+  inFlight?: boolean;
+  queuedWrites?: number;
+  lastAppliedHash?: string;
+  lastWriteAt?: number;
 };
 
 
@@ -28,9 +35,19 @@ type StoredTargetApp = { enabled: boolean; packageName: string };
 type BridgeSyncListener = (state: BridgeSyncState) => void;
 type NativeWriteConfigResult = {
   prefsWritten?: boolean;
+  prefsCommitted?: boolean;
+  prefsEpochMatched?: boolean;
   ipcJsonWritten?: boolean;
   persistentFallbackWritten?: boolean;
+  companionRefreshScheduled?: boolean;
+  prefsPathResolved?: string;
+  warningCode?: string | null;
   errorCode?: string | null;
+};
+
+type BridgeWriteWaiter = {
+  resolve: () => void;
+  reject: (error: Error & { bridgeCode?: BridgeSyncFailureCode }) => void;
 };
 
 const bridgeSyncListeners = new Set<BridgeSyncListener>();
@@ -40,10 +57,23 @@ let latestBridgeSyncState: BridgeSyncState = {
   message: 'Waiting for first sync',
   timestamp: 0,
   attempts: 0,
+  warningCode: null,
+  inFlight: false,
+  queuedWrites: 0,
+  lastAppliedHash: '',
+  lastWriteAt: 0,
 };
 let syncAllInFlight: Promise<void> | null = null;
 let lastSyncCompletedAt = 0;
 const MIN_SYNC_INTERVAL_MS = 500;
+let queuedWritePatch: Partial<BridgeConfig> = {};
+let queuedWriteWaiters: BridgeWriteWaiter[] = [];
+let writeQueueInFlight: Promise<void> | null = null;
+let writeQueueRunning = false;
+let bridgeInFlight = false;
+let bridgeLastAppliedHash = '';
+let bridgeLastWriteAt = 0;
+let bridgeLastWarning: BridgeWriteWarningCode | null = null;
 
 function parseStoredJson<T>(raw: string | null, fallback: T): T {
   if (raw === null) return fallback;
@@ -86,6 +116,12 @@ function parseStoredString(raw: string | null, fallback: string | null): string 
   return fallback;
 }
 
+function isLikelyPrivateMediaPath(path: string | null): boolean {
+  if (!path) return false;
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.startsWith('/data/user/') || normalized.startsWith('/data/data/');
+}
+
 function safeParseTargetApps(targetAppsRaw: string | null): StoredTargetApp[] {
   if (!targetAppsRaw) return [];
 
@@ -116,12 +152,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function createBridgeError(
+  message: string,
+  code: BridgeSyncFailureCode
+): Error & { bridgeCode?: BridgeSyncFailureCode } {
+  const error = new Error(message) as Error & { bridgeCode?: BridgeSyncFailureCode };
+  error.bridgeCode = code;
+  (error as Error & { code?: string }).code = code;
+  return error;
+}
+
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err ?? 'Unknown error');
 }
 
 function normalizeBridgeError(err: unknown): { code: BridgeSyncFailureCode; message: string } {
   const message = getErrorMessage(err);
+  const bridgeCode =
+    typeof err === 'object' &&
+    err !== null &&
+    'bridgeCode' in err &&
+    typeof (err as { bridgeCode?: unknown }).bridgeCode === 'string'
+      ? (err as { bridgeCode: BridgeSyncFailureCode }).bridgeCode
+      : null;
+  if (bridgeCode) {
+    return { code: bridgeCode, message };
+  }
   const nativeCode =
     typeof err === 'object' &&
     err !== null &&
@@ -159,15 +215,64 @@ function normalizeBridgeError(err: unknown): { code: BridgeSyncFailureCode; mess
   return { code: 'write_failed', message };
 }
 
+function normalizeWarningCode(raw: unknown): BridgeWriteWarningCode | null {
+  const normalized = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === 'prefs_epoch_mismatch' ||
+    normalized === 'prefs_unconfirmed' ||
+    normalized === 'prefs_commit_unconfirmed'
+  ) {
+    return 'prefs_epoch_mismatch';
+  }
+  if (
+    normalized === 'companion_refresh_deferred' ||
+    normalized === 'companion_refresh_not_scheduled'
+  ) {
+    return 'companion_refresh_deferred';
+  }
+  return null;
+}
+
+function toBridgeSyncState(base: BridgeSyncState): BridgeSyncState {
+  return {
+    ...base,
+    warningCode: base.warningCode ?? bridgeLastWarning,
+    inFlight: bridgeInFlight,
+    queuedWrites: queuedWriteWaiters.length,
+    lastAppliedHash: bridgeLastAppliedHash,
+    lastWriteAt: bridgeLastWriteAt,
+  };
+}
+
 function publishBridgeSyncState(state: BridgeSyncState): void {
-  latestBridgeSyncState = state;
+  latestBridgeSyncState = toBridgeSyncState(state);
   bridgeSyncListeners.forEach(listener => {
     try {
-      listener(state);
+      listener(latestBridgeSyncState);
     } catch (err: unknown) {
       logger.warn('Bridge sync listener threw', 'ConfigBridge', err);
     }
   });
+}
+
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(item => stableSerialize(item)).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a.localeCompare(b)
+    );
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableSerialize(v)}`).join(',')}}`;
+  }
+  const serialized = JSON.stringify(value);
+  return serialized ?? 'null';
+}
+
+function buildPayloadHash(payload: Record<string, unknown>): string {
+  return stableSerialize(payload);
 }
 
 export function subscribeBridgeSyncState(listener: BridgeSyncListener): () => void {
@@ -179,7 +284,7 @@ export function subscribeBridgeSyncState(listener: BridgeSyncListener): () => vo
 }
 
 export function getLatestBridgeSyncState(): BridgeSyncState {
-  return latestBridgeSyncState;
+  return toBridgeSyncState(latestBridgeSyncState);
 }
 
 async function bumpBridgeVersion(): Promise<number> {
@@ -205,7 +310,10 @@ async function verifyIpcReadinessAfterWrite(): Promise<void> {
 
   const ipcRootExists = ipcStatus.ipcRootExists === true;
   const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
-  const configJsonReady = ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true;
+  const configState = String(ipcStatus.configStatus ?? '').trim().toLowerCase();
+  const configJsonReady =
+    (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
+    configState === 'config_ready';
 
   if (!ipcRootExists) {
     throw new Error('IPC root missing after bridge write');
@@ -217,15 +325,6 @@ async function verifyIpcReadinessAfterWrite(): Promise<void> {
 
   if (companionState === 'scope_mismatch') {
     throw new Error('IPC companion reports scope mismatch');
-  }
-}
-
-async function refreshCompanionNow(): Promise<void> {
-  if (!VirtuCamSettings?.refreshCompanionNow) return;
-  try {
-    await VirtuCamSettings.refreshCompanionNow();
-  } catch (err: unknown) {
-    logger.warn('Companion runtime refresh failed', 'ConfigBridge', err);
   }
 }
 
@@ -246,6 +345,178 @@ export type BridgeConfig = {
   targetPackages: string[];
 };
 
+function buildWritePayload(config: Partial<BridgeConfig>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if (Object.prototype.hasOwnProperty.call(config, 'enabled')) payload.enabled = config.enabled;
+  if (Object.prototype.hasOwnProperty.call(config, 'mediaSourcePath'))
+    payload.mediaSourcePath = config.mediaSourcePath;
+  if (Object.prototype.hasOwnProperty.call(config, 'mediaSourceType'))
+    payload.mediaSourceType = config.mediaSourceType;
+  if (Object.prototype.hasOwnProperty.call(config, 'cameraTarget'))
+    payload.cameraTarget = config.cameraTarget;
+  if (Object.prototype.hasOwnProperty.call(config, 'mirrored')) payload.mirrored = config.mirrored;
+  if (Object.prototype.hasOwnProperty.call(config, 'rotation')) payload.rotation = config.rotation;
+  if (Object.prototype.hasOwnProperty.call(config, 'scaleX')) payload.scaleX = config.scaleX;
+  if (Object.prototype.hasOwnProperty.call(config, 'scaleY')) payload.scaleY = config.scaleY;
+  if (Object.prototype.hasOwnProperty.call(config, 'offsetX')) payload.offsetX = config.offsetX;
+  if (Object.prototype.hasOwnProperty.call(config, 'offsetY')) payload.offsetY = config.offsetY;
+  if (Object.prototype.hasOwnProperty.call(config, 'scaleMode')) payload.scaleMode = config.scaleMode;
+  if (Object.prototype.hasOwnProperty.call(config, 'targetMode'))
+    payload.targetMode = config.targetMode;
+  if (Object.prototype.hasOwnProperty.call(config, 'sourceMode')) payload.sourceMode = config.sourceMode;
+  if (Object.prototype.hasOwnProperty.call(config, 'targetPackages'))
+    payload.targetPackages = config.targetPackages;
+  return payload;
+}
+
+function mergeWritePatch(
+  base: Partial<BridgeConfig>,
+  patch: Partial<BridgeConfig>
+): Partial<BridgeConfig> {
+  return {
+    ...base,
+    ...patch,
+  };
+}
+
+async function performNativeWrite(payload: Record<string, unknown>): Promise<BridgeWriteWarningCode | null> {
+  const nativeResult =
+    (await VirtuCamSettings.writeConfig(payload)) as boolean | NativeWriteConfigResult;
+
+  if (typeof nativeResult === 'object' && nativeResult !== null) {
+    const prefsCommitted =
+      nativeResult.prefsCommitted ?? nativeResult.prefsWritten ?? true;
+    const prefsEpochMatched = nativeResult.prefsEpochMatched ?? true;
+    const ipcJsonWritten = nativeResult.ipcJsonWritten === true;
+    const persistentFallbackWritten = nativeResult.persistentFallbackWritten === true;
+    const hasDurableConfig = ipcJsonWritten || persistentFallbackWritten;
+    const nativeCode = String(nativeResult.errorCode ?? '').trim();
+
+    if (!hasDurableConfig) {
+      throw createBridgeError(
+        nativeCode.length > 0
+          ? `Native write incomplete (${nativeCode})`
+          : 'Native write incomplete (no durable config)',
+        nativeCode.startsWith('IPC_') ? 'ipc_unready' : 'write_failed'
+      );
+    }
+
+    if (!prefsCommitted) {
+      return normalizeWarningCode(nativeResult.warningCode) ?? 'prefs_epoch_mismatch';
+    }
+
+    if (!prefsEpochMatched) {
+      return normalizeWarningCode(nativeResult.warningCode) ?? 'prefs_epoch_mismatch';
+    }
+
+    if (nativeResult.companionRefreshScheduled === false) {
+      return normalizeWarningCode(nativeResult.warningCode) ?? 'companion_refresh_deferred';
+    }
+
+    return normalizeWarningCode(nativeResult.warningCode);
+  }
+
+  if (nativeResult !== true) {
+    throw createBridgeError('Native write returned unexpected status', 'write_failed');
+  }
+
+  return null;
+}
+
+function resolveWriteWaiters(
+  waiters: BridgeWriteWaiter[],
+  err?: Error & { bridgeCode?: BridgeSyncFailureCode }
+): void {
+  waiters.forEach(waiter => {
+    if (err) {
+      waiter.reject(err);
+      return;
+    }
+    waiter.resolve();
+  });
+}
+
+async function runWriteQueue(): Promise<void> {
+  if (writeQueueRunning) return;
+  writeQueueRunning = true;
+  bridgeInFlight = true;
+  publishBridgeSyncState({
+    ...latestBridgeSyncState,
+    timestamp: Date.now(),
+    attempts: latestBridgeSyncState.attempts,
+  });
+
+  try {
+    while (queuedWriteWaiters.length > 0) {
+      const patch = queuedWritePatch;
+      const payload = buildWritePayload(patch);
+      if (Object.keys(payload).length === 0) {
+        const waiters = queuedWriteWaiters;
+        queuedWriteWaiters = [];
+        queuedWritePatch = {};
+        resolveWriteWaiters(waiters);
+        continue;
+      }
+
+      const waiters = queuedWriteWaiters;
+      queuedWriteWaiters = [];
+      queuedWritePatch = {};
+
+      try {
+        const warningCode = await performNativeWrite(payload);
+        await bumpBridgeVersion();
+        bridgeLastAppliedHash = buildPayloadHash(payload);
+        bridgeLastWriteAt = Date.now();
+        bridgeLastWarning = warningCode;
+        publishBridgeSyncState({
+          ok: true,
+          code: null,
+          message:
+            warningCode === 'prefs_epoch_mismatch'
+              ? 'Bridge write successful (prefs verification deferred)'
+              : warningCode === 'companion_refresh_deferred'
+                ? 'Bridge write successful (companion refresh deferred)'
+                : 'Bridge write successful',
+          timestamp: Date.now(),
+          attempts: 1,
+          warningCode,
+        });
+        resolveWriteWaiters(waiters);
+      } catch (err: unknown) {
+        const normalized = normalizeBridgeError(err);
+        logger.error(`Failed to write config (${normalized.code})`, 'ConfigBridge', err);
+        publishBridgeSyncState({
+          ok: false,
+          code: normalized.code,
+          message: normalized.message,
+          timestamp: Date.now(),
+          attempts: 1,
+          warningCode: null,
+        });
+        resolveWriteWaiters(waiters, createBridgeError(normalized.message, normalized.code));
+      }
+    }
+  } finally {
+    bridgeInFlight = false;
+    writeQueueRunning = false;
+    publishBridgeSyncState({
+      ...latestBridgeSyncState,
+      timestamp: Date.now(),
+      attempts: latestBridgeSyncState.attempts,
+    });
+  }
+}
+
+function ensureWriteQueueRunning(): void {
+  if (writeQueueInFlight) return;
+  writeQueueInFlight = runWriteQueue().finally(() => {
+    writeQueueInFlight = null;
+    if (queuedWriteWaiters.length > 0) {
+      ensureWriteQueueRunning();
+    }
+  });
+}
+
 /**
  * Write configuration to SharedPreferences (world-readable for Xposed)
  */
@@ -258,68 +529,29 @@ export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<
       message: 'VirtuCamSettings native module not available',
       timestamp: Date.now(),
       attempts: 1,
+      warningCode: null,
     };
     publishBridgeSyncState(state);
-    throw new Error(state.message);
+    throw createBridgeError(state.message, 'native_unavailable');
   }
 
-  try {
-    const payload: Record<string, unknown> = {};
+  const patch = config;
+  if (Object.keys(buildWritePayload(patch)).length === 0) return;
 
-    // Keep partial updates truly partial to avoid wiping unrelated settings.
-    if (Object.prototype.hasOwnProperty.call(config, 'enabled')) payload.enabled = config.enabled;
-    if (Object.prototype.hasOwnProperty.call(config, 'mediaSourcePath')) payload.mediaSourcePath = config.mediaSourcePath;
-    if (Object.prototype.hasOwnProperty.call(config, 'mediaSourceType')) payload.mediaSourceType = config.mediaSourceType;
-    if (Object.prototype.hasOwnProperty.call(config, 'cameraTarget')) payload.cameraTarget = config.cameraTarget;
-    if (Object.prototype.hasOwnProperty.call(config, 'mirrored')) payload.mirrored = config.mirrored;
-    if (Object.prototype.hasOwnProperty.call(config, 'rotation')) payload.rotation = config.rotation;
-    if (Object.prototype.hasOwnProperty.call(config, 'scaleX')) payload.scaleX = config.scaleX;
-    if (Object.prototype.hasOwnProperty.call(config, 'scaleY')) payload.scaleY = config.scaleY;
-    if (Object.prototype.hasOwnProperty.call(config, 'offsetX')) payload.offsetX = config.offsetX;
-    if (Object.prototype.hasOwnProperty.call(config, 'offsetY')) payload.offsetY = config.offsetY;
-    if (Object.prototype.hasOwnProperty.call(config, 'scaleMode')) payload.scaleMode = config.scaleMode;
-    if (Object.prototype.hasOwnProperty.call(config, 'targetMode')) payload.targetMode = config.targetMode;
-    if (Object.prototype.hasOwnProperty.call(config, 'sourceMode')) payload.sourceMode = config.sourceMode;
-    if (Object.prototype.hasOwnProperty.call(config, 'targetPackages')) payload.targetPackages = config.targetPackages;
+  queuedWritePatch = mergeWritePatch(queuedWritePatch, patch);
 
-    if (Object.keys(payload).length === 0) return;
+  const waiterPromise = new Promise<void>((resolve, reject) => {
+    queuedWriteWaiters.push({ resolve, reject });
+  });
+  publishBridgeSyncState({
+    ...latestBridgeSyncState,
+    timestamp: Date.now(),
+    attempts: latestBridgeSyncState.attempts,
+  });
 
-    const nativeResult =
-      (await VirtuCamSettings.writeConfig(payload)) as boolean | NativeWriteConfigResult;
-    if (typeof nativeResult === 'object' && nativeResult !== null) {
-      const prefsWritten = nativeResult.prefsWritten !== false;
-      const ipcJsonWritten = nativeResult.ipcJsonWritten === true;
-      const persistentFallbackWritten = nativeResult.persistentFallbackWritten === true;
-      if (!prefsWritten || (!ipcJsonWritten && !persistentFallbackWritten)) {
-        const nativeCode = String(nativeResult.errorCode ?? 'WRITE_ERROR');
-        throw new Error(`Native write incomplete (${nativeCode})`);
-      }
-    } else if (nativeResult !== true) {
-      throw new Error('Native write returned unexpected status');
-    }
-    await refreshCompanionNow();
-    await bumpBridgeVersion();
-    publishBridgeSyncState({
-      ok: true,
-      code: null,
-      message: 'Bridge write successful',
-      timestamp: Date.now(),
-      attempts: 1,
-    });
-  } catch (err: unknown) {
-    const normalized = normalizeBridgeError(err);
-    logger.error(`Failed to write config (${normalized.code})`, 'ConfigBridge', err);
-    publishBridgeSyncState({
-      ok: false,
-      code: normalized.code,
-      message: normalized.message,
-      timestamp: Date.now(),
-      attempts: 1,
-    });
-    const error = new Error(normalized.message) as Error & { bridgeCode?: BridgeSyncFailureCode };
-    error.bridgeCode = normalized.code;
-    throw error;
-  }
+  ensureWriteQueueRunning();
+
+  await waiterPromise;
 }
 
 /**
@@ -429,7 +661,8 @@ export async function syncAllSettings(force = false): Promise<void> {
     ]);
 
     const enabledValue = parseStoredBoolean(enabled, false);
-    const mediaPath = parseStoredString(hookMediaPathRaw, null);
+    const parsedMediaPath = parseStoredString(hookMediaPathRaw, null);
+    const mediaPath = isLikelyPrivateMediaPath(parsedMediaPath) ? null : parsedMediaPath;
     const front = parseStoredBoolean(frontCamera, true);
     const back = parseStoredBoolean(backCamera, false);
     const mirroredValue = parseStoredBoolean(mirrored, false);
@@ -465,6 +698,16 @@ export async function syncAllSettings(force = false): Promise<void> {
       effectiveTargetMode = 'all';
     }
 
+    const bridgeConfig = await readBridgeConfig();
+    const currentSourceMode = bridgeConfig.sourceMode;
+    const sourceMode: SourceMode = mediaPath
+      ? currentSourceMode === 'stream' || currentSourceMode === 'test'
+        ? currentSourceMode
+        : 'file'
+      : currentSourceMode === 'test'
+        ? 'test'
+        : 'black';
+
     const config: Partial<BridgeConfig> = {
       enabled: enabledValue,
       mediaSourcePath: mediaPath,
@@ -476,7 +719,7 @@ export async function syncAllSettings(force = false): Promise<void> {
       offsetX: offsetXValue,
       offsetY: offsetYValue,
       targetMode: effectiveTargetMode,
-      sourceMode: mediaPath ? 'file' : 'black',
+      sourceMode,
       targetPackages: enabledPackages,
     };
 
@@ -493,6 +736,7 @@ export async function syncAllSettings(force = false): Promise<void> {
           message: `Bridge sync successful (attempt ${attempt})`,
           timestamp: Date.now(),
           attempts: attempt,
+          warningCode: getLatestBridgeSyncState().warningCode ?? null,
         });
         return;
       } catch (err: unknown) {
@@ -515,13 +759,10 @@ export async function syncAllSettings(force = false): Promise<void> {
           message: normalized.message,
           timestamp: Date.now(),
           attempts: attempt,
+          warningCode: null,
         });
         logger.error(`Failed to sync settings (${normalized.code})`, 'ConfigBridge', err);
-        const finalError = new Error(normalized.message) as Error & {
-          bridgeCode?: BridgeSyncFailureCode;
-        };
-        finalError.bridgeCode = normalized.code;
-        throw finalError;
+        throw createBridgeError(normalized.message, normalized.code);
       }
     }
 

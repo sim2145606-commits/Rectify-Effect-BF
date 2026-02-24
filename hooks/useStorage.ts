@@ -67,6 +67,20 @@ export function useStorage<T>(key: string, defaultValue: T) {
       setValue(prev => {
         const resolved =
           typeof newValue === 'function' ? (newValue as (prev: T) => T)(prev) : newValue;
+        let prevSerialized = '';
+        let nextSerialized = '';
+        try {
+          prevSerialized = JSON.stringify(prev);
+          nextSerialized = JSON.stringify(resolved);
+        } catch {
+          // Fallback to reference comparison when serialization fails.
+        }
+        if (
+          (prevSerialized && nextSerialized && prevSerialized === nextSerialized) ||
+          Object.is(prev, resolved)
+        ) {
+          return prev;
+        }
         emitStorageChange(key, resolved, sourceIdRef.current);
         // Persist asynchronously as a side effect (fire-and-forget)
         AsyncStorage.setItem(key, JSON.stringify(resolved)).catch((err: unknown) => {

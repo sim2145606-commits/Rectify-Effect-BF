@@ -42,6 +42,8 @@ type IpcStatusResult = {
   configStatus?: string;
   markerStatus?: string;
   runtimeStatus?: string;
+  stateReadSource?: string;
+  companionVersion?: string;
   prefsPathResolved?: string;
   configStaged?: boolean;
   stagedMediaPath?: string;
@@ -464,6 +466,10 @@ export async function runDiagnostics(
   } else {
     const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
     const runtimeState = String(ipcStatus.runtimeStatus ?? '').trim().toLowerCase();
+    const stateReadSource = String(ipcStatus.stateReadSource ?? '').trim().toLowerCase();
+    const readSourceHint =
+      stateReadSource === 'root_read' ? ' (state read via root fallback)' : '';
+    const companionVersion = String(ipcStatus.companionVersion ?? '').trim();
     const configReady =
       (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
       String(ipcStatus.configStatus ?? '').trim().toLowerCase() === 'config_ready';
@@ -472,7 +478,9 @@ export async function runDiagnostics(
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
         status: configReady ? 'pass' : 'fail',
-        detail: configReady ? 'Companion ready' : 'Companion ready but config not staged',
+        detail: configReady
+          ? `Companion ready${readSourceHint}${companionVersion ? ` (${companionVersion})` : ''}`
+          : `Companion ready but config not staged${readSourceHint}`,
       });
     } else if (companionState === 'waiting_runtime') {
       pushCheck({
@@ -481,29 +489,29 @@ export async function runDiagnostics(
         status: 'warn',
         detail:
           runtimeState === 'runtime_observed'
-            ? 'Companion waiting state is stale; runtime hook is already observed'
-            : 'Companion config/scope ready; waiting for first runtime hook observation',
+            ? `Companion waiting state is stale; runtime hook is already observed${readSourceHint}`
+            : `Companion config/scope ready; waiting for first runtime hook observation${readSourceHint}`,
       });
     } else if (companionState === 'marker_missing' && runtimeState === 'runtime_observed') {
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
         status: 'warn',
-        detail: 'Marker missing, but runtime hook was observed in LSPosed logs',
+        detail: `Marker missing, but runtime hook was observed in LSPosed logs${readSourceHint}`,
       });
     } else if (!companionState) {
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
         status: 'fail',
-        detail: 'Companion status file missing/empty',
+        detail: `Companion status file missing/empty${readSourceHint}`,
       });
     } else {
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
         status: 'fail',
-        detail: `Companion state: ${companionState}`,
+        detail: `Companion state: ${companionState}${readSourceHint}`,
       });
     }
   }
@@ -524,11 +532,24 @@ export async function runDiagnostics(
       detail: 'IPC root missing - companion module likely not active',
     });
   } else if (ipcStatus.configJsonExists && ipcStatus.configJsonReadable) {
+    const stateReadSource = String(ipcStatus.stateReadSource ?? '').trim().toLowerCase();
+    const readSourceHint =
+      stateReadSource === 'root_read' ? ' (state read via root fallback)' : '';
     pushCheck({
       name: 'IPC Config',
       description: '/dev/virtucam_ipc/config/virtucam_config.json',
       status: 'pass',
-      detail: 'Config JSON exists and is readable',
+      detail: `Config JSON exists and is readable${readSourceHint}`,
+    });
+  } else if (String(ipcStatus.configStatus ?? '').trim().toLowerCase() === 'config_ready') {
+    const stateReadSource = String(ipcStatus.stateReadSource ?? '').trim().toLowerCase();
+    const readSourceHint =
+      stateReadSource === 'root_read' ? ' (state read via root fallback)' : '';
+    pushCheck({
+      name: 'IPC Config',
+      description: '/dev/virtucam_ipc/config/virtucam_config.json',
+      status: 'pass',
+      detail: `Companion reports config_ready even though JSON is not app-readable${readSourceHint}`,
     });
   } else {
     const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
