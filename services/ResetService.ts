@@ -8,6 +8,7 @@ export const DEFAULT_VALUES: Record<string, string | null> = {
   [STORAGE_KEYS.FRONT_CAMERA]: 'true',
   [STORAGE_KEYS.BACK_CAMERA]: 'false',
   [STORAGE_KEYS.SELECTED_MEDIA]: null,
+  [STORAGE_KEYS.HOOK_MEDIA_PATH]: null,
   [STORAGE_KEYS.SCALE_MODE]: 'fit',
   [STORAGE_KEYS.SCALE_X]: '1.0',
   [STORAGE_KEYS.SCALE_Y]: '1.0',

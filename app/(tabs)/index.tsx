@@ -279,7 +279,7 @@ export default function Dashboard() {
               style={[styles.setupButton, { backgroundColor: colors.accent + '18', borderColor: colors.accent + '40' }]}
             >
               <Ionicons name="settings-outline" size={16} color={colors.accent} />
-              <Text style={[styles.setupButtonText, { color: colors.accent }]}>Setup</Text>
+              <Text style={[styles.setupButtonText, { color: colors.accent }]}>Setup Guide</Text>
             </Pressable>
             <View
               style={[

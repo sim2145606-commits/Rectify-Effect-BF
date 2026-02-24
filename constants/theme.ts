@@ -180,6 +180,7 @@ export const STORAGE_KEYS = {
   FRONT_CAMERA: 'virtucam_front_camera',
   BACK_CAMERA: 'virtucam_back_camera',
   SELECTED_MEDIA: 'virtucam_selected_media',
+  HOOK_MEDIA_PATH: 'virtucam_hook_media_path',
   RECENT_FILES: 'virtucam_recent_files',
   SCALE_MODE: 'virtucam_scale_mode',
   SCALE_X: 'virtucam_scale_x',

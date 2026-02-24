@@ -138,6 +138,7 @@ export async function applyPreset(preset: LocalPreset): Promise<void> {
     ];
 
     pairs.push([STORAGE_KEYS.SELECTED_MEDIA, JSON.stringify(preset.media_uri)]);
+    pairs.push([STORAGE_KEYS.HOOK_MEDIA_PATH, JSON.stringify(null)]);
 
     await AsyncStorage.multiSet(pairs);
     await syncAllSettings();

@@ -60,6 +60,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     const moduleScoped = !!result.moduleScoped;
     const hookConfigured = !!result.hookConfigured;
     const hookReady = !!result.hookReady;
+    const runtimeHookObserved = !!result.runtimeHookObserved;
     const scopeReason = String(result.scopeEvaluationReason ?? '');
 
     if (hookReady) {
@@ -70,7 +71,9 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       return {
         status: 'granted',
         detail: hookConfigured
-          ? 'Module loaded and scoped in LSPosed'
+          ? runtimeHookObserved
+            ? 'Module loaded and scoped in LSPosed'
+            : 'Module scoped; waiting for first runtime hook observation in a target app.'
           : 'Module + scope detected. Finish hook configuration in VirtuCam app.',
         canRequest: false,
       };

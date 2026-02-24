@@ -71,6 +71,7 @@ export default function StudioScreen() {
     STORAGE_KEYS.SELECTED_MEDIA,
     null
   );
+  const [, setHookMediaPath] = useStorage<string | null>(STORAGE_KEYS.HOOK_MEDIA_PATH, null);
   const [recentFiles, setRecentFiles] = useStorage<MediaItem[]>(STORAGE_KEYS.RECENT_FILES, []);
   const [selectedType, setSelectedType] = useState<'image' | 'video' | null>(null);
   const [loading, setLoading] = useState(false);
@@ -119,6 +120,7 @@ export default function StudioScreen() {
       resolveMediaPath(selectedMedia)
         .then(resolved => {
           setResolvedPath(resolved);
+          setHookMediaPath(resolved.absolutePath);
           // Update bridge config with resolved absolute path
           void commitBridgeUpdate(
             {
@@ -131,18 +133,20 @@ export default function StudioScreen() {
         })
         .catch((err: unknown) => {
           setResolvedPath(null);
+          setHookMediaPath(null);
           const message = err instanceof Error ? err.message : String(err);
           setBridgeWriteError(`resolve media path: ${message}`);
         });
     } else {
       setResolvedPath(null);
+      setHookMediaPath(null);
       void commitBridgeUpdate(
         { mediaSourcePath: null, sourceMode: 'black' },
         'clear media source',
         { quiet: true }
       );
     }
-  }, [selectedMedia, recentFiles, commitBridgeUpdate]);
+  }, [selectedMedia, recentFiles, commitBridgeUpdate, setHookMediaPath]);
 
   const refreshOverlayRuntimeState = useCallback(async () => {
     if (!VirtuCamSettings) {
@@ -256,9 +260,10 @@ export default function StudioScreen() {
   const clearSelection = useCallback(() => {
     lightImpact();
     setSelectedMedia(null);
+    setHookMediaPath(null);
     setSelectedType(null);
     void commitBridgeUpdate({ mediaSourcePath: null, sourceMode: 'black' }, 'clear media');
-  }, [lightImpact, setSelectedMedia, commitBridgeUpdate]);
+  }, [lightImpact, setSelectedMedia, setHookMediaPath, commitBridgeUpdate]);
 
   const handleScaleModeChange = useCallback(
     (mode: ScaleMode) => {

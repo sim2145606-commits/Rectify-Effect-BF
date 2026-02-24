@@ -14,6 +14,9 @@ MARKER_STATE_FILE="$IPC_DIR/state/marker_status"
 MARKER_SOURCE_FILE="$IPC_DIR/state/marker_source"
 SCOPE_STATE_FILE="$IPC_DIR/state/scope_status"
 COMPLETE_FILE="$IPC_DIR/state/service_complete_time"
+PERSISTENT_DIR="/data/adb/virtucam"
+PERSISTENT_JSON="$PERSISTENT_DIR/virtucam_config.json"
+PERSISTENT_XML="$PERSISTENT_DIR/virtucam_config.xml"
 
 write_state_file() {
     local file="$1"
@@ -132,6 +135,18 @@ if [ -f "$PREFS_FILE" ]; then
     echo "[OK] SharedPrefs permissions fixed and XML synced"
 else
     echo "[WARN] SharedPrefs config missing ($PREFS_FILE)"
+fi
+
+if [ -f "$PERSISTENT_JSON" ]; then
+    cp "$PERSISTENT_JSON" "$CFG_JSON" 2>/dev/null
+    chmod 0644 "$CFG_JSON" 2>/dev/null
+    echo "[OK] Persistent JSON synced to IPC"
+fi
+
+if [ ! -f "$CFG_XML" ] && [ -f "$PERSISTENT_XML" ]; then
+    cp "$PERSISTENT_XML" "$CFG_XML" 2>/dev/null
+    chmod 0644 "$CFG_XML" 2>/dev/null
+    echo "[OK] Persistent XML synced to IPC"
 fi
 
 if command -v chcon >/dev/null 2>&1; then

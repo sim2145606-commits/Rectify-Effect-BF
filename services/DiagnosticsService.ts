@@ -19,6 +19,9 @@ type XposedStatusResult = {
   scopedTargetsCount?: number;
   broadScopeDetected?: boolean;
   broadScopePackages?: string;
+  ipcConfigReady?: boolean;
+  stagedMediaReady?: boolean;
+  runtimeHookObserved?: boolean;
 };
 
 type IpcStatusResult = {
@@ -77,6 +80,9 @@ export type RawXposedDebugInfo = {
   scopedTargetsCount: number;
   broadScopeDetected: boolean;
   broadScopePackages: string;
+  ipcConfigReady: boolean;
+  stagedMediaReady: boolean;
+  runtimeHookObserved: boolean;
   latestMappedCount: number | null;
   latestZeroReason: string;
   mappingHint: string;
@@ -367,6 +373,9 @@ export async function runDiagnostics(
     const ready = xposedStatus.hookReady === true;
     const moduleLoaded = xposedStatus.moduleLoaded === true;
     const hookConfigured = xposedStatus.hookConfigured === true;
+    const ipcConfigReady = xposedStatus.ipcConfigReady === true;
+    const stagedMediaReady = xposedStatus.stagedMediaReady === true;
+    const runtimeHookObserved = xposedStatus.runtimeHookObserved === true;
     const scopeHint = readScopeMismatchHint(String(xposedStatus.scopeEvaluationReason ?? ''));
     let detailStatus: 'pass' | 'warn' | 'fail' = ready ? 'pass' : 'fail';
     let baseDetail = ready
@@ -376,6 +385,15 @@ export async function runDiagnostics(
     if (!ready && moduleLoaded && !hookConfigured) {
       detailStatus = 'warn';
       baseDetail = 'Hook engine loaded but disabled by config';
+    } else if (!ready && moduleLoaded && hookConfigured && !ipcConfigReady) {
+      detailStatus = 'fail';
+      baseDetail = 'Hook config exists but IPC config is not readable';
+    } else if (!ready && moduleLoaded && hookConfigured && !stagedMediaReady) {
+      detailStatus = 'fail';
+      baseDetail = 'Hook config exists but staged media is not readable';
+    } else if (!ready && moduleLoaded && hookConfigured && !runtimeHookObserved) {
+      detailStatus = 'warn';
+      baseDetail = 'Config is ready but runtime hook has not been observed yet';
     } else if (
       !ready &&
       hookConfigured &&
@@ -409,7 +427,7 @@ export async function runDiagnostics(
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
-        status: configReady ? 'pass' : 'warn',
+        status: configReady ? 'pass' : 'fail',
         detail: configReady ? 'Companion ready' : 'Companion ready but config not staged',
       });
     } else if (!companionState) {
@@ -423,7 +441,7 @@ export async function runDiagnostics(
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
-        status: 'warn',
+        status: 'fail',
         detail: `Companion state: ${companionState}`,
       });
     }
@@ -591,6 +609,9 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
         typeof xposedStatus.scopedTargetsCount === 'number' ? xposedStatus.scopedTargetsCount : 0,
       broadScopeDetected: xposedStatus.broadScopeDetected === true,
       broadScopePackages: String(xposedStatus.broadScopePackages ?? ''),
+      ipcConfigReady: xposedStatus.ipcConfigReady === true,
+      stagedMediaReady: xposedStatus.stagedMediaReady === true,
+      runtimeHookObserved: xposedStatus.runtimeHookObserved === true,
       latestMappedCount: mappingStatus.latestMappedCount,
       latestZeroReason: String(mappingStatus.latestZeroReason ?? ''),
       mappingHint,

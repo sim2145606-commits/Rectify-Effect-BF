@@ -26,6 +26,12 @@ export type BridgeSyncState = {
 type StoredTargetApp = { enabled: boolean; packageName: string };
 
 type BridgeSyncListener = (state: BridgeSyncState) => void;
+type NativeWriteConfigResult = {
+  prefsWritten?: boolean;
+  ipcJsonWritten?: boolean;
+  persistentFallbackWritten?: boolean;
+  errorCode?: string | null;
+};
 
 const bridgeSyncListeners = new Set<BridgeSyncListener>();
 let latestBridgeSyncState: BridgeSyncState = {
@@ -187,12 +193,21 @@ async function verifyIpcReadinessAfterWrite(): Promise<void> {
     throw new Error('IPC root missing after bridge write');
   }
 
-  if (companionState !== 'ready') {
-    throw new Error(`IPC companion not ready (${companionState || 'empty'})`);
+  if (!configJsonReady) {
+    throw new Error('IPC config JSON is missing/unreadable after bridge write');
   }
 
-  if (!configJsonReady) {
-    throw new Error('Companion ready but IPC config JSON is missing/unreadable');
+  if (companionState === 'scope_mismatch') {
+    throw new Error('IPC companion reports scope mismatch');
+  }
+}
+
+async function refreshCompanionNow(): Promise<void> {
+  if (!VirtuCamSettings?.refreshCompanionNow) return;
+  try {
+    await VirtuCamSettings.refreshCompanionNow();
+  } catch (err: unknown) {
+    logger.warn('Companion runtime refresh failed', 'ConfigBridge', err);
   }
 }
 
@@ -251,7 +266,20 @@ export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<
 
     if (Object.keys(payload).length === 0) return;
 
-    await VirtuCamSettings.writeConfig(payload);
+    const nativeResult =
+      (await VirtuCamSettings.writeConfig(payload)) as boolean | NativeWriteConfigResult;
+    if (typeof nativeResult === 'object' && nativeResult !== null) {
+      const prefsWritten = nativeResult.prefsWritten !== false;
+      const ipcJsonWritten = nativeResult.ipcJsonWritten === true;
+      const persistentFallbackWritten = nativeResult.persistentFallbackWritten === true;
+      if (!prefsWritten || (!ipcJsonWritten && !persistentFallbackWritten)) {
+        const nativeCode = String(nativeResult.errorCode ?? 'WRITE_ERROR');
+        throw new Error(`Native write incomplete (${nativeCode})`);
+      }
+    } else if (nativeResult !== true) {
+      throw new Error('Native write returned unexpected status');
+    }
+    await refreshCompanionNow();
     await bumpBridgeVersion();
     publishBridgeSyncState({
       ok: true,
@@ -347,7 +375,7 @@ export async function syncAllSettings(): Promise<void> {
   try {
     const [
       enabled,
-      mediaPathRaw,
+      hookMediaPathRaw,
       frontCamera,
       backCamera,
       mirrored,
@@ -360,7 +388,7 @@ export async function syncAllSettings(): Promise<void> {
       targetAppsRaw,
     ] = await Promise.all([
       AsyncStorage.getItem(STORAGE_KEYS.HOOK_ENABLED),
-      AsyncStorage.getItem(STORAGE_KEYS.SELECTED_MEDIA),
+      AsyncStorage.getItem(STORAGE_KEYS.HOOK_MEDIA_PATH),
       AsyncStorage.getItem(STORAGE_KEYS.FRONT_CAMERA),
       AsyncStorage.getItem(STORAGE_KEYS.BACK_CAMERA),
       AsyncStorage.getItem(STORAGE_KEYS.MIRRORED),
@@ -374,7 +402,7 @@ export async function syncAllSettings(): Promise<void> {
     ]);
 
     const enabledValue = parseStoredBoolean(enabled, false);
-    const mediaPath = parseStoredString(mediaPathRaw, null);
+    const mediaPath = parseStoredString(hookMediaPathRaw, null);
     const front = parseStoredBoolean(frontCamera, true);
     const back = parseStoredBoolean(backCamera, false);
     const mirroredValue = parseStoredBoolean(mirrored, false);

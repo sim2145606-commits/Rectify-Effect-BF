@@ -61,6 +61,9 @@ type XposedStatusResult = {
   moduleLoaded?: boolean;
   moduleScoped?: boolean;
   hookConfigured?: boolean;
+  ipcConfigReady?: boolean;
+  stagedMediaReady?: boolean;
+  runtimeHookObserved?: boolean;
   detectionMethod?: string;
   markerSource?: string;
   scopeEvaluationReason?: string;
@@ -335,6 +338,9 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             : ipcStatus?.stagedMediaExists === true && ipcStatus?.stagedMediaReadable === true;
         const moduleLoaded = xposedResult.moduleLoaded === true;
         const hookConfigured = xposedResult.hookConfigured === true;
+        const ipcConfigReadyFlag = xposedResult.ipcConfigReady === true;
+        const stagedMediaReadyFlag = xposedResult.stagedMediaReady === true;
+        const runtimeHookObserved = xposedResult.runtimeHookObserved === true;
         const markerSource = String(
           xposedResult.markerSource ?? ipcStatus?.moduleMarkerSource ?? 'unknown'
         );
@@ -406,12 +412,24 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             );
           }
           if (companionReady === false) {
-            hookConfigStatus = 'warning';
+            hookConfigStatus = 'error';
             hookConfigNotes.push('Companion not ready');
           }
           if (stagedMediaReadable === false) {
-            hookConfigStatus = 'warning';
+            hookConfigStatus = 'error';
             hookConfigNotes.push('Staged media missing/unreadable');
+          }
+          if (!ipcConfigReadyFlag) {
+            hookConfigStatus = 'error';
+            hookConfigNotes.push('IPC config not ready');
+          }
+          if (!stagedMediaReadyFlag) {
+            hookConfigStatus = 'error';
+            hookConfigNotes.push('Source media file is not readable by hook');
+          }
+          if (!runtimeHookObserved) {
+            hookConfigStatus = hookConfigStatus === 'error' ? 'error' : 'warning';
+            hookConfigNotes.push('Runtime hook not yet observed in target process');
           }
           result.hookConfigured = {
             label: 'Hook Configuration',
@@ -474,10 +492,21 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           if (stagedMediaReadable === false) {
             notes.push('Staged media missing/unreadable');
           }
+          if (!ipcConfigReadyFlag) {
+            notes.push('IPC config not ready');
+          }
+          if (!stagedMediaReadyFlag) {
+            notes.push('Source media file is not readable by hook');
+          }
+          if (!runtimeHookObserved) {
+            notes.push('Runtime hook not yet observed in target process');
+          }
           result.hookConfigured = {
             label: 'Hook Configuration',
             detail: notes.join(' - '),
-            status: hookConfigured ? 'ok' : 'warning',
+            status: hookConfigured && ipcConfigReadyFlag && stagedMediaReadyFlag
+              ? runtimeHookObserved ? 'ok' : 'warning'
+              : 'error',
           };
         } else {
           result.xposedFramework = {

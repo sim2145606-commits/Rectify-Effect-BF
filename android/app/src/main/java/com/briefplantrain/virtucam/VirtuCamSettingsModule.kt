@@ -97,130 +97,74 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
                 editor.putString("targetPackages", packageList.joinToString(","))
             }
-            
+
+            val result = Arguments.createMap()
             val committed = editor.commit()
+            val prefsFile = File(
+                reactApplicationContext.applicationInfo.dataDir,
+                "shared_prefs/virtucam_config.xml"
+            )
+            val prefsDir = File(reactApplicationContext.applicationInfo.dataDir, "shared_prefs")
+            val prefsWritten = committed && prefsFile.exists() && prefsFile.canRead()
+            result.putBoolean("prefsWritten", prefsWritten)
+
+            var ipcJsonWritten = false
+            var persistentFallbackWritten = false
+            var errorCode: String? = null
+
             if (!committed) {
-                android.util.Log.w("VirtuCamSettings", "SharedPreferences commit returned false")
+                errorCode = "PREFS_COMMIT_FALSE"
             }
-            
-            // ISSUE 1 FIX: Dual-strategy approach for Android 9+ compatibility
-            // Strategy A: Use root to chmod the SharedPreferences file and directory
-            try {
-                val prefsFile = File(reactApplicationContext.applicationInfo.dataDir,
-                    "shared_prefs/virtucam_config.xml")
-                val prefsDir = File(reactApplicationContext.applicationInfo.dataDir,
-                    "shared_prefs")
-                
-                if (prefsFile.exists()) {
-                    // Try non-root first (will work on some devices)
+
+            if (committed) {
+                try {
                     prefsFile.setReadable(true, false)
-                    
-                    // Try root chmod for better compatibility
-                    try {
-                        val escapedPrefsDir = escapeShellArg(prefsDir.absolutePath)
-                        val escapedPrefsFile = escapeShellArg(prefsFile.absolutePath)
-                        
-                        executeRootCommand("chmod 755 $escapedPrefsDir")
-                        executeRootCommand("chmod 644 $escapedPrefsFile")
-                        
-                        android.util.Log.d("VirtuCamSettings", "Root chmod applied successfully")
-                    } catch (e: Exception) {
-                        android.util.Log.w("VirtuCamSettings", "Root chmod failed (non-fatal): ${e.message}")
-                    }
+                    val escapedPrefsDir = escapeShellArg(prefsDir.absolutePath)
+                    val escapedPrefsFile = escapeShellArg(prefsFile.absolutePath)
+                    executeRootCommand("chmod 755 $escapedPrefsDir")
+                    executeRootCommand("chmod 644 $escapedPrefsFile")
+                } catch (e: Exception) {
+                    android.util.Log.w("VirtuCamSettings", "Could not normalize prefs readability: ${e.message}")
                 }
-            } catch (e: Exception) {
-                android.util.Log.w("VirtuCamSettings", "Could not set prefs file readable: ${e.message}")
             }
-            
-            // Strategy B: Write fallback JSON config to world-readable location
+
+            val serializedConfig = buildPersistedConfigJson().toString()
+
             try {
-                val fallbackConfig = JSONObject()
-                if (config.hasKey("enabled")) {
-                    fallbackConfig.put("enabled", config.getBoolean("enabled"))
-                }
-                if (config.hasKey("mediaSourcePath")) {
-                    fallbackConfig.put("mediaSourcePath", config.getString("mediaSourcePath"))
-                }
-                if (config.hasKey("cameraTarget")) {
-                    fallbackConfig.put("cameraTarget", config.getString("cameraTarget"))
-                }
-                if (config.hasKey("mirrored")) {
-                    fallbackConfig.put("mirrored", config.getBoolean("mirrored"))
-                }
-                if (config.hasKey("rotation")) {
-                    fallbackConfig.put("rotation", config.getInt("rotation"))
-                }
-                if (config.hasKey("scaleX")) {
-                    fallbackConfig.put("scaleX", config.getDouble("scaleX"))
-                }
-                if (config.hasKey("scaleY")) {
-                    fallbackConfig.put("scaleY", config.getDouble("scaleY"))
-                }
-                if (config.hasKey("offsetX")) {
-                    fallbackConfig.put("offsetX", config.getDouble("offsetX"))
-                }
-                if (config.hasKey("offsetY")) {
-                    fallbackConfig.put("offsetY", config.getDouble("offsetY"))
-                }
-                if (config.hasKey("scaleMode")) {
-                    fallbackConfig.put("scaleMode", config.getString("scaleMode"))
-                }
-                if (config.hasKey("targetMode")) {
-                    fallbackConfig.put("targetMode", config.getString("targetMode"))
-                }
-                if (config.hasKey("sourceMode")) {
-                    fallbackConfig.put("sourceMode", config.getString("sourceMode"))
-                }
-                if (config.hasKey("targetPackages")) {
-                    val packages = config.getArray("targetPackages")
-                    val packageList = mutableListOf<String>()
-                    if (packages != null) {
-                        for (i in 0 until packages.size()) {
-                            packageList.add(packages.getString(i))
-                        }
-                    }
-                    fallbackConfig.put("targetPackages", packageList.joinToString(","))
-                }
-                
-                val fallbackFile = File(VirtuCamIPC.CONFIG_JSON)
-                val ipcConfigDir = File(VirtuCamIPC.CONFIG_DIR)
-
-                if (!ipcConfigDir.exists()) {
-                    // Companion module missing/not ready: keep SharedPreferences as primary source.
-                    android.util.Log.w("VirtuCamSettings", "IPC dir not ready, skipping JSON config write")
-                } else if (!fallbackFile.canonicalPath.startsWith(VirtuCamIPC.IPC_ROOT) ||
-                    fallbackFile.canonicalPath != VirtuCamIPC.CONFIG_JSON) {
-                    throw SecurityException("Invalid file path")
-                } else {
-                    val allowedExtensions = setOf("json", "xml")
-                    if (fallbackFile.extension.lowercase() !in allowedExtensions) {
-                        throw SecurityException("Invalid file extension")
-                    }
-                    FileWriter(fallbackFile).use { writer ->
-                        writer.write(fallbackConfig.toString())
-                    }
-                    fallbackFile.setReadable(true, false)
-
-                    // New files written by app context can be labeled app_data_file on some ROMs.
-                    // Relabel to tmpfs so system_server / hooked processes can read IPC config.
-                    try {
-                        val escapedConfigDir = escapeShellArg(VirtuCamIPC.CONFIG_DIR)
-                        val escapedConfigFile = escapeShellArg(fallbackFile.absolutePath)
-                        executeRootCommand("chmod 0777 $escapedConfigDir")
-                        executeRootCommand("chmod 0644 $escapedConfigFile")
-                        executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedConfigDir")
-                        executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedConfigFile")
-                    } catch (e: Exception) {
-                        android.util.Log.w("VirtuCamSettings", "Could not relabel IPC config file: ${e.message}")
-                    }
-
-                    android.util.Log.d("VirtuCamSettings", "Fallback JSON config written successfully")
-                }
+                ipcJsonWritten = writeConfigJsonToIpc(serializedConfig)
             } catch (e: Exception) {
-                android.util.Log.w("VirtuCamSettings", "Could not write fallback config: ${e.message}")
+                android.util.Log.w("VirtuCamSettings", "IPC config write failed: ${e.message}")
+                if (errorCode == null) errorCode = "IPC_WRITE_FAILED"
             }
-            
-            promise.resolve(true)
+
+            if (!ipcJsonWritten) {
+                try {
+                    persistentFallbackWritten = writePersistentFallbackJson(serializedConfig)
+                } catch (e: Exception) {
+                    android.util.Log.w("VirtuCamSettings", "Persistent fallback write failed: ${e.message}")
+                    if (errorCode == null) errorCode = "PERSISTENT_FALLBACK_FAILED"
+                }
+            }
+
+            result.putBoolean("ipcJsonWritten", ipcJsonWritten)
+            result.putBoolean("persistentFallbackWritten", persistentFallbackWritten)
+            result.putString("errorCode", errorCode)
+
+            if (!prefsWritten) {
+                promise.reject("PREFS_WRITE_FAILED", "SharedPreferences write verification failed")
+                return
+            }
+
+            if (!ipcJsonWritten && !persistentFallbackWritten) {
+                promise.reject(
+                    "CONFIG_SYNC_FAILED",
+                    "Config write failed for IPC and persistent fallback"
+                )
+                return
+            }
+
+            refreshCompanionInternal()
+            promise.resolve(result)
         } catch (e: Exception) {
             promise.reject("WRITE_ERROR", "Failed to write config: ${e.message}", e)
         }
@@ -353,6 +297,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     android.util.Log.w("VirtuCamSettings", "Failed to normalize staged media context: ${e.message}")
                 }
 
+                refreshCompanionInternal()
+
                 if (reactApplicationContext.hasActiveCatalystInstance()) {
                     promise.resolve(stagedFile.absolutePath)
                 }
@@ -420,6 +366,24 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             promise.resolve(result)
         } catch (e: Exception) {
             promise.reject("IPC_STATUS_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun refreshCompanionNow(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
+
+        try {
+            val refreshed = refreshCompanionInternal()
+            val result = Arguments.createMap()
+            result.putBoolean("refreshed", refreshed)
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("COMPANION_REFRESH_ERROR", "Failed to refresh companion: ${e.message}", e)
         }
     }
 
@@ -711,13 +675,11 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 scopeEvaluationReason = "configured_targets_scoped"
             }
 
-            // Method 5: Check modules directory registration (module package itself)
-            if (checkModulesDirectory(modulePackageName)) {
-                if (detectionMethod == "none") {
-                    detectionMethod = "modules_dir"
-                }
-                moduleLoaded = true
+            val runtimeHookObserved = hasRuntimeHookObservation()
+            if (runtimeHookObserved && detectionMethod == "none") {
+                detectionMethod = "runtime_log"
             }
+            moduleLoaded = moduleLoaded || runtimeHookObserved
 
             val enabled = prefs.getBoolean("enabled", false)
             val mediaSourcePath = prefs.getString("mediaSourcePath", null)
@@ -750,22 +712,36 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             }
             val broadScopeDetected = broadScopePackages.isNotEmpty()
 
-            // If the module package is installed + LSPosed exists, treat module as loaded
-            // even when runtime marker writes are blocked on strict SELinux ROMs.
-            if (!moduleLoaded && lsposedExists && checkModulesDirectory(modulePackageName)) {
-                moduleLoaded = true
-                if (detectionMethod == "none") {
-                    detectionMethod = "modules_dir"
-                }
-            }
-
             val sourceConfigured = when (sourceMode) {
                 "black", "test" -> true
                 else -> !mediaSourcePath.isNullOrEmpty()
             }
+            val sourceNeedsFile = sourceMode == "file" || sourceMode == "stream"
+            val stagedMediaReady = if (!sourceNeedsFile) {
+                true
+            } else {
+                !mediaSourcePath.isNullOrBlank() && try {
+                    val staged = File(normalizeFilePath(mediaSourcePath)).canonicalFile
+                    staged.exists() && staged.canRead()
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            val ipcConfigReady = try {
+                (File(VirtuCamIPC.CONFIG_JSON).exists() && File(VirtuCamIPC.CONFIG_JSON).canRead()) ||
+                    (File(VirtuCamIPC.CONFIG_XML).exists() && File(VirtuCamIPC.CONFIG_XML).canRead())
+            } catch (_: Exception) {
+                false
+            }
             val hookConfigured = enabled && sourceConfigured &&
                 (targetMode != "whitelist" || hasTargets)
-            val hookReady = moduleLoaded && moduleScoped && hookConfigured
+            val hookReady =
+                moduleLoaded &&
+                moduleScoped &&
+                hookConfigured &&
+                ipcConfigReady &&
+                stagedMediaReady &&
+                runtimeHookObserved
             
             // Backward-compatible fields
             result.putBoolean("xposedActive", moduleLoaded)
@@ -775,6 +751,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("moduleScoped", moduleScoped)
             result.putBoolean("hookConfigured", hookConfigured)
             result.putBoolean("hookReady", hookReady)
+            result.putBoolean("ipcConfigReady", ipcConfigReady)
+            result.putBoolean("stagedMediaReady", stagedMediaReady)
+            result.putBoolean("runtimeHookObserved", runtimeHookObserved)
             result.putString("detectionMethod", detectionMethod)
             result.putString("markerSource", markerSource)
             result.putInt("configuredTargetsCount", configuredTargets.size)
@@ -788,6 +767,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             android.util.Log.d("VirtuCamSettings",
                 "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +
                 "hookConfigured=$hookConfigured, hookReady=$hookReady, lsposedInstalled=$lsposedExists, " +
+                "ipcConfigReady=$ipcConfigReady, stagedMediaReady=$stagedMediaReady, runtimeHookObserved=$runtimeHookObserved, " +
                 "method=$detectionMethod, markerSource=$markerSource, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets, " +
                 "broadScope=$broadScopePackages")
             
@@ -802,6 +782,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("moduleScoped", false)
             result.putBoolean("hookConfigured", false)
             result.putBoolean("hookReady", false)
+            result.putBoolean("ipcConfigReady", false)
+            result.putBoolean("stagedMediaReady", false)
+            result.putBoolean("runtimeHookObserved", false)
             result.putString("detectionMethod", "error")
             result.putString("markerSource", "none")
             result.putInt("configuredTargetsCount", 0)
@@ -1500,6 +1483,88 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    private fun buildPersistedConfigJson(): JSONObject {
+        val obj = JSONObject()
+        obj.put("enabled", prefs.getBoolean("enabled", false))
+        obj.put("mediaSourcePath", prefs.getString("mediaSourcePath", null))
+        obj.put("cameraTarget", prefs.getString("cameraTarget", "front"))
+        obj.put("mirrored", prefs.getBoolean("mirrored", false))
+        obj.put("rotation", prefs.getInt("rotation", 0))
+        obj.put("scaleX", prefs.getFloat("scaleX", 1.0f).toDouble())
+        obj.put("scaleY", prefs.getFloat("scaleY", 1.0f).toDouble())
+        obj.put("offsetX", prefs.getFloat("offsetX", 0.0f).toDouble())
+        obj.put("offsetY", prefs.getFloat("offsetY", 0.0f).toDouble())
+        obj.put("scaleMode", prefs.getString("scaleMode", "fit"))
+        obj.put("targetMode", prefs.getString("targetMode", "all"))
+        obj.put("sourceMode", prefs.getString("sourceMode", "black"))
+        obj.put("targetPackages", prefs.getString("targetPackages", ""))
+        return obj
+    }
+
+    private fun writeConfigJsonToIpc(serializedConfig: String): Boolean {
+        val fallbackFile = File(VirtuCamIPC.CONFIG_JSON).canonicalFile
+        val ipcConfigDir = File(VirtuCamIPC.CONFIG_DIR).canonicalFile
+
+        if (!ipcConfigDir.exists() && !ipcConfigDir.mkdirs()) {
+            throw IllegalStateException("IPC config dir unavailable")
+        }
+        if (!ipcConfigDir.path.startsWith(VirtuCamIPC.IPC_ROOT)) {
+            throw SecurityException("Invalid IPC directory path")
+        }
+        if (fallbackFile.canonicalPath != VirtuCamIPC.CONFIG_JSON) {
+            throw SecurityException("Invalid IPC config file path")
+        }
+
+        FileWriter(fallbackFile).use { writer ->
+            writer.write(serializedConfig)
+        }
+        fallbackFile.setReadable(true, false)
+
+        val escapedConfigDir = escapeShellArg(VirtuCamIPC.CONFIG_DIR)
+        val escapedConfigFile = escapeShellArg(fallbackFile.absolutePath)
+        executeRootCommand("chmod 0777 $escapedConfigDir")
+        executeRootCommand("chmod 0644 $escapedConfigFile")
+        executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedConfigDir")
+        executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedConfigFile")
+
+        return fallbackFile.exists() && fallbackFile.canRead()
+    }
+
+    private fun writePersistentFallbackJson(serializedConfig: String): Boolean {
+        val tmpFile = File(
+            reactApplicationContext.cacheDir,
+            "virtucam_config_fallback_${System.currentTimeMillis()}.json"
+        )
+        FileWriter(tmpFile).use { writer ->
+            writer.write(serializedConfig)
+        }
+        tmpFile.setReadable(true, false)
+
+        val escapedTmp = escapeShellArg(tmpFile.absolutePath)
+        val escapedPersistentDir = escapeShellArg(VirtuCamIPC.PERSISTENT_ROOT)
+        val escapedPersistentJson = escapeShellArg(VirtuCamIPC.PERSISTENT_JSON)
+        executeRootCommand("mkdir -p $escapedPersistentDir")
+        executeRootCommand("cp $escapedTmp $escapedPersistentJson")
+        executeRootCommand("chmod 0600 $escapedPersistentJson")
+        executeRootCommand("chcon u:object_r:adb_data_file:s0 $escapedPersistentJson")
+        executeRootCommand("rm -f $escapedTmp")
+
+        val verifyOutput = executeRootCommand("ls $escapedPersistentJson 2>/dev/null")
+        return verifyOutput.contains("virtucam_config.json")
+    }
+
+    private fun refreshCompanionInternal(): Boolean {
+        val actionScript = "/data/adb/modules/virtucam_companion/action.sh"
+        val escapedAction = escapeShellArg(actionScript)
+        val scriptExists = executeRootCommand("ls $escapedAction 2>/dev/null")
+        if (!scriptExists.contains("action.sh")) {
+            return false
+        }
+        executeRootCommand("sh $escapedAction")
+        val statusOutput = executeRootCommand("cat ${escapeShellArg(VirtuCamIPC.COMPANION_STATUS)} 2>/dev/null")
+        return statusOutput.trim().isNotEmpty()
+    }
+
     /**
      * Execute a shell command and return output.
      * Uses sh -c to correctly handle commands with spaces, pipes, and redirects.
@@ -1569,6 +1634,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             "/data/adb/", "pm ", "sqlite3 ", "cat ", "grep ", "strings ", "find ",
             "logcat ", "tail ", "getenforce", "uname ", "sh ", "id",
             "chcon ",
+            "mkdir ",
+            "cp ",
+            "rm ",
             "cmd appops",
             "am ",
             "mountpoint"
@@ -1624,6 +1692,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     private fun hasMarkerViaRoot(path: String, expectedToken: String): Boolean {
         val markerRootCheck = executeRootCommand("ls ${escapeShellArg(path)} 2>/dev/null")
         return markerRootCheck.contains(expectedToken)
+    }
+
+    private fun hasRuntimeHookObservation(): Boolean {
+        val query = executeRootCommand(
+            "grep -h 'VirtuCam/XposedEntry: module active in process:' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null"
+        )
+        return query.contains("VirtuCam/XposedEntry: module active in process:")
     }
 
     private fun isValidPackageName(packageName: String): Boolean {

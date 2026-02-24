@@ -164,6 +164,9 @@ is_scope_enabled() {
 fix_shared_prefs() {
     local prefs_dir="/data/data/$VIRTUCAM_PKG/shared_prefs"
     local prefs_file="$prefs_dir/virtucam_config.xml"
+    local persistent_dir="/data/adb/virtucam"
+    local persistent_json="$persistent_dir/virtucam_config.json"
+    local persistent_xml="$persistent_dir/virtucam_config.xml"
 
     if [ -d "$prefs_dir" ]; then
         chmod 0771 "$prefs_dir" 2>/dev/null
@@ -177,6 +180,18 @@ fix_shared_prefs() {
         log "SharedPreferences config synced to IPC"
     else
         log "WARNING: SharedPreferences config missing ($prefs_file)"
+    fi
+
+    if [ -f "$persistent_json" ]; then
+        cp "$persistent_json" "$CFG_JSON" 2>/dev/null
+        chmod 0644 "$CFG_JSON" 2>/dev/null
+        log "Persistent JSON config synced to IPC"
+    fi
+
+    if [ ! -f "$CFG_XML" ] && [ -f "$persistent_xml" ]; then
+        cp "$persistent_xml" "$CFG_XML" 2>/dev/null
+        chmod 0644 "$CFG_XML" 2>/dev/null
+        log "Persistent XML config synced to IPC"
     fi
 }
 
