@@ -12,11 +12,56 @@ export type SourceMode = 'black' | 'file' | 'stream' | 'test';
 
 type StoredTargetApp = { enabled: boolean; packageName: string };
 
+function parseStoredJson<T>(raw: string | null, fallback: T): T {
+  if (raw === null) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return (raw as unknown as T) ?? fallback;
+  }
+}
+
+function parseStoredBoolean(raw: string | null, fallback: boolean): boolean {
+  const parsed = parseStoredJson<unknown>(raw, fallback);
+  if (typeof parsed === 'boolean') return parsed;
+  if (typeof parsed === 'string') {
+    const normalized = parsed.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return fallback;
+}
+
+function parseStoredNumber(raw: string | null, fallback: number): number {
+  const parsed = parseStoredJson<unknown>(raw, fallback);
+  if (typeof parsed === 'number' && Number.isFinite(parsed)) return parsed;
+  if (typeof parsed === 'string') {
+    const num = Number(parsed);
+    if (Number.isFinite(num)) return num;
+  }
+  return fallback;
+}
+
+function parseStoredString(raw: string | null, fallback: string | null): string | null {
+  const parsed = parseStoredJson<unknown>(raw, fallback);
+  if (parsed === null || parsed === undefined) return fallback;
+  if (typeof parsed === 'string') {
+    const trimmed = parsed.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return fallback;
+    return trimmed;
+  }
+  return fallback;
+}
+
 function safeParseTargetApps(targetAppsRaw: string | null): StoredTargetApp[] {
   if (!targetAppsRaw) return [];
 
   try {
-    const parsed = JSON.parse(targetAppsRaw);
+    const parsedCandidate = parseStoredJson<unknown>(targetAppsRaw, []);
+    const parsed =
+      typeof parsedCandidate === 'string'
+        ? parseStoredJson<unknown>(parsedCandidate, [])
+        : parsedCandidate;
     if (!Array.isArray(parsed)) {
       return [];
     }
@@ -159,7 +204,7 @@ export async function syncAllSettings(): Promise<void> {
   try {
     const [
       enabled,
-      mediaPath,
+      mediaPathRaw,
       frontCamera,
       backCamera,
       mirrored,
@@ -185,8 +230,17 @@ export async function syncAllSettings(): Promise<void> {
       AsyncStorage.getItem(STORAGE_KEYS.TARGET_APPS),
     ]);
 
-    const front = frontCamera === 'true';
-    const back = backCamera === 'true';
+    const enabledValue = parseStoredBoolean(enabled, false);
+    const mediaPath = parseStoredString(mediaPathRaw, null);
+    const front = parseStoredBoolean(frontCamera, true);
+    const back = parseStoredBoolean(backCamera, false);
+    const mirroredValue = parseStoredBoolean(mirrored, false);
+    const rotationValue = parseStoredNumber(rotation, 0);
+    const scaleXValue = parseStoredNumber(scaleX, 1.0);
+    const scaleYValue = parseStoredNumber(scaleY, 1.0);
+    const offsetXValue = parseStoredNumber(offsetX, 0.0);
+    const offsetYValue = parseStoredNumber(offsetY, 0.0);
+
     let cameraTarget: CameraTarget = 'none';
     if (front && back) {
       cameraTarget = 'both';
@@ -201,9 +255,10 @@ export async function syncAllSettings(): Promise<void> {
       .filter(app => app.enabled)
       .map(app => app.packageName);
 
+    const parsedTargetMode = parseStoredString(targetModeRaw, 'all');
     let effectiveTargetMode: 'all' | 'whitelist' | 'blacklist' =
-      (targetModeRaw === 'all' || targetModeRaw === 'whitelist' || targetModeRaw === 'blacklist')
-        ? targetModeRaw
+      parsedTargetMode === 'all' || parsedTargetMode === 'whitelist' || parsedTargetMode === 'blacklist'
+        ? parsedTargetMode
         : 'all';
 
     // Current UI no longer exposes target package management; when no targets are defined,
@@ -213,17 +268,17 @@ export async function syncAllSettings(): Promise<void> {
     }
 
     const config: Partial<BridgeConfig> = {
-      enabled: enabled === 'true',
+      enabled: enabledValue,
       mediaSourcePath: mediaPath,
       cameraTarget,
-      mirrored: mirrored === 'true',
-      rotation: rotation ? parseInt(rotation, 10) : 0,
-      scaleX: scaleX ? parseFloat(scaleX) : 1.0,
-      scaleY: scaleY ? parseFloat(scaleY) : 1.0,
-      offsetX: offsetX ? parseFloat(offsetX) : 0.0,
-      offsetY: offsetY ? parseFloat(offsetY) : 0.0,
+      mirrored: mirroredValue,
+      rotation: rotationValue,
+      scaleX: scaleXValue,
+      scaleY: scaleYValue,
+      offsetX: offsetXValue,
+      offsetY: offsetYValue,
       targetMode: effectiveTargetMode,
-      sourceMode: mediaPath ? (mediaPath.startsWith('rtmp://') || mediaPath.startsWith('rtsp://') || mediaPath.startsWith('http://') || mediaPath.startsWith('https://') ? 'stream' : 'file') : 'black',
+      sourceMode: mediaPath ? 'file' : 'black',
       targetPackages: enabledPackages,
     };
 

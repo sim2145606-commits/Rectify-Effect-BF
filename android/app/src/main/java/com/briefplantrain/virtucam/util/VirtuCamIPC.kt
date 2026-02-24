@@ -14,6 +14,7 @@ object VirtuCamIPC {
     const val IPC_ROOT = "/dev/virtucam_ipc"
     const val CONFIG_DIR = "$IPC_ROOT/config"
     const val STATE_DIR = "$IPC_ROOT/state"
+    const val MEDIA_DIR = "$IPC_ROOT/media"
     const val LOGS_DIR = "$IPC_ROOT/logs"
 
     // Config files

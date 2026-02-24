@@ -35,18 +35,12 @@ export const DEFAULT_VALUES: Record<string, string | null> = {
 };
 
 const DEFAULT_TARGET_APPS = [
-  { id: '1', name: 'WhatsApp', packageName: 'com.whatsapp', enabled: true, icon: 'whatsapp' },
-  { id: '2', name: 'Telegram', packageName: 'org.telegram.messenger', enabled: true, icon: 'send' },
-  { id: '3', name: 'Instagram', packageName: 'com.instagram.android', enabled: false, icon: 'instagram' },
-  { id: '4', name: 'Snapchat', packageName: 'com.snapchat.android', enabled: false, icon: 'snapchat' },
-  { id: '5', name: 'Google Meet', packageName: 'com.google.android.apps.meetings', enabled: true, icon: 'google' },
-  { id: '6', name: 'Zoom', packageName: 'us.zoom.videomeetings', enabled: true, icon: 'video' },
-  { id: '7', name: 'Skype', packageName: 'com.skype.raider', enabled: false, icon: 'skype' },
-  { id: '8', name: 'Discord', packageName: 'com.discord', enabled: false, icon: 'message-text' },
-  { id: '9', name: 'Signal', packageName: 'org.thoughtcrime.securesms', enabled: false, icon: 'chat' },
-  { id: '10', name: 'Facebook', packageName: 'com.facebook.katana', enabled: false, icon: 'facebook' },
-  { id: '11', name: 'TikTok', packageName: 'com.zhiliaoapp.musically', enabled: false, icon: 'music-note' },
-  { id: '12', name: 'Teams', packageName: 'com.microsoft.teams', enabled: true, icon: 'microsoft-teams' },
+  { id: 'camera', name: 'Camera', packageName: 'com.android.camera', enabled: true, source: 'preset' },
+  { id: 'whatsapp', name: 'WhatsApp', packageName: 'com.whatsapp', enabled: false, source: 'preset' },
+  { id: 'telegram', name: 'Telegram', packageName: 'org.telegram.messenger', enabled: false, source: 'preset' },
+  { id: 'messenger', name: 'Messenger', packageName: 'com.facebook.orca', enabled: false, source: 'preset' },
+  { id: 'meet', name: 'Google Meet', packageName: 'com.google.android.apps.meetings', enabled: false, source: 'preset' },
+  { id: 'zoom', name: 'Zoom', packageName: 'us.zoom.videomeetings', enabled: false, source: 'preset' },
 ];
 
 export async function resetToDefaults(): Promise<{

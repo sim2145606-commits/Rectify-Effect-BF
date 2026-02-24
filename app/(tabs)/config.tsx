@@ -96,11 +96,15 @@ export default function StudioScreen() {
         .then(resolved => {
           setResolvedPath(resolved);
           // Update bridge config with resolved absolute path
-          writeBridgeConfig({ mediaSourcePath: resolved.absolutePath }).catch(() => {});
+          writeBridgeConfig({
+            mediaSourcePath: resolved.absolutePath,
+            sourceMode: 'file',
+          }).catch(() => {});
         })
         .catch(() => setResolvedPath(null));
     } else {
       setResolvedPath(null);
+      writeBridgeConfig({ mediaSourcePath: null, sourceMode: 'black' }).catch(() => {});
     }
   }, [selectedMedia, recentFiles]);
 
@@ -217,6 +221,7 @@ export default function StudioScreen() {
     lightImpact();
     setSelectedMedia(null);
     setSelectedType(null);
+    writeBridgeConfig({ mediaSourcePath: null, sourceMode: 'black' }).catch(() => {});
   }, [lightImpact, setSelectedMedia]);
 
   const handleScaleModeChange = useCallback(

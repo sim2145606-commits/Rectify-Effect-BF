@@ -22,7 +22,7 @@ public final class ConfigSnapshot {
     public float offsetY = 0f;
     public String scaleMode = "fit";
 
-    public TargetMode targetMode = TargetMode.WHITELIST;
+    public TargetMode targetMode = TargetMode.ALL;
     public Set<String> targetPackages = Collections.emptySet();
 
     public boolean debug = false;

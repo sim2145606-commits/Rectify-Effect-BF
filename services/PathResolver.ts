@@ -1,6 +1,8 @@
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
+
+const { VirtuCamSettings } = NativeModules;
 
 const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov']);
 const BLOCKED_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
@@ -23,6 +25,8 @@ export type ResolvedPath = {
   mimeType: string;
   fileSize: number;
   isAccessible: boolean;
+  stagedPath?: string | null;
+  originalPath?: string | null;
 };
 
 /**
@@ -37,17 +41,23 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
     mimeType: guessMimeType(uri),
     fileSize: 0,
     isAccessible: false,
+    stagedPath: null,
+    originalPath: null,
   };
 
   try {
     if (uri.startsWith('file://')) {
       const info = await FileSystem.getInfoAsync(uri);
       if (info.exists) {
+        const absolutePath = uri.replace('file://', '');
+        const stagedPath = await stageMediaForHook(absolutePath);
         return {
           ...defaultResult,
-          absolutePath: uri.replace('file://', ''),
+          absolutePath: stagedPath || absolutePath,
           fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
           isAccessible: true,
+          stagedPath,
+          originalPath: absolutePath,
         };
       }
     }
@@ -66,11 +76,15 @@ export async function resolveMediaPath(uri: string): Promise<ResolvedPath> {
 
     const info = await FileSystem.getInfoAsync(uri);
     if (info.exists) {
+      const absolutePath = info.uri.replace('file://', '');
+      const stagedPath = await stageMediaForHook(absolutePath);
       return {
         ...defaultResult,
-        absolutePath: info.uri.replace('file://', ''),
+        absolutePath: stagedPath || absolutePath,
         fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
         isAccessible: true,
+        stagedPath,
+        originalPath: absolutePath,
       };
     }
 
@@ -92,14 +106,18 @@ async function resolveContentUri(uri: string): Promise<ResolvedPath> {
     await FileSystem.copyAsync({ from: uri, to: destPath });
 
     const info = await FileSystem.getInfoAsync(destPath);
+    const absolutePath = destPath.replace('file://', '');
+    const stagedPath = await stageMediaForHook(absolutePath);
 
     return {
-      absolutePath: destPath.replace('file://', ''),
+      absolutePath: stagedPath || absolutePath,
       fileName,
       fileExtension: extractExtension(fileName),
       mimeType: guessMimeType(fileName),
       fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
       isAccessible: true,
+      stagedPath,
+      originalPath: absolutePath,
     };
   } catch (err: unknown) {
     if (__DEV__) {
@@ -113,6 +131,8 @@ async function resolveContentUri(uri: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(uri),
       fileSize: 0,
       isAccessible: false,
+      stagedPath: null,
+      originalPath: null,
     };
   }
 }
@@ -124,13 +144,17 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
 
     if (asset.localUri) {
       const info = await FileSystem.getInfoAsync(asset.localUri);
+      const absolutePath = asset.localUri.replace('file://', '');
+      const stagedPath = await stageMediaForHook(absolutePath);
       return {
-        absolutePath: asset.localUri.replace('file://', ''),
+        absolutePath: stagedPath || absolutePath,
         fileName: asset.filename,
         fileExtension: extractExtension(asset.filename),
         mimeType: guessMimeType(asset.filename),
         fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
         isAccessible: true,
+        stagedPath,
+        originalPath: absolutePath,
       };
     }
 
@@ -141,6 +165,8 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(asset.filename),
       fileSize: 0,
       isAccessible: false,
+      stagedPath: null,
+      originalPath: null,
     };
   } catch (err: unknown) {
     if (__DEV__) {
@@ -154,6 +180,8 @@ async function resolvePhotoUri(uri: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(uri),
       fileSize: 0,
       isAccessible: false,
+      stagedPath: null,
+      originalPath: null,
     };
   }
 }
@@ -177,14 +205,18 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
 
     const result = await FileSystem.downloadAsync(url, destPath);
     const info = await FileSystem.getInfoAsync(result.uri);
+    const absolutePath = result.uri.replace('file://', '');
+    const stagedPath = await stageMediaForHook(absolutePath);
 
     return {
-      absolutePath: result.uri.replace('file://', ''),
+      absolutePath: stagedPath || absolutePath,
       fileName,
       fileExtension: ext,
       mimeType: result.headers?.['content-type'] || guessMimeType(fileName),
       fileSize: info.exists && !info.isDirectory ? (info.size || 0) : 0,
       isAccessible: true,
+      stagedPath,
+      originalPath: absolutePath,
     };
   } catch (err: unknown) {
     if (__DEV__) {
@@ -198,6 +230,8 @@ async function downloadAndResolve(url: string): Promise<ResolvedPath> {
       mimeType: guessMimeType(url),
       fileSize: 0,
       isAccessible: false,
+      stagedPath: null,
+      originalPath: null,
     };
   }
 }
@@ -317,4 +351,20 @@ function isAllowedRemoteUrl(rawUrl: string): boolean {
 function guessMimeType(uri: string): string {
   const ext = extractExtension(uri);
   return MIME_MAP[ext] || 'application/octet-stream';
+}
+
+async function stageMediaForHook(absolutePath: string): Promise<string | null> {
+  if (!absolutePath || Platform.OS !== 'android') return null;
+  if (!VirtuCamSettings?.stageMediaForHook) return null;
+
+  try {
+    const staged = await VirtuCamSettings.stageMediaForHook(absolutePath);
+    return typeof staged === 'string' && staged.length > 0 ? staged : null;
+  } catch (err: unknown) {
+    if (__DEV__) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('PathResolver: stageMediaForHook failed:', message);
+    }
+    return null;
+  }
 }

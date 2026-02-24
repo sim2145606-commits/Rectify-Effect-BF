@@ -224,6 +224,9 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                         "createCaptureSessionByOutputConfigurations")) replaced++;
                             }
                             LogUtil.d(TAG, "createCaptureSessionByOutputConfigurations mapped=" + replaced);
+                            if (replaced == 0) {
+                                logZeroMapping(engine, "createCaptureSessionByOutputConfigurations");
+                            }
                         }
                     }
             );
@@ -248,6 +251,9 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                             "createCaptureSession(SessionConfiguration)")) replaced++;
                                 }
                                 LogUtil.d(TAG, "createCaptureSession(SessionConfiguration) mapped=" + replaced);
+                                if (replaced == 0) {
+                                    logZeroMapping(engine, "createCaptureSession(SessionConfiguration)");
+                                }
                             }
                         }
                 );
@@ -293,7 +299,19 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             }
         }
         LogUtil.d(TAG, "createCaptureSession(List<Surface>) mapped=" + replaced);
+        if (replaced == 0) {
+            logZeroMapping(engine, "createCaptureSession(List<Surface>)");
+        }
         return out;
+    }
+
+    private static void logZeroMapping(VirtualCameraEngine engine, String hookName) {
+        if (engine == null) return;
+        try {
+            LogUtil.d(TAG, hookName + " mapped=0 reason={" + engine.getRoutingDebugSummary() + "}");
+        } catch (Throwable t) {
+            LogUtil.d(TAG, hookName + " mapped=0 reason={summary_unavailable:" + t.getClass().getSimpleName() + "}");
+        }
     }
 
     private static void installCaptureRequestHooks(final VirtualCameraEngine engine) {

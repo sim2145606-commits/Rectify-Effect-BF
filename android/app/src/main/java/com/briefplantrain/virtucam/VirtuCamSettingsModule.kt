@@ -285,6 +285,132 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Stage media to companion-managed IPC storage for cross-process readability.
+     * Returns absolute staged path in /dev/virtucam_ipc/media.
+     */
+    @ReactMethod
+    fun stageMediaForHook(sourcePath: String, promise: Promise) {
+        if (!assertAuthenticated(promise)) return
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
+
+        Thread {
+            try {
+                val raw = sourcePath.trim()
+                if (raw.isEmpty()) {
+                    promise.reject("INVALID_MEDIA_PATH", "Source path is empty")
+                    return@Thread
+                }
+
+                val normalizedSource = normalizeFilePath(raw)
+                val sourceFile = File(normalizedSource).canonicalFile
+                if (!sourceFile.exists() || !sourceFile.isFile) {
+                    promise.reject("MEDIA_NOT_FOUND", "Source media does not exist")
+                    return@Thread
+                }
+
+                if (!isAllowedMediaExtension(sourceFile.name)) {
+                    promise.reject("MEDIA_TYPE_NOT_ALLOWED", "Unsupported media extension")
+                    return@Thread
+                }
+
+                val mediaDir = File(VirtuCamIPC.MEDIA_DIR)
+                if (!mediaDir.exists() && !mediaDir.mkdirs()) {
+                    promise.reject("IPC_MEDIA_DIR_UNAVAILABLE", "Could not create IPC media directory")
+                    return@Thread
+                }
+
+                val safeBaseName = sanitizeFileName(sourceFile.nameWithoutExtension)
+                val extension = sourceFile.extension.lowercase()
+                val stagedFile = File(
+                    mediaDir,
+                    "staged_${System.currentTimeMillis()}_${safeBaseName}.${extension}"
+                ).canonicalFile
+
+                if (!stagedFile.path.startsWith(VirtuCamIPC.MEDIA_DIR)) {
+                    promise.reject("INVALID_STAGE_PATH", "Invalid staging destination")
+                    return@Thread
+                }
+
+                sourceFile.inputStream().use { input ->
+                    stagedFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                stagedFile.setReadable(true, false)
+
+                try {
+                    val escapedMediaDir = escapeShellArg(VirtuCamIPC.MEDIA_DIR)
+                    val escapedMediaFile = escapeShellArg(stagedFile.absolutePath)
+                    executeRootCommand("chmod 0777 $escapedMediaDir")
+                    executeRootCommand("chmod 0644 $escapedMediaFile")
+                    executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedMediaDir")
+                    executeRootCommand("chcon u:object_r:tmpfs:s0 $escapedMediaFile")
+                } catch (e: Exception) {
+                    android.util.Log.w("VirtuCamSettings", "Failed to normalize staged media context: ${e.message}")
+                }
+
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.resolve(stagedFile.absolutePath)
+                }
+            } catch (e: Exception) {
+                if (reactApplicationContext.hasActiveCatalystInstance()) {
+                    promise.reject("STAGE_MEDIA_ERROR", "Failed to stage media: ${e.message}", e)
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * IPC diagnostics for bridge and staged media troubleshooting.
+     */
+    @ReactMethod
+    fun getIpcStatus(promise: Promise) {
+        if (!assertAuthenticated(promise)) return
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
+
+        try {
+            val result = Arguments.createMap()
+
+            val ipcRoot = File(VirtuCamIPC.IPC_ROOT)
+            val configJson = File(VirtuCamIPC.CONFIG_JSON)
+            val configXml = File(VirtuCamIPC.CONFIG_XML)
+            val mediaDir = File(VirtuCamIPC.MEDIA_DIR)
+            val markerFile = File(VirtuCamIPC.MODULE_ACTIVE)
+            val companionStatus = File(VirtuCamIPC.COMPANION_STATUS)
+
+            val stagedPath = prefs.getString("mediaSourcePath", null)
+            val stagedFile = if (!stagedPath.isNullOrBlank()) {
+                try { File(normalizeFilePath(stagedPath)).canonicalFile } catch (_: Exception) { null }
+            } else {
+                null
+            }
+
+            result.putBoolean("ipcRootExists", ipcRoot.exists())
+            result.putBoolean("configJsonExists", configJson.exists())
+            result.putBoolean("configJsonReadable", configJson.exists() && configJson.canRead())
+            result.putBoolean("configXmlExists", configXml.exists())
+            result.putBoolean("configXmlReadable", configXml.exists() && configXml.canRead())
+            result.putBoolean("mediaDirExists", mediaDir.exists())
+            result.putBoolean("moduleMarkerExists", markerFile.exists())
+            result.putString("companionStatus", safeReadSmallFile(companionStatus))
+            result.putString("stagedMediaPath", stagedPath ?: "")
+            result.putBoolean("stagedMediaExists", stagedFile?.exists() == true)
+            result.putBoolean("stagedMediaReadable", stagedFile?.canRead() == true)
+
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("IPC_STATUS_ERROR", e.message, e)
+        }
+    }
+
+    /**
      * Check if root access is available
      * PERFORMANCE FIX: Runs on background thread to avoid ANR
      */
@@ -599,6 +725,17 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
             }
 
+            val broadScopeCandidates = listOf(
+                "android",
+                "system",
+                "com.android.systemui",
+                "com.android.phone"
+            )
+            val broadScopePackages = broadScopeCandidates.filter {
+                hasScopedPackageForModule(modulePackageName, it)
+            }
+            val broadScopeDetected = broadScopePackages.isNotEmpty()
+
             // If the module package is installed + LSPosed exists, treat module as loaded
             // even when runtime marker writes are blocked on strict SELinux ROMs.
             if (!moduleLoaded && lsposedExists && checkModulesDirectory(modulePackageName)) {
@@ -630,11 +767,14 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putString("configuredTargets", configuredTargets.joinToString(","))
             result.putString("scopedTargets", scopedTargets.joinToString(","))
             result.putString("scopeEvaluationReason", scopeEvaluationReason)
+            result.putBoolean("broadScopeDetected", broadScopeDetected)
+            result.putString("broadScopePackages", broadScopePackages.joinToString(","))
             
             android.util.Log.d("VirtuCamSettings",
                 "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +
                 "hookConfigured=$hookConfigured, hookReady=$hookReady, lsposedInstalled=$lsposedExists, " +
-                "method=$detectionMethod, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets")
+                "method=$detectionMethod, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets, " +
+                "broadScope=$broadScopePackages")
             
             promise.resolve(result)
         } catch (e: Exception) {
@@ -653,6 +793,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putString("configuredTargets", "")
             result.putString("scopedTargets", "")
             result.putString("scopeEvaluationReason", "error")
+            result.putBoolean("broadScopeDetected", false)
+            result.putString("broadScopePackages", "")
             promise.resolve(result)
         }
     }
@@ -671,6 +813,34 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
      * Check LSPosed's SQLite database for module enabled state
      * Works with ReLSPosed and modern LSPosed forks
      */
+    private fun hasScopedPackageForModule(modulePackageName: String, targetPackage: String): Boolean {
+        val safeModule = sanitizePackageName(modulePackageName)
+        val safeTarget = sanitizePackageName(targetPackage)
+        if (safeModule.isEmpty() || safeTarget.isEmpty()) return false
+
+        val escapedTarget = escapeShellArg(safeTarget)
+        val checks = listOf(
+            "ls /data/adb/lspd/config/scope/$safeModule/$safeTarget 2>/dev/null",
+            "ls /data/adb/modules/zygisk_lsposed/config/scope/$safeModule/$safeTarget 2>/dev/null",
+            "ls /data/adb/modules/riru_lsposed/config/scope/$safeModule/$safeTarget 2>/dev/null",
+            "cat /data/adb/lspd/config/modules/$safeModule/scope.json 2>/dev/null | grep $escapedTarget",
+            "cat /data/adb/modules/zygisk_lsposed/config/modules/$safeModule/scope.json 2>/dev/null | grep $escapedTarget",
+            "cat /data/adb/modules/riru_lsposed/config/modules/$safeModule/scope.json 2>/dev/null | grep $escapedTarget"
+        )
+
+        for (command in checks) {
+            val output = executeRootCommand(command)
+            if (output.isNotEmpty() &&
+                !output.contains("No such file") &&
+                !output.contains("cannot access")
+            ) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     private fun checkLSPosedDatabase(packageName: String): Boolean {
         val escapedPkg = escapeShellArg(packageName)
         
@@ -1350,6 +1520,32 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         val allowed = setOf("mp4", "mkv", "avi", "mov", "webm", "jpg", "jpeg", "png", "gif")
         val ext = filePath.substringAfterLast('.', "").lowercase().trim()
         return ext.isNotEmpty() && ext in allowed
+    }
+
+    private fun normalizeFilePath(rawPath: String): String {
+        val trimmed = rawPath.trim()
+        return if (trimmed.startsWith("file://")) {
+            trimmed.removePrefix("file://")
+        } else {
+            trimmed
+        }
+    }
+
+    private fun sanitizeFileName(raw: String): String {
+        val cleaned = raw.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        return cleaned.take(64).ifEmpty { "media" }
+    }
+
+    private fun safeReadSmallFile(file: File): String {
+        return try {
+            if (!file.exists() || !file.canRead() || file.length() > 4096) {
+                ""
+            } else {
+                file.readText().trim()
+            }
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     /**

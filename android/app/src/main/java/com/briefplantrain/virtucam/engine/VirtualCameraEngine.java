@@ -135,14 +135,41 @@ public final class VirtualCameraEngine {
         if (!cfg.isTargeted(packageName)) return original;
 
         SurfaceInfo i = (info != null) ? info : inferSurfaceInfo(original);
+        if (i.kind == SurfaceInfo.Kind.UNKNOWN && (i.width <= 0 || i.height <= 0)) {
+            i = new SurfaceInfo(
+                    SurfaceInfo.Kind.UNKNOWN,
+                    1280,
+                    720,
+                    i.format,
+                    (i.note == null ? "" : i.note) + "|fallback_size");
+        }
 
-        boolean replace =
-                i.kind == SurfaceInfo.Kind.SURFACE_TEXTURE ||
-                (i.kind == SurfaceInfo.Kind.UNKNOWN && cfg.aggressiveSurfaceReplace);
+        final boolean replace;
+        if (i.kind == SurfaceInfo.Kind.SURFACE_TEXTURE) {
+            replace = true;
+        } else if (i.kind == SurfaceInfo.Kind.UNKNOWN) {
+            boolean unknownSizeLooksCameraLike =
+                    i.width >= 320 && i.height >= 240 &&
+                    i.width <= 4096 && i.height <= 4096;
+            replace = cfg.aggressiveSurfaceReplace || unknownSizeLooksCameraLike;
+            LogUtil.d(TAG, "Unknown surface decision: replace=" + replace +
+                    " size=" + i.width + "x" + i.height +
+                    " aggressive=" + cfg.aggressiveSurfaceReplace +
+                    " note=" + i.note);
+        } else {
+            replace = false;
+        }
 
-        if (!replace) return original;
+        if (!replace) {
+            LogUtil.d(TAG, "Skipping non-target surface kind=" + i.kind + " size=" + i.width + "x" + i.height);
+            return original;
+        }
 
-        return mappingManager.getOrCreateDrainSurface(original, i);
+        Surface mapped = mappingManager.getOrCreateDrainSurface(original, i);
+        if (mapped == original) {
+            LogUtil.d(TAG, "Surface mapping returned original surface; kind=" + i.kind + " size=" + i.width + "x" + i.height);
+        }
+        return mapped;
     }
 
     public Surface mapRequestTargetSurface(Surface surface) {
@@ -151,6 +178,17 @@ public final class VirtualCameraEngine {
 
     public void rollbackOutputSurfaceMapping(Surface original) {
         mappingManager.removeMapping(original);
+    }
+
+    public String getRoutingDebugSummary() {
+        ConfigSnapshot cfg = configLoader.getSnapshot();
+        int targetCount = cfg.targetPackages != null ? cfg.targetPackages.size() : 0;
+        return "enabled=" + cfg.enabled +
+                ",targeted=" + cfg.isTargeted(packageName) +
+                ",targetMode=" + cfg.targetMode +
+                ",targetPackages=" + targetCount +
+                ",sourceMode=" + cfg.sourceMode +
+                ",hasMedia=" + (cfg.mediaSourcePath != null && !cfg.mediaSourcePath.trim().isEmpty());
     }
 
     private final Runnable renderLoop = new Runnable() {

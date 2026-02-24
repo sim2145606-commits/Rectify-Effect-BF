@@ -37,7 +37,25 @@ wait_for_boot() {
 # Resolve VirtuCam UID
 get_virtucam_uid() {
     local uid
+    uid="$(cmd package list packages -U 2>/dev/null | grep "package:$VIRTUCAM_PKG " | head -n1 | sed -n 's/.* uid:\([0-9][0-9]*\).*/\1/p')"
+    if [ -n "$uid" ] && [ "$uid" -gt 1000 ]; then
+        echo "$uid"
+        return
+    fi
+
+    uid="$(stat -c '%u' "/data/user/0/$VIRTUCAM_PKG" 2>/dev/null)"
+    if [ -n "$uid" ] && [ "$uid" -gt 1000 ]; then
+        echo "$uid"
+        return
+    fi
+
     uid="$(stat -c '%u' "/data/data/$VIRTUCAM_PKG" 2>/dev/null)"
+    if [ -n "$uid" ] && [ "$uid" -gt 1000 ]; then
+        echo "$uid"
+        return
+    fi
+
+    uid="$(dumpsys package "$VIRTUCAM_PKG" 2>/dev/null | grep -m1 "userId=" | sed -n 's/.*userId=\([0-9][0-9]*\).*/\1/p')"
     if [ -n "$uid" ] && [ "$uid" -gt 1000 ]; then
         echo "$uid"
         return
@@ -219,6 +237,29 @@ sync_persistent_store() {
     fi
 }
 
+log_ipc_snapshot() {
+    local cfg_json="$IPC_DIR/config/virtucam_config.json"
+    local cfg_xml="$IPC_DIR/config/virtucam_config.xml"
+    local marker="$IPC_DIR/state/module_active"
+    local media_count="0"
+    local staged_path=""
+
+    if [ -d "$IPC_DIR/media" ]; then
+        media_count="$(ls -1 "$IPC_DIR/media" 2>/dev/null | wc -l | tr -d ' ')"
+        [ -z "$media_count" ] && media_count="0"
+    fi
+
+    if [ -f "$cfg_json" ]; then
+        staged_path="$(tr -d '\n' < "$cfg_json" 2>/dev/null | sed -n 's/.*"mediaSourcePath"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    fi
+
+    log "IPC snapshot: cfg_json=$( [ -r "$cfg_json" ] && echo yes || echo no ), cfg_xml=$( [ -r "$cfg_xml" ] && echo yes || echo no ), marker=$( [ -e "$marker" ] && echo yes || echo no ), media_files=$media_count, staged_path='${staged_path}'"
+}
+
+mkdir -p "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" "$MODULE_DIR/logs" 2>/dev/null
+chmod 0777 "$IPC_DIR" "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" 2>/dev/null
+chmod 0755 "$MODULE_DIR" "$MODULE_DIR/logs" 2>/dev/null
+
 wait_for_boot
 
 log "=== service.sh started ==="
@@ -233,6 +274,7 @@ grant_permissions
 ensure_lsposed_scope
 sync_persistent_store
 fix_ipc_contexts
+log_ipc_snapshot
 
 # Write companion ready status to IPC
 printf 'ready\n' > "$IPC_DIR/state/companion_status"

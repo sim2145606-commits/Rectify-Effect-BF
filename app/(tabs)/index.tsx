@@ -13,10 +13,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { FontSize, Spacing, BorderRadius, STORAGE_KEYS, platformShadow } from '@/constants/theme';
+import { FontSize, Spacing, BorderRadius, STORAGE_KEYS } from '@/constants/theme';
 import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useSystemStatus } from '@/hooks/useSystemStatus';
@@ -58,7 +59,6 @@ export default function Dashboard() {
   const [bridgeHookEnabled, setBridgeHookEnabled] = useState(false);
   const [bridgeMediaPath, setBridgeMediaPath] = useState<string | null>(null);
   const [bridgeCameraTarget, setBridgeCameraTarget] = useState<string>('front');
-  const [bridgeTargetAppsCount, setBridgeTargetAppsCount] = useState(0);
 
   const masterGlow = useSharedValue(0);
   const masterScale = useSharedValue(1);
@@ -71,29 +71,35 @@ export default function Dashboard() {
         setBridgeHookEnabled(config.enabled || false);
         setBridgeMediaPath(config.mediaSourcePath || null);
         setBridgeCameraTarget(config.cameraTarget || 'front');
-        setBridgeTargetAppsCount(config.targetPackages?.length || 0);
       }
     } catch {
       // Silent
     }
   }, []);
 
+  const syncBridgeState = useCallback(async () => {
+    try {
+      await syncAllSettings();
+      const bridgeSt = await getBridgeStatus();
+      setBridgeVersion(bridgeSt.version);
+      setBridgePath(bridgeSt.path);
+      setBridgeReadable(bridgeSt.readable);
+      setLastSyncTime(new Date().toLocaleTimeString());
+      await applyBridgeConfig();
+    } catch {
+      // Silent
+    }
+  }, [applyBridgeConfig]);
+
   useEffect(() => {
-    const doSync = async () => {
-      try {
-        await syncAllSettings();
-        const bridgeSt = await getBridgeStatus();
-        setBridgeVersion(bridgeSt.version);
-        setBridgePath(bridgeSt.path);
-        setBridgeReadable(bridgeSt.readable);
-        setLastSyncTime(new Date().toLocaleTimeString());
-        await applyBridgeConfig();
-      } catch {
-        // Silent
-      }
-    };
-    void doSync();
-  }, [hookEnabled, frontCamera, backCamera, selectedMedia, applyBridgeConfig]);
+    void syncBridgeState();
+  }, [hookEnabled, frontCamera, backCamera, selectedMedia, syncBridgeState]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void syncBridgeState();
+    }, [syncBridgeState])
+  );
 
   useEffect(() => {
     const loadInfo = async () => {
@@ -142,10 +148,6 @@ export default function Dashboard() {
     transform: [{ scale: masterScale.value }],
   }));
 
-  const scanLineStyle = useAnimatedStyle(() => ({
-    top: `${scanLineY.value * 100}%` as `${number}%`,
-  }));
-
   const allSystemsReady = systemStatus.overallReady;
   const canEnableHook =
     systemStatus.rootAccess.status === 'ok' &&
@@ -176,18 +178,12 @@ export default function Dashboard() {
   const handleRefreshStatus = useCallback(async () => {
     mediumImpact();
     await refreshSystemStatus();
-    await syncAllSettings();
-    const bridgeSt = await getBridgeStatus();
-    setBridgeVersion(bridgeSt.version);
-    setBridgePath(bridgeSt.path);
-    setBridgeReadable(bridgeSt.readable);
-    setLastSyncTime(new Date().toLocaleTimeString());
-    await applyBridgeConfig();
+    await syncBridgeState();
     setLoadingSystemInfo(true);
     const info = await getSystemInfo();
     setSystemInfo(info);
     setLoadingSystemInfo(false);
-  }, [mediumImpact, refreshSystemStatus, applyBridgeConfig]);
+  }, [mediumImpact, refreshSystemStatus, syncBridgeState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

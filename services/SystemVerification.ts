@@ -55,6 +55,34 @@ export type SystemVerificationState = {
   overlayPermission: SystemCheck;
 };
 
+type XposedStatusResult = {
+  hookReady?: boolean;
+  lsposedInstalled?: boolean;
+  moduleLoaded?: boolean;
+  moduleScoped?: boolean;
+  hookConfigured?: boolean;
+  detectionMethod?: string;
+  scopeEvaluationReason?: string;
+  configuredTargets?: string;
+  broadScopeDetected?: boolean;
+  broadScopePackages?: string;
+};
+
+type IpcStatusResult = {
+  configJsonExists?: boolean;
+  configJsonReadable?: boolean;
+  companionStatus?: string;
+  stagedMediaPath?: string;
+  stagedMediaExists?: boolean;
+  stagedMediaReadable?: boolean;
+};
+
+type MappingLogStatus = {
+  hasMappingLog: boolean;
+  latestMappedCount: number | null;
+  latestZeroReason: string | null;
+};
+
 const CACHE_KEY = STORAGE_KEYS.SYSTEM_STATUS;
 
 export const INITIAL_SYSTEM_STATE: SystemVerificationState = {
@@ -96,6 +124,72 @@ export function getStatusIcon(status: SystemCheckStatus): IoniconsName {
     case 'loading':
     default:
       return 'hourglass';
+  }
+}
+
+function parseMappingLogStatus(logs: string): MappingLogStatus {
+  if (!logs) {
+    return {
+      hasMappingLog: false,
+      latestMappedCount: null,
+      latestZeroReason: null,
+    };
+  }
+
+  const lines = logs.split(/\r?\n/);
+  let latestMappedCount: number | null = null;
+  let latestZeroReason: string | null = null;
+
+  for (const line of lines) {
+    const mappedMatch = line.match(/mapped=(\d+)/);
+    if (!mappedMatch) continue;
+    const mapped = Number(mappedMatch[1]);
+    if (!Number.isFinite(mapped)) continue;
+
+    latestMappedCount = mapped;
+    if (mapped === 0) {
+      const reasonMatch = line.match(/reason=\{([^}]*)\}/);
+      if (reasonMatch && reasonMatch[1]) {
+        latestZeroReason = reasonMatch[1];
+      }
+    }
+  }
+
+  return {
+    hasMappingLog: latestMappedCount !== null,
+    latestMappedCount,
+    latestZeroReason,
+  };
+}
+
+function getScopeDetail(scopeReason: string, hasTargets: boolean): string {
+  if (scopeReason === 'whitelist_no_targets_configured') {
+    return 'Whitelist mode has no local target apps configured';
+  }
+  if (scopeReason === 'whitelist_targets_not_in_scope') {
+    return 'Whitelist targets are not in LSPosed scope';
+  }
+  if (scopeReason === 'configured_targets_scoped') {
+    return 'Configured targets found in LSPosed scope';
+  }
+  if (scopeReason === 'non_whitelist_mode') {
+    return 'Scope accepted in non-whitelist mode';
+  }
+  if (!hasTargets) {
+    return 'No local target app constraints configured';
+  }
+  return scopeReason || 'Scope status unclear';
+}
+
+async function getMappingStatus(): Promise<MappingLogStatus> {
+  try {
+    if (!VirtuCamSettings?.getXposedLogs) {
+      return { hasMappingLog: false, latestMappedCount: null, latestZeroReason: null };
+    }
+    const logsResult = (await VirtuCamSettings.getXposedLogs()) as { logs?: string };
+    return parseMappingLogStatus(String(logsResult?.logs ?? ''));
+  } catch {
+    return { hasMappingLog: false, latestMappedCount: null, latestZeroReason: null };
   }
 }
 
@@ -192,10 +286,35 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
       };
     }
 
-    // Check Xposed/LSPosed
+    // Check Xposed/LSPosed + IPC/mapping health
     if (VirtuCamSettings && VirtuCamSettings.checkXposedStatus) {
       try {
-        const xposedResult = await VirtuCamSettings.checkXposedStatus();
+        const xposedResult = (await VirtuCamSettings.checkXposedStatus()) as XposedStatusResult;
+        const ipcStatus = VirtuCamSettings.getIpcStatus
+          ? ((await VirtuCamSettings.getIpcStatus()) as IpcStatusResult)
+          : null;
+        const mappingStatus = await getMappingStatus();
+
+        const hasConfiguredTargets =
+          String(xposedResult.configuredTargets ?? '')
+            .trim()
+            .length > 0;
+        const scopeReason = String(xposedResult.scopeEvaluationReason ?? '');
+        const scopeDetail = getScopeDetail(scopeReason, hasConfiguredTargets);
+        const broadScopeDetected = xposedResult.broadScopeDetected === true;
+        const broadScopePackages = String(xposedResult.broadScopePackages ?? '').trim();
+
+        const configJsonReady = ipcStatus
+          ? ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true
+          : null;
+        const companionReady = ipcStatus
+          ? String(ipcStatus.companionStatus ?? '').trim().toLowerCase() === 'ready'
+          : null;
+        const stagedMediaPath = String(ipcStatus?.stagedMediaPath ?? '').trim();
+        const stagedMediaReadable =
+          stagedMediaPath.length === 0
+            ? null
+            : ipcStatus?.stagedMediaExists === true && ipcStatus?.stagedMediaReadable === true;
 
         if (xposedResult.hookReady) {
           result.xposedFramework = {
@@ -203,20 +322,73 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             detail: 'Framework active',
             status: 'ok',
           };
-          result.moduleActive = {
-            label: 'VirtuCam Module',
-            detail: `Hook ready (${xposedResult.detectionMethod || 'detected'})`,
-            status: 'ok',
-          };
-          result.moduleScoped = {
-            label: 'Module Scope',
-            detail: 'Module is scoped to app targets',
-            status: 'ok',
-          };
+
+          if (mappingStatus.hasMappingLog && (mappingStatus.latestMappedCount ?? 0) === 0) {
+            const reasonSuffix = mappingStatus.latestZeroReason
+              ? ` (${mappingStatus.latestZeroReason})`
+              : '';
+            result.moduleActive = {
+              label: 'VirtuCam Module',
+              detail: `Hook loaded but mapped=0${reasonSuffix}`,
+              status: 'warning',
+            };
+          } else if (
+            mappingStatus.hasMappingLog &&
+            typeof mappingStatus.latestMappedCount === 'number' &&
+            mappingStatus.latestMappedCount > 0
+          ) {
+            result.moduleActive = {
+              label: 'VirtuCam Module',
+              detail: `Hook ready; mapped=${mappingStatus.latestMappedCount}`,
+              status: 'ok',
+            };
+          } else {
+            result.moduleActive = {
+              label: 'VirtuCam Module',
+              detail: `Hook ready (${xposedResult.detectionMethod || 'detected'})`,
+              status: 'ok',
+            };
+          }
+
+          if (broadScopeDetected) {
+            result.moduleScoped = {
+              label: 'Module Scope',
+              detail: broadScopePackages
+                ? `Broad scope entries detected: ${broadScopePackages}`
+                : 'Broad system scope entries detected',
+              status: 'warning',
+            };
+          } else {
+            result.moduleScoped = {
+              label: 'Module Scope',
+              detail: scopeDetail,
+              status: xposedResult.moduleScoped ? 'ok' : 'warning',
+            };
+          }
+
+          let hookConfigStatus: SystemCheckStatus = xposedResult.hookConfigured ? 'ok' : 'warning';
+          const hookConfigNotes: string[] = [];
+          if (xposedResult.hookConfigured) {
+            hookConfigNotes.push('Hook config valid');
+          } else {
+            hookConfigNotes.push('Enable hook and select media source');
+          }
+          if (configJsonReady === false) {
+            hookConfigStatus = 'warning';
+            hookConfigNotes.push('IPC config missing/unreadable');
+          }
+          if (companionReady === false) {
+            hookConfigStatus = 'warning';
+            hookConfigNotes.push('Companion not ready');
+          }
+          if (stagedMediaReadable === false) {
+            hookConfigStatus = 'warning';
+            hookConfigNotes.push('Staged media missing/unreadable');
+          }
           result.hookConfigured = {
             label: 'Hook Configuration',
-            detail: 'Enabled with valid media + targets',
-            status: 'ok',
+            detail: hookConfigNotes.join(' - '),
+            status: hookConfigStatus,
           };
         } else if (xposedResult.lsposedInstalled) {
           result.xposedFramework = {
@@ -231,25 +403,41 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
               : 'Module not loaded in hooked process yet',
             status: 'warning',
           };
-          const scopeReason = xposedResult.scopeEvaluationReason;
-          const scopeDetail = xposedResult.moduleScoped
-            ? scopeReason === 'non_whitelist_mode'
-              ? 'Scope accepted (non-whitelist target mode)'
-              : 'Scope configured'
-            : scopeReason === 'whitelist_no_targets_configured'
-              ? 'Whitelist mode has no local targets configured'
-              : 'Scope missing for target app(s)';
 
-          result.moduleScoped = {
-            label: 'Module Scope',
-            detail: scopeDetail,
-            status: xposedResult.moduleScoped ? 'ok' : 'warning',
-          };
+          if (broadScopeDetected) {
+            result.moduleScoped = {
+              label: 'Module Scope',
+              detail: broadScopePackages
+                ? `Broad scope entries detected: ${broadScopePackages}`
+                : 'Broad system scope entries detected',
+              status: 'warning',
+            };
+          } else {
+            result.moduleScoped = {
+              label: 'Module Scope',
+              detail: scopeDetail,
+              status: xposedResult.moduleScoped ? 'ok' : 'warning',
+            };
+          }
+
+          const notes: string[] = [];
+          if (xposedResult.hookConfigured) {
+            notes.push('Hook config valid');
+          } else {
+            notes.push('Enable hook and select media source');
+          }
+          if (configJsonReady === false) {
+            notes.push('IPC config missing/unreadable');
+          }
+          if (companionReady === false) {
+            notes.push('Companion not ready');
+          }
+          if (stagedMediaReadable === false) {
+            notes.push('Staged media missing/unreadable');
+          }
           result.hookConfigured = {
             label: 'Hook Configuration',
-            detail: xposedResult.hookConfigured
-              ? 'Hook config valid'
-              : 'Enable hook and select media source',
+            detail: notes.join(' - '),
             status: xposedResult.hookConfigured ? 'ok' : 'warning',
           };
         } else {
@@ -359,7 +547,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
     } else {
       if (VirtuCamSettings && VirtuCamSettings.checkAllFilesAccess) {
         try {
-          const allFilesGranted = VirtuCamSettings.checkAllFilesAccess();
+          const allFilesGranted = await VirtuCamSettings.checkAllFilesAccess();
           result.storagePermission = {
             label: 'Storage Permission',
             detail: allFilesGranted ? 'All files access granted' : 'Grant storage access',

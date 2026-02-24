@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/theme';
 import { logger } from './LogService';
+import { syncAllSettings } from './ConfigBridge';
 
 export type LocalPreset = {
   id: string;
@@ -136,11 +137,10 @@ export async function applyPreset(preset: LocalPreset): Promise<void> {
       [STORAGE_KEYS.OFFSET_Y, JSON.stringify(preset.offset_y)],
     ];
 
-    if (preset.media_uri) {
-      pairs.push([STORAGE_KEYS.SELECTED_MEDIA, JSON.stringify(preset.media_uri)]);
-    }
+    pairs.push([STORAGE_KEYS.SELECTED_MEDIA, JSON.stringify(preset.media_uri)]);
 
     await AsyncStorage.multiSet(pairs);
+    await syncAllSettings();
   } catch (err: unknown) {
     logger.error('Failed to apply preset', 'PresetService', err);
     throw new Error('Failed to apply preset');

@@ -4,12 +4,16 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  FlatList,
   Pressable,
   Alert,
   Platform,
   ActivityIndicator,
   Linking,
   Switch,
+  Modal,
+  TextInput,
+  NativeModules,
 } from 'react-native';
 import Animated, {
   FadeInDown,
@@ -42,34 +46,82 @@ import { writeBridgeConfig } from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
 
+const { VirtuCamSettings } = NativeModules;
+
 type TargetMode = 'all' | 'whitelist' | 'blacklist';
+type TargetAppSource = 'preset' | 'custom';
 type TargetAppItem = {
   id: string;
   name: string;
   packageName: string;
   enabled: boolean;
+  source: TargetAppSource;
+};
+type InstalledAppItem = {
+  packageName: string;
+  name: string;
 };
 
 const TARGET_APP_PRESETS: Array<Omit<TargetAppItem, 'enabled'>> = [
-  { id: 'camera', name: 'Camera', packageName: 'com.android.camera' },
-  { id: 'whatsapp', name: 'WhatsApp', packageName: 'com.whatsapp' },
-  { id: 'telegram', name: 'Telegram', packageName: 'org.telegram.messenger' },
-  { id: 'messenger', name: 'Messenger', packageName: 'com.facebook.orca' },
-  { id: 'meet', name: 'Google Meet', packageName: 'com.google.android.apps.meetings' },
-  { id: 'zoom', name: 'Zoom', packageName: 'us.zoom.videomeetings' },
+  { id: 'camera', name: 'Camera', packageName: 'com.android.camera', source: 'preset' },
+  { id: 'whatsapp', name: 'WhatsApp', packageName: 'com.whatsapp', source: 'preset' },
+  { id: 'telegram', name: 'Telegram', packageName: 'org.telegram.messenger', source: 'preset' },
+  { id: 'messenger', name: 'Messenger', packageName: 'com.facebook.orca', source: 'preset' },
+  { id: 'meet', name: 'Google Meet', packageName: 'com.google.android.apps.meetings', source: 'preset' },
+  { id: 'zoom', name: 'Zoom', packageName: 'us.zoom.videomeetings', source: 'preset' },
 ];
 
-function mergeTargetApps(stored: TargetAppItem[] | null | undefined): TargetAppItem[] {
-  const safeStored = Array.isArray(stored) ? stored : [];
-  return TARGET_APP_PRESETS.map(preset => {
-    const existing = safeStored.find(app => app?.packageName === preset.packageName);
-    return {
-      ...preset,
-      enabled: !!existing?.enabled,
-    };
-  });
+const PRESET_PACKAGE_SET = new Set(TARGET_APP_PRESETS.map(app => app.packageName));
+
+function sanitizeTargetApp(input: unknown): TargetAppItem | null {
+  if (!input || typeof input !== 'object') return null;
+  const candidate = input as Partial<TargetAppItem>;
+  if (typeof candidate.packageName !== 'string' || typeof candidate.name !== 'string') return null;
+
+  const packageName = candidate.packageName.trim();
+  const name = candidate.name.trim();
+  if (!packageName || !name) return null;
+
+  const source: TargetAppSource =
+    candidate.source === 'preset' || PRESET_PACKAGE_SET.has(packageName) ? 'preset' : 'custom';
+
+  return {
+    id: typeof candidate.id === 'string' && candidate.id.trim()
+      ? candidate.id
+      : `${source}-${packageName}`,
+    name,
+    packageName,
+    enabled: candidate.enabled === true,
+    source,
+  };
 }
 
+function mergeTargetApps(stored: TargetAppItem[] | null | undefined): TargetAppItem[] {
+  const safeStored = (Array.isArray(stored) ? stored : [])
+    .map(sanitizeTargetApp)
+    .filter((app): app is TargetAppItem => app !== null);
+
+  const byPackage = new Map<string, TargetAppItem>();
+  safeStored.forEach(app => {
+    byPackage.set(app.packageName, app);
+  });
+
+  const presets = TARGET_APP_PRESETS.map(preset => {
+    const existing = byPackage.get(preset.packageName);
+    return {
+      ...preset,
+      enabled: existing?.enabled === true,
+      source: 'preset' as const,
+    };
+  });
+
+  const customApps = safeStored
+    .filter(app => !PRESET_PACKAGE_SET.has(app.packageName))
+    .map(app => ({ ...app, source: 'custom' as const }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return [...presets, ...customApps];
+}
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -86,8 +138,46 @@ export default function SettingsScreen() {
   const [isResetting, setIsResetting] = useState(false);
   const [targetMode, setTargetMode] = useStorage<TargetMode>(STORAGE_KEYS.TARGET_MODE, 'all');
   const [targetApps, setTargetApps] = useStorage<TargetAppItem[]>(STORAGE_KEYS.TARGET_APPS, []);
+  const [isPickerVisible, setIsPickerVisible] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState('');
+  const [installedApps, setInstalledApps] = useState<InstalledAppItem[]>([]);
 
   const resolvedTargetApps = useMemo(() => mergeTargetApps(targetApps), [targetApps]);
+  const enabledTargetApps = useMemo(
+    () => resolvedTargetApps.filter(app => app.enabled),
+    [resolvedTargetApps]
+  );
+  const broadScopePackages = useMemo(() => {
+    if (!rawXposedDebug?.broadScopePackages) return [];
+    return rawXposedDebug.broadScopePackages
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean);
+  }, [rawXposedDebug]);
+  const scopeMismatchDetail = useMemo(() => {
+    if (!rawXposedDebug) return '';
+    if (targetMode !== 'whitelist') return '';
+    const configured = enabledTargetApps.length;
+    const scoped = rawXposedDebug.scopedTargetsCount;
+    if (configured === 0) {
+      return 'Whitelist mode has no enabled local target apps.';
+    }
+    if (scoped < configured) {
+      return `Whitelist mismatch: ${scoped}/${configured} enabled local targets are scoped in LSPosed.`;
+    }
+    return '';
+  }, [rawXposedDebug, targetMode, enabledTargetApps]);
+
+  const filteredInstalledApps = useMemo(() => {
+    const query = pickerQuery.trim().toLowerCase();
+    const base = query.length === 0
+      ? installedApps
+      : installedApps.filter(app =>
+          app.name.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query)
+        );
+    return base.slice(0, 200);
+  }, [installedApps, pickerQuery]);
 
   const pushTargetBridgeConfig = useCallback((mode: TargetMode, apps: TargetAppItem[]) => {
     const enabledPackages = apps.filter(app => app.enabled).map(app => app.packageName);
@@ -96,6 +186,47 @@ export default function SettingsScreen() {
       targetPackages: enabledPackages,
     }).catch(() => {});
   }, []);
+
+  const loadInstalledApps = useCallback(async () => {
+    if (!VirtuCamSettings?.getAllInstalledApps) {
+      Alert.alert('Unavailable', 'Native app picker API is not available on this build.');
+      return;
+    }
+
+    setPickerLoading(true);
+    try {
+      const rawList = await VirtuCamSettings.getAllInstalledApps();
+      const parsed = Array.isArray(rawList)
+        ? rawList
+            .map((entry: unknown) => {
+              if (!entry || typeof entry !== 'object') return null;
+              const candidate = entry as Partial<InstalledAppItem>;
+              if (typeof candidate.packageName !== 'string' || typeof candidate.name !== 'string') {
+                return null;
+              }
+              const packageName = candidate.packageName.trim();
+              const name = candidate.name.trim();
+              if (!packageName || !name) return null;
+              return { packageName, name } as InstalledAppItem;
+            })
+            .filter((entry): entry is InstalledAppItem => entry !== null)
+            .sort((a, b) => a.name.localeCompare(b.name))
+        : [];
+
+      setInstalledApps(parsed);
+    } catch {
+      Alert.alert('Scan Failed', 'Unable to load installed apps.');
+    } finally {
+      setPickerLoading(false);
+    }
+  }, []);
+
+  const handleOpenAddAppPicker = useCallback(async () => {
+    lightImpact();
+    setPickerQuery('');
+    await loadInstalledApps();
+    setIsPickerVisible(true);
+  }, [lightImpact, loadInstalledApps]);
 
   const handleRequestPermission = useCallback(
     async (type: string) => {
@@ -140,6 +271,20 @@ export default function SettingsScreen() {
     pushTargetBridgeConfig(targetMode, resolvedTargetApps);
   }, [targetMode, resolvedTargetApps, pushTargetBridgeConfig]);
 
+  useEffect(() => {
+    let active = true;
+    const refreshRawDebug = async () => {
+      const info = await getRawXposedDebugInfo();
+      if (active) {
+        setRawXposedDebug(info);
+      }
+    };
+    void refreshRawDebug();
+    return () => {
+      active = false;
+    };
+  }, [targetMode, resolvedTargetApps.length]);
+
   const handleTargetModeChange = useCallback((mode: TargetMode) => {
     lightImpact();
     setTargetMode(mode);
@@ -151,6 +296,39 @@ export default function SettingsScreen() {
     const nextApps = resolvedTargetApps.map(app =>
       app.packageName === packageName ? { ...app, enabled: !app.enabled } : app
     );
+    setTargetApps(nextApps);
+    pushTargetBridgeConfig(targetMode, nextApps);
+  }, [lightImpact, resolvedTargetApps, setTargetApps, targetMode, pushTargetBridgeConfig]);
+
+  const handleAddCustomTargetApp = useCallback((app: InstalledAppItem) => {
+    lightImpact();
+    const existing = resolvedTargetApps.find(item => item.packageName === app.packageName);
+    let nextApps: TargetAppItem[];
+    if (existing) {
+      nextApps = resolvedTargetApps.map(item =>
+        item.packageName === app.packageName
+          ? { ...item, enabled: true, name: app.name }
+          : item
+      );
+    } else {
+      nextApps = [
+        ...resolvedTargetApps,
+        {
+          id: `custom-${app.packageName}`,
+          name: app.name,
+          packageName: app.packageName,
+          enabled: true,
+          source: 'custom',
+        },
+      ];
+    }
+    setTargetApps(nextApps);
+    pushTargetBridgeConfig(targetMode, nextApps);
+  }, [lightImpact, resolvedTargetApps, setTargetApps, pushTargetBridgeConfig, targetMode]);
+
+  const handleRemoveCustomTargetApp = useCallback((packageName: string) => {
+    lightImpact();
+    const nextApps = resolvedTargetApps.filter(app => app.packageName !== packageName);
     setTargetApps(nextApps);
     pushTargetBridgeConfig(targetMode, nextApps);
   }, [lightImpact, resolvedTargetApps, setTargetApps, targetMode, pushTargetBridgeConfig]);
@@ -408,29 +586,182 @@ export default function SettingsScreen() {
             })}
           </View>
 
-          {resolvedTargetApps.map((app, index) => (
-            <View
-              key={app.packageName}
-              style={[
-                styles.targetAppRow,
-                index < resolvedTargetApps.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
-              ]}
+          <View style={styles.targetActionsRow}>
+            <Text style={[styles.targetActionsHint, { color: colors.textTertiary }]}>
+              {enabledTargetApps.length} enabled app{enabledTargetApps.length === 1 ? '' : 's'}
+            </Text>
+            <Pressable
+              onPress={() => void handleOpenAddAppPicker()}
+              style={[styles.addAppButton, { backgroundColor: colors.electricBlue + '18', borderColor: colors.electricBlue + '35' }]}
             >
-              <View style={styles.targetAppInfo}>
-                <Text style={[styles.targetAppName, { color: colors.textPrimary }]}>{app.name}</Text>
-                <Text style={[styles.targetAppPkg, { color: colors.textTertiary }]}>{app.packageName}</Text>
-              </View>
-              <Switch
-                value={app.enabled}
-                onValueChange={() => handleToggleTargetApp(app.packageName)}
-                trackColor={{ false: colors.inactive, true: colors.electricBlue + '60' }}
-                thumbColor={app.enabled ? colors.electricBlue : colors.textTertiary}
-                disabled={targetMode === 'all'}
-              />
+              {pickerLoading ? (
+                <ActivityIndicator size="small" color={colors.electricBlue} />
+              ) : (
+                <Ionicons name="add-circle-outline" size={15} color={colors.electricBlue} />
+              )}
+              <Text style={[styles.addAppButtonText, { color: colors.electricBlue }]}>Add Application</Text>
+            </Pressable>
+          </View>
+
+          {broadScopePackages.length > 0 && (
+            <View style={[styles.scopeAlertBox, { backgroundColor: colors.warningAmber + '18', borderColor: colors.warningAmber + '40' }]}>
+              <Ionicons name="warning-outline" size={14} color={colors.warningAmber} />
+              <Text style={[styles.scopeAlertText, { color: colors.warningAmber }]}>
+                Broad LSPosed scope entries detected ({broadScopePackages.join(', ')}). This can cause lag/hangs.
+              </Text>
             </View>
-          ))}
+          )}
+
+          {scopeMismatchDetail.length > 0 && (
+            <View style={[styles.scopeAlertBox, { backgroundColor: colors.danger + '14', borderColor: colors.danger + '35' }]}>
+              <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
+              <Text style={[styles.scopeAlertText, { color: colors.danger }]}>{scopeMismatchDetail}</Text>
+            </View>
+          )}
+
+          {rawXposedDebug && (
+            <Text style={[styles.scopeMeta, { color: colors.textTertiary }]}>
+              Scope reason: {rawXposedDebug.scopeEvaluationReason} | Mapping: {rawXposedDebug.mappingHint}
+            </Text>
+          )}
+
+          {resolvedTargetApps.length === 0 ? (
+            <View style={styles.emptyTargetApps}>
+              <Text style={[styles.emptyTargetAppsText, { color: colors.textTertiary }]}>No target apps configured.</Text>
+            </View>
+          ) : (
+            resolvedTargetApps.map((app, index) => {
+              const isCustom = app.source === 'custom';
+              return (
+                <View
+                  key={app.packageName}
+                  style={[
+                    styles.targetAppRow,
+                    index < resolvedTargetApps.length - 1 && {
+                      borderBottomColor: colors.border,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                >
+                  <View style={styles.targetAppInfo}>
+                    <View style={styles.targetAppTitleRow}>
+                      <Text style={[styles.targetAppName, { color: colors.textPrimary }]}>{app.name}</Text>
+                      <View
+                        style={[
+                          styles.targetSourceBadge,
+                          {
+                            backgroundColor: isCustom ? colors.cyan + '20' : colors.surfaceLight,
+                            borderColor: isCustom ? colors.cyan + '40' : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.targetSourceBadgeText,
+                            { color: isCustom ? colors.cyan : colors.textTertiary },
+                          ]}
+                        >
+                          {isCustom ? 'Custom' : 'Preset'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.targetAppPkg, { color: colors.textTertiary }]}>{app.packageName}</Text>
+                  </View>
+                  <View style={styles.targetRowActions}>
+                    {isCustom && (
+                      <Pressable
+                        onPress={() => handleRemoveCustomTargetApp(app.packageName)}
+                        style={[styles.removeAppButton, { borderColor: colors.danger + '40', backgroundColor: colors.danger + '12' }]}
+                      >
+                        <Ionicons name="trash-outline" size={13} color={colors.danger} />
+                      </Pressable>
+                    )}
+                    <Switch
+                      value={app.enabled}
+                      onValueChange={() => handleToggleTargetApp(app.packageName)}
+                      trackColor={{ false: colors.inactive, true: colors.electricBlue + '60' }}
+                      thumbColor={app.enabled ? colors.electricBlue : colors.textTertiary}
+                      disabled={targetMode === 'all'}
+                    />
+                  </View>
+                </View>
+              );
+            })
+          )}
         </Card>
       </Animated.View>
+
+      <Modal
+        visible={isPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsPickerVisible(false)}
+      >
+        <View style={styles.pickerBackdrop}>
+          <View style={[styles.pickerSheet, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
+            <View style={[styles.pickerHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerTitle, { color: colors.textPrimary }]}>Add Application</Text>
+              <Pressable onPress={() => setIsPickerVisible(false)} style={styles.pickerCloseButton}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <TextInput
+              value={pickerQuery}
+              onChangeText={setPickerQuery}
+              placeholder="Search name or package"
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.pickerSearchInput, { color: colors.textPrimary, borderColor: colors.border, backgroundColor: colors.surfaceLight }]}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            {pickerLoading ? (
+              <View style={styles.pickerLoading}>
+                <ActivityIndicator size="small" color={colors.electricBlue} />
+                <Text style={[styles.pickerLoadingText, { color: colors.textSecondary }]}>Scanning installed apps...</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={filteredInstalledApps}
+                keyExtractor={item => item.packageName}
+                keyboardShouldPersistTaps="handled"
+                renderItem={({ item }) => {
+                  const alreadyAdded = resolvedTargetApps.some(app => app.packageName === item.packageName);
+                  return (
+                    <Pressable
+                      onPress={() => {
+                        handleAddCustomTargetApp(item);
+                        setIsPickerVisible(false);
+                      }}
+                      style={[styles.pickerAppRow, { borderBottomColor: colors.border }]}
+                    >
+                      <View style={styles.pickerAppInfo}>
+                        <Text style={[styles.pickerAppName, { color: colors.textPrimary }]} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        <Text style={[styles.pickerAppPackage, { color: colors.textTertiary }]} numberOfLines={1}>
+                          {item.packageName}
+                        </Text>
+                      </View>
+                      <Text style={[styles.pickerAppAction, { color: alreadyAdded ? colors.warningAmber : colors.electricBlue }]}>
+                        {alreadyAdded ? 'Enable' : 'Add'}
+                      </Text>
+                    </Pressable>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={styles.pickerEmpty}>
+                    <Text style={[styles.pickerEmptyText, { color: colors.textTertiary }]}>
+                      No matching apps found.
+                    </Text>
+                  </View>
+                }
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Permissions Section */}
       <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(200).duration(500)}>
@@ -628,10 +959,19 @@ export default function SettingsScreen() {
                 scopedTargets: {rawXposedDebug.scopedTargets || '(none)'}
               </Text>
               <Text style={styles.rawDebugLine}>
+                targetCount: {rawXposedDebug.scopedTargetsCount}/{rawXposedDebug.configuredTargetsCount}
+              </Text>
+              <Text style={styles.rawDebugLine}>
                 moduleLoaded={String(rawXposedDebug.moduleLoaded)} | moduleScoped={String(rawXposedDebug.moduleScoped)}
               </Text>
               <Text style={styles.rawDebugLine}>
                 hookConfigured={String(rawXposedDebug.hookConfigured)} | hookReady={String(rawXposedDebug.hookReady)}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                broadScope={String(rawXposedDebug.broadScopeDetected)} {rawXposedDebug.broadScopePackages || ''}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                mappingHint: {rawXposedDebug.mappingHint}
               </Text>
               <Text style={styles.rawDebugHint}>
                 Tip: if moduleLoaded=false after reboot, open a scoped target app once, then run diagnostics again.
@@ -906,6 +1246,168 @@ const styles = StyleSheet.create({
   targetAppPkg: {
     fontSize: FontSize.xs,
     marginTop: 2,
+  },
+  targetActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.sm,
+    gap: Spacing.md,
+  },
+  targetActionsHint: {
+    fontSize: FontSize.xs,
+    flex: 1,
+  },
+  addAppButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  addAppButtonText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  scopeAlertBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  scopeAlertText: {
+    flex: 1,
+    fontSize: FontSize.xs,
+    lineHeight: 16,
+  },
+  scopeMeta: {
+    fontSize: FontSize.xs,
+    marginBottom: Spacing.sm,
+    lineHeight: 16,
+  },
+  emptyTargetApps: {
+    paddingVertical: Spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyTargetAppsText: {
+    fontSize: FontSize.sm,
+  },
+  targetAppTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  targetSourceBadge: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.xs + 2,
+    paddingVertical: 2,
+  },
+  targetSourceBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  targetRowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  removeAppButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    maxHeight: '82%',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xl,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  pickerTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+  },
+  pickerCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerSearchInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.sm,
+    fontSize: FontSize.sm,
+  },
+  pickerLoading: {
+    paddingVertical: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  pickerLoadingText: {
+    fontSize: FontSize.sm,
+  },
+  pickerAppRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.md,
+  },
+  pickerAppInfo: {
+    flex: 1,
+  },
+  pickerAppName: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+  },
+  pickerAppPackage: {
+    fontSize: FontSize.xs,
+    marginTop: 2,
+  },
+  pickerAppAction: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+  },
+  pickerEmpty: {
+    paddingVertical: Spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerEmptyText: {
+    fontSize: FontSize.sm,
   },
   permissionRow: {
     flexDirection: 'row',
