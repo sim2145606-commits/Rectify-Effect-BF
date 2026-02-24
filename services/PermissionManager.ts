@@ -29,6 +29,11 @@ type XposedStatusResult = {
   runtimeHookObserved?: boolean;
   scopeEvaluationReason?: string;
   mappingFailureReason?: string;
+  configPrimaryReadable?: boolean;
+  hookLastReadOk?: boolean;
+  runtimeReady?: boolean;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
 };
 
 type IpcStatusResult = {
@@ -37,6 +42,14 @@ type IpcStatusResult = {
   runtimeStatus?: string;
   configJsonExists?: boolean;
   configJsonReadable?: boolean;
+  configPrimaryReadable?: boolean;
+  config_primary_readable?: boolean;
+  hookLastReadOk?: boolean;
+  hook_last_read_ok?: boolean;
+  runtimeReady?: boolean;
+  runtime_ready?: boolean;
+  lastErrorCode?: string;
+  last_error_code?: string;
 };
 
 function normalizeState(raw: unknown): string {
@@ -91,10 +104,21 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     const mappingFailureReason = normalizeState(result.mappingFailureReason);
     const companionState = normalizeState(ipcResult?.companionStatus);
     const runtimeState = normalizeState(ipcResult?.runtimeStatus);
-    const configState = normalizeState(ipcResult?.configStatus);
     const configReady =
-      (ipcResult?.configJsonExists === true && ipcResult?.configJsonReadable === true) ||
-      configState === 'config_ready';
+      ipcResult?.configPrimaryReadable === true ||
+      ipcResult?.config_primary_readable === true ||
+      result.configPrimaryReadable === true;
+    const hookLastReadOk =
+      ipcResult?.hookLastReadOk === true ||
+      ipcResult?.hook_last_read_ok === true ||
+      result.hookLastReadOk === true;
+    const runtimeReady =
+      ipcResult?.runtimeReady === true ||
+      ipcResult?.runtime_ready === true ||
+      result.runtimeReady === true;
+    const runtimeErrorCode = normalizeState(
+      ipcResult?.lastErrorCode ?? ipcResult?.last_error_code ?? result.lastErrorCode
+    );
 
     if (!result.lsposedInstalled) {
       return { status: 'denied', detail: 'LSPosed not installed', canRequest: false };
@@ -130,7 +154,23 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     if (!configReady && companionState === 'config_missing' && hookConfigured) {
       return {
         status: 'denied',
-        detail: 'Hook config exists but IPC config is missing/unreadable.',
+        detail: 'Hook config exists but primary hook config is missing/unreadable.',
+        canRequest: true,
+      };
+    }
+
+    if (configReady && !hookLastReadOk) {
+      return {
+        status: 'denied',
+        detail: 'Primary config exists but hook runtime readback is failing.',
+        canRequest: true,
+      };
+    }
+
+    if (runtimeErrorCode.length > 0) {
+      return {
+        status: 'denied',
+        detail: `Runtime error reported: ${runtimeErrorCode}`,
         canRequest: true,
       };
     }
@@ -143,7 +183,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       return {
         status: 'granted',
         detail:
-          runtimeState === 'runtime_observed'
+          runtimeState === 'runtime_observed' || runtimeReady
             ? 'Companion waiting state is stale; runtime hook already observed.'
             : 'Module configured; waiting for first runtime hook observation in a scoped app.',
         canRequest: false,

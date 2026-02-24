@@ -189,6 +189,25 @@ class LogService {
         lines.push(`Companion State: ${String(ipcStatus?.companionStatus ?? '')}`);
         lines.push(`Config State: ${String(ipcStatus?.configStatus ?? '')}`);
         lines.push(`Runtime State: ${String(ipcStatus?.runtimeStatus ?? '')}`);
+        lines.push(`Runtime Ready: ${String(ipcStatus?.runtimeReady ?? ipcStatus?.runtime_ready ?? '')}`);
+        lines.push(
+          `Hook Last Read OK: ${String(ipcStatus?.hookLastReadOk ?? ipcStatus?.hook_last_read_ok ?? '')}`
+        );
+        lines.push(
+          `Config Primary Readable: ${String(
+            ipcStatus?.configPrimaryReadable ?? ipcStatus?.config_primary_readable ?? ''
+          )}`
+        );
+        lines.push(
+          `Source Effective: ${String(
+            ipcStatus?.sourceModeEffective ?? ipcStatus?.source_mode_effective ?? ''
+          )}`
+        );
+        lines.push(
+          `Runtime Error: ${String(
+            ipcStatus?.lastErrorCode ?? ipcStatus?.last_error_code ?? ''
+          )} ${String(ipcStatus?.lastErrorMessage ?? ipcStatus?.last_error_message ?? '')}`.trim()
+        );
         lines.push(`State Read Source: ${String(ipcStatus?.stateReadSource ?? '')}`);
         lines.push(`Companion Version: ${String(ipcStatus?.companionVersion ?? '')}`);
         lines.push(`Staged Media Path: ${String(ipcStatus?.stagedMediaPath ?? '')}`);

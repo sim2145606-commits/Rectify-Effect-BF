@@ -94,16 +94,24 @@
       <span id="st-ipc" class="badge warn">Loading...</span>
     </div>
     <div class="row">
-      <span class="label">Scope State</span>
-      <span id="st-scope" class="badge warn">Loading...</span>
+      <span class="label">Primary Config</span>
+      <span id="st-primary" class="badge warn">Loading...</span>
     </div>
     <div class="row">
-      <span class="label">Config Staging</span>
-      <span id="st-config" class="badge warn">Loading...</span>
+      <span class="label">Hook Readback</span>
+      <span id="st-hookread" class="badge warn">Loading...</span>
     </div>
     <div class="row">
-      <span class="label">Marker Source</span>
-      <span id="st-marker" class="badge warn">Loading...</span>
+      <span class="label">Runtime Fresh</span>
+      <span id="st-fresh" class="badge warn">Loading...</span>
+    </div>
+    <div class="row">
+      <span class="label">Effective Source</span>
+      <span id="st-source" class="badge warn">Loading...</span>
+    </div>
+    <div class="row">
+      <span class="label">Last Error</span>
+      <span id="st-error" class="badge warn">Loading...</span>
     </div>
   </div>
 
@@ -122,6 +130,7 @@
 
   <script>
     const IPC = "/dev/virtucam_ipc";
+    const RUNTIME_STALE_MS = 180000;
 
     async function ksuExec(cmd) {
       try {
@@ -163,54 +172,58 @@
       return String(raw || "").trim().toLowerCase();
     }
 
+    function parseRuntimeState(raw) {
+      try {
+        const parsed = JSON.parse(String(raw || "").trim());
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    async function readRuntimeState() {
+      const json = await ksuExec(`cat ${IPC}/state/runtime_state.json 2>/dev/null`);
+      if (json && json.trim().startsWith("{")) {
+        return parseRuntimeState(json);
+      }
+      const fallback = await ksuExec(`cat /data/adb/virtucam/state/runtime_state.json 2>/dev/null`);
+      return parseRuntimeState(fallback);
+    }
+
     async function loadStatus() {
       const ipcMount = await ksuExec(`mountpoint -q ${IPC} && echo mounted || echo missing`);
       setBadge("st-ipc", toState(ipcMount) === "mounted" ? "Mounted" : "Missing", toState(ipcMount) === "mounted" ? "ok" : "err");
 
-      const companionStatus = toState(await ksuExec(`cat ${IPC}/state/companion_status 2>/dev/null`));
-      if (companionStatus === "ready") {
+      const companionState = toState(await ksuExec(`cat ${IPC}/state/companion_status 2>/dev/null`));
+      const runtime = await readRuntimeState();
+      const runtimeReady = runtime.runtime_ready === true;
+      const hookReadOk = runtime.hook_last_read_ok === true;
+      const primaryReadable = runtime.config_primary_readable === true;
+      const updatedEpochMs = Number(runtime.updated_epoch_ms || 0);
+      const fresh = updatedEpochMs > 0 && (Date.now() - updatedEpochMs) <= RUNTIME_STALE_MS;
+      const healthy = runtimeReady && hookReadOk && fresh;
+
+      if (healthy && companionState === "ready") {
         setBadge("st-companion", "READY", "ok");
-      } else if (!companionStatus) {
+      } else if (!companionState) {
         setBadge("st-companion", "PENDING", "warn");
       } else {
-        setBadge("st-companion", companionStatus.toUpperCase(), companionStatus === "scope_mismatch" ? "err" : "warn");
+        setBadge("st-companion", companionState.toUpperCase(), companionState === "scope_mismatch" ? "err" : "warn");
       }
 
-      const scopeState = toState(await ksuExec(`cat ${IPC}/state/scope_status 2>/dev/null`));
-      setBadge(
-        "st-scope",
-        scopeState ? scopeState.toUpperCase() : "UNKNOWN",
-        scopeState === "scope_ok" ? "ok" : (scopeState ? "err" : "warn")
-      );
+      setBadge("st-primary", primaryReadable ? "READABLE" : "UNREADABLE", primaryReadable ? "ok" : "err");
+      setBadge("st-hookread", hookReadOk ? "OK" : "FAILED", hookReadOk ? "ok" : "err");
+      setBadge("st-fresh", fresh ? "FRESH" : "STALE", fresh ? "ok" : "warn");
 
-      const configStateRaw = toState(await ksuExec(`cat ${IPC}/state/config_status 2>/dev/null`));
-      let configState = configStateRaw;
-      if (!configState) {
-        const configReady = toState(await ksuExec(`[ -r ${IPC}/config/virtucam_config.json ] && echo yes || echo no`));
-        configState = configReady === "yes" ? "config_ready" : "config_missing";
-      }
-      setBadge(
-        "st-config",
-        configState.toUpperCase(),
-        configState === "config_ready" ? "ok" : "warn"
-      );
+      const sourceEffective = String(runtime.source_mode_effective || "black").trim().toUpperCase();
+      setBadge("st-source", sourceEffective || "BLACK", sourceEffective === "BLACK" ? "warn" : "ok");
 
-      const markerSourceRaw = toState(await ksuExec(`cat ${IPC}/state/marker_source 2>/dev/null`));
-      let markerSource = markerSourceRaw;
-      if (!markerSource) {
-        const markerIpc = toState(await ksuExec(`[ -e ${IPC}/state/module_active ] && echo ipc || echo none`));
-        if (markerIpc === "ipc") {
-          markerSource = "ipc";
-        } else {
-          const markerLegacy = toState(await ksuExec(`[ -e /data/local/tmp/virtucam_module_active ] && echo legacy || echo none`));
-          markerSource = markerLegacy;
-        }
+      const errCode = String(runtime.last_error_code || "").trim();
+      if (!errCode || errCode === "none") {
+        setBadge("st-error", "NONE", "ok");
+      } else {
+        setBadge("st-error", errCode.toUpperCase(), "err");
       }
-      setBadge(
-        "st-marker",
-        markerSource === "none" || !markerSource ? "NONE" : markerSource.toUpperCase(),
-        markerSource === "ipc" || markerSource === "legacy" ? "ok" : "warn"
-      );
 
       const logs = await ksuExec(`tail -80 ${IPC}/logs/service.log 2>/dev/null || tail -80 /data/adb/modules/virtucam_companion/logs/service.log 2>/dev/null || echo "No logs yet"`);
       document.getElementById("log-output").textContent = logs || "No logs";

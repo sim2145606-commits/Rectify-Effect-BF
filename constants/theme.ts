@@ -199,6 +199,8 @@ export const STORAGE_KEYS = {
   FLOATING_BUBBLE: 'virtucam_floating_bubble',
   TARGET_APPS: 'virtucam_target_apps',
   TARGET_MODE: 'virtucam_target_mode',
+  ALLOW_BROAD_SCOPE: 'virtucam_allow_broad_scope',
+  VCAM_COMPATIBILITY_MODE: 'virtucam_vcam_compatibility_mode',
   AI_ENHANCEMENT: 'virtucam_ai_enhancement',
   ONBOARDING_COMPLETE: 'virtucam_onboarding_complete',
   SYSTEM_STATUS: 'virtucam_system_status',

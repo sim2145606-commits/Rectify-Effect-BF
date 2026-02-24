@@ -26,6 +26,7 @@ export const DEFAULT_VALUES: Record<string, string | null> = {
   [STORAGE_KEYS.ENGINE_ACTIVE]: 'false',
   [STORAGE_KEYS.FLOATING_BUBBLE]: 'false',
   [STORAGE_KEYS.TARGET_MODE]: 'all',
+  [STORAGE_KEYS.VCAM_COMPATIBILITY_MODE]: 'false',
   [STORAGE_KEYS.INJECTION_METHOD]: 'camera2',
   [STORAGE_KEYS.CAMERA2_HOOK]: 'true',
   [STORAGE_KEYS.CAMERA1_HOOK]: 'true',
@@ -86,6 +87,7 @@ export async function resetToDefaults(): Promise<{
       offsetY: 0.0,
       scaleMode: 'fit',
       targetMode: 'all',
+      vcamCompatibilityMode: false,
       targetPackages: [],
     });
 

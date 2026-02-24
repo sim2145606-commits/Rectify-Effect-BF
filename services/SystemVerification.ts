@@ -73,6 +73,18 @@ type XposedStatusResult = {
   markerRequired?: boolean;
   runtimeObservedAt?: number;
   mappingFailureReason?: string;
+  configPrimaryReadable?: boolean;
+  configIpcReadable?: boolean;
+  hookLastReadOk?: boolean;
+  runtimeReady?: boolean;
+  activeSourceMode?: string;
+  sourceModeEffective?: string;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
+  lastOkEpochMs?: number;
+  runtimeUpdatedEpochMs?: number;
+  allowBroadScope?: boolean;
+  vcamCompatibilityMode?: boolean;
 };
 
 type IpcStatusResult = {
@@ -92,6 +104,27 @@ type IpcStatusResult = {
   stagedMediaExists?: boolean;
   stagedMediaReadable?: boolean;
   stagedMediaHookReadable?: boolean;
+  configPrimaryReadable?: boolean;
+  config_primary_readable?: boolean;
+  configIpcReadable?: boolean;
+  config_ipc_readable?: boolean;
+  hookLastReadOk?: boolean;
+  hook_last_read_ok?: boolean;
+  runtimeReady?: boolean;
+  runtime_ready?: boolean;
+  activeSourceMode?: string;
+  active_source_mode?: string;
+  sourceModeEffective?: string;
+  source_mode_effective?: string;
+  lastErrorCode?: string;
+  last_error_code?: string;
+  lastErrorMessage?: string;
+  last_error_message?: string;
+  lastOkEpochMs?: number;
+  last_ok_epoch_ms?: number;
+  updatedEpochMs?: number;
+  updated_epoch_ms?: number;
+  runtimeStateFresh?: boolean;
 };
 
 type MappingLogStatus = {
@@ -266,7 +299,20 @@ export async function getCachedSystemStatus(): Promise<SystemVerificationState |
 /**
  * Run full system check with REAL verification
  */
-export async function runFullSystemCheck(): Promise<SystemVerificationState> {
+export async function runFullSystemCheck(options?: {
+  heavy?: boolean;
+}): Promise<SystemVerificationState> {
+  const heavy = options?.heavy === true;
+  if (!heavy) {
+    const cached = await getCachedSystemStatus();
+    if (cached) {
+      return {
+        ...cached,
+        lastChecked: Date.now(),
+      };
+    }
+  }
+
   const result: SystemVerificationState = {
     rootAccess: { label: 'Root Access', detail: 'Checking root access...', status: 'loading' },
     xposedFramework: {
@@ -377,10 +423,45 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
         const runtimeState = ipcStatus
           ? String(ipcStatus.runtimeStatus ?? '').trim().toLowerCase()
           : '';
-        const configJsonReady = ipcStatus
-          ? (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
-            String(ipcStatus.configStatus ?? '').trim().toLowerCase() === 'config_ready'
-          : null;
+        const configPrimaryReady = ipcStatus
+          ? ipcStatus.configPrimaryReadable === true || ipcStatus.config_primary_readable === true
+          : xposedResult.configPrimaryReadable === true;
+        const configIpcReady = ipcStatus
+          ? ipcStatus.configIpcReadable === true ||
+            ipcStatus.config_ipc_readable === true ||
+            (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true)
+          : xposedResult.configIpcReadable === true;
+        const hookLastReadOk = ipcStatus
+          ? ipcStatus.hookLastReadOk === true || ipcStatus.hook_last_read_ok === true
+          : xposedResult.hookLastReadOk === true;
+        const runtimeReady = ipcStatus
+          ? ipcStatus.runtimeReady === true || ipcStatus.runtime_ready === true
+          : xposedResult.runtimeReady === true;
+        const runtimeStateFresh = ipcStatus ? ipcStatus.runtimeStateFresh !== false : true;
+        const activeSourceMode = String(
+          ipcStatus?.activeSourceMode ??
+            ipcStatus?.active_source_mode ??
+            xposedResult.activeSourceMode ??
+            'black'
+        ).trim();
+        const sourceModeEffective = String(
+          ipcStatus?.sourceModeEffective ??
+            ipcStatus?.source_mode_effective ??
+            xposedResult.sourceModeEffective ??
+            activeSourceMode
+        ).trim();
+        const runtimeErrorCode = String(
+          ipcStatus?.lastErrorCode ??
+            ipcStatus?.last_error_code ??
+            xposedResult.lastErrorCode ??
+            ''
+        ).trim();
+        const runtimeErrorMessage = String(
+          ipcStatus?.lastErrorMessage ??
+            ipcStatus?.last_error_message ??
+            xposedResult.lastErrorMessage ??
+            ''
+        ).trim();
         const stagedMediaPath = String(ipcStatus?.stagedMediaPath ?? '').trim();
         const stagedMediaReadable =
           stagedMediaPath.length === 0
@@ -390,7 +471,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           stagedMediaPath.length === 0 ? null : ipcStatus?.stagedMediaHookReadable === true;
         const moduleLoaded = xposedResult.moduleLoaded === true;
         const hookConfigured = xposedResult.hookConfigured === true;
-        const ipcConfigReadyFlag = xposedResult.ipcConfigReady === true;
+        const ipcConfigReadyFlag = xposedResult.ipcConfigReady === true || configPrimaryReady;
         const stagedMediaReadyFlag = xposedResult.stagedMediaReady === true;
         const runtimeHookObserved = xposedResult.runtimeHookObserved === true;
         const mappingFailureReason = String(xposedResult.mappingFailureReason ?? '').trim();
@@ -466,13 +547,24 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           } else {
             hookConfigNotes.push('Enable hook and select media source');
           }
-          if (configJsonReady === false) {
+          if (!configPrimaryReady) {
+            hookConfigStatus = 'error';
+            hookConfigNotes.push('Primary config is not hook-readable');
+          } else if (!configIpcReady) {
             hookConfigStatus = 'warning';
-            hookConfigNotes.push(
-              companionReady
-                ? 'Companion ready but config not staged'
-                : 'IPC config missing/unreadable'
-            );
+            hookConfigNotes.push('IPC mirror config is missing/unreadable');
+          }
+          if (!hookLastReadOk) {
+            hookConfigStatus = 'error';
+            hookConfigNotes.push('Hook runtime readback is not healthy');
+          }
+          if (!runtimeReady) {
+            hookConfigStatus = hookConfigStatus === 'error' ? 'error' : 'warning';
+            hookConfigNotes.push('Runtime state not ready');
+          }
+          if (!runtimeStateFresh) {
+            hookConfigStatus = hookConfigStatus === 'error' ? 'error' : 'warning';
+            hookConfigNotes.push('Runtime state is stale');
           }
           if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
             hookConfigStatus = 'error';
@@ -495,9 +587,21 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             hookConfigStatus = 'error';
             hookConfigNotes.push('Staged media is not hook-readable');
           }
+          if (activeSourceMode.length > 0) {
+            hookConfigNotes.push(`Source mode active=${activeSourceMode}, effective=${sourceModeEffective}`);
+          }
+          if (xposedResult.vcamCompatibilityMode === true) {
+            hookConfigNotes.push('VCAM compatibility mode enabled (strict takeover)');
+          }
+          if (runtimeErrorCode.length > 0 || runtimeErrorMessage.length > 0) {
+            hookConfigStatus = 'error';
+            hookConfigNotes.push(
+              `Runtime error: ${runtimeErrorCode || 'unknown'}${runtimeErrorMessage ? ` (${runtimeErrorMessage})` : ''}`
+            );
+          }
           if (!ipcConfigReadyFlag) {
             hookConfigStatus = 'error';
-            hookConfigNotes.push('IPC config not ready');
+            hookConfigNotes.push('Primary config not ready');
           }
           if (!stagedMediaReadyFlag) {
             hookConfigStatus = 'error';
@@ -567,12 +671,19 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           } else {
             notes.push(moduleLoaded ? 'Hook engine loaded but disabled by config' : 'Enable hook and select media source');
           }
-          if (configJsonReady === false) {
-            notes.push(
-              companionReady
-                ? 'Companion ready but config not staged'
-                : 'IPC config missing/unreadable'
-            );
+          if (!configPrimaryReady) {
+            notes.push('Primary config is not hook-readable');
+          } else if (!configIpcReady) {
+            notes.push('IPC mirror config is missing/unreadable');
+          }
+          if (!hookLastReadOk) {
+            notes.push('Hook runtime readback is not healthy');
+          }
+          if (!runtimeReady) {
+            notes.push('Runtime state not ready');
+          }
+          if (!runtimeStateFresh) {
+            notes.push('Runtime state is stale');
           }
           if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
             notes.push(`Companion state: ${companionState}${readSourceHint}`);
@@ -591,8 +702,19 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           if (stagedMediaHookReadable === false) {
             notes.push('Staged media is not hook-readable');
           }
+          if (activeSourceMode.length > 0) {
+            notes.push(`Source mode active=${activeSourceMode}, effective=${sourceModeEffective}`);
+          }
+          if (xposedResult.vcamCompatibilityMode === true) {
+            notes.push('VCAM compatibility mode enabled (strict takeover)');
+          }
+          if (runtimeErrorCode.length > 0 || runtimeErrorMessage.length > 0) {
+            notes.push(
+              `Runtime error: ${runtimeErrorCode || 'unknown'}${runtimeErrorMessage ? ` (${runtimeErrorMessage})` : ''}`
+            );
+          }
           if (!ipcConfigReadyFlag) {
-            notes.push('IPC config not ready');
+            notes.push('Primary config not ready');
           }
           if (!stagedMediaReadyFlag) {
             notes.push('Source media file is not readable by hook');
@@ -609,6 +731,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             status:
               hookConfigured &&
               ipcConfigReadyFlag &&
+              hookLastReadOk &&
               stagedMediaReadyFlag &&
               mappingFailureReason.length === 0
                 ? runtimeHookObserved

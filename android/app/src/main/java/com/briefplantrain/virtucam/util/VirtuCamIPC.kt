@@ -10,6 +10,8 @@ import java.io.File
  * - XposedEntry.java (reads/writes hook state)
  */
 object VirtuCamIPC {
+    private const val TAG = "VirtuCamIPC"
+    private val markerSkipLogOnce = mutableSetOf<String>()
 
     // IPC directory tree managed by companion module
     const val IPC_ROOT = "/dev/virtucam_ipc"
@@ -30,13 +32,19 @@ object VirtuCamIPC {
     const val MARKER_SOURCE = "$STATE_DIR/marker_source"
     const val SCOPE_STATUS = "$STATE_DIR/scope_status"
     const val RUNTIME_STATUS = "$STATE_DIR/runtime_status"
+    const val RUNTIME_STATE_JSON = "$STATE_DIR/runtime_state.json"
     const val SERVICE_COMPLETE_TIME = "$STATE_DIR/service_complete_time"
     const val BOOT_TIME = "$STATE_DIR/boot_time"
 
     // Persistent root-only fallback store
     const val PERSISTENT_ROOT = "/data/adb/virtucam"
-    const val PERSISTENT_JSON = "$PERSISTENT_ROOT/virtucam_config.json"
-    const val PERSISTENT_XML = "$PERSISTENT_ROOT/virtucam_config.xml"
+    const val PERSISTENT_CONFIG_DIR = "$PERSISTENT_ROOT/config"
+    const val PERSISTENT_STATE_DIR = "$PERSISTENT_ROOT/state"
+    const val PERSISTENT_JSON = "$PERSISTENT_CONFIG_DIR/virtucam_config.json"
+    const val PERSISTENT_XML = "$PERSISTENT_CONFIG_DIR/virtucam_config.xml"
+    const val PERSISTENT_JSON_LEGACY = "$PERSISTENT_ROOT/virtucam_config.json"
+    const val PERSISTENT_XML_LEGACY = "$PERSISTENT_ROOT/virtucam_config.xml"
+    const val PERSISTENT_RUNTIME_STATE_JSON = "$PERSISTENT_STATE_DIR/runtime_state.json"
 
     // Legacy paths (read-only compatibility)
     const val LEGACY_TMP_JSON = "/data/local/tmp/virtucam_config.json"
@@ -64,40 +72,73 @@ object VirtuCamIPC {
             if (stateDir.exists()) {
                 wroteIpc = writeMarkerFile(File(MODULE_ACTIVE))
             } else {
-                Log.w("VirtuCamIPC", "IPC state dir not ready; skipping IPC marker write")
+                logMarkerSkipOnce(MODULE_ACTIVE, "IPC state dir not ready")
             }
 
             wroteLegacy = writeMarkerFile(File(LEGACY_TMP_ACTIVE))
         } catch (t: Throwable) {
-            Log.w("VirtuCamIPC", "Unexpected marker write error: ${t.message}")
+            Log.w(TAG, "Unexpected marker write error: ${t.message}")
         }
 
         if (!wroteIpc && !wroteLegacy) {
-            Log.w("VirtuCamIPC", "Failed to write module marker to IPC and legacy paths")
+            logMarkerSkipOnce("module_active_paths", "Failed to write module marker to IPC and legacy paths")
         }
     }
 
     private fun writeMarkerFile(file: File): Boolean {
+        val parent = file.parentFile
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            logMarkerSkipOnce(file.path, "Unable to create parent directory")
+            return false
+        }
+        if (parent != null && !parent.canWrite()) {
+            logMarkerSkipOnce(file.path, "Parent directory is not writable")
+            return false
+        }
+        if (file.exists() && !file.canWrite()) {
+            logMarkerSkipOnce(file.path, "Marker file exists but is not writable")
+            return false
+        }
+
         return try {
-            val parent = file.parentFile
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs()
-            }
             file.writeText("active\n")
             file.setLastModified(System.currentTimeMillis())
             file.setReadable(true, false)
             true
         } catch (t: Throwable) {
-            Log.w("VirtuCamIPC", "Failed marker write at ${file.path}: ${t.message}")
+            val message = t.message ?: ""
+            if (message.contains("EACCES", ignoreCase = true) ||
+                message.contains("permission denied", ignoreCase = true)
+            ) {
+                logMarkerSkipOnce(file.path, "Permission denied")
+            } else {
+                Log.w(TAG, "Failed marker write at ${file.path}: ${t.message}")
+            }
             false
+        }
+    }
+
+    private fun logMarkerSkipOnce(path: String, reason: String) {
+        val key = "$path|$reason"
+        val shouldLog = synchronized(markerSkipLogOnce) { markerSkipLogOnce.add(key) }
+        if (shouldLog) {
+            Log.i(TAG, "Skipping marker write at $path: $reason")
         }
     }
 
     @JvmStatic
     fun readConfigJson(): String? {
         return try {
-            val file = File(CONFIG_JSON)
-            if (file.exists() && file.canRead()) file.readText() else null
+            val persistent = File(PERSISTENT_JSON)
+            if (persistent.exists() && persistent.canRead()) {
+                return persistent.readText()
+            }
+            val persistentLegacy = File(PERSISTENT_JSON_LEGACY)
+            if (persistentLegacy.exists() && persistentLegacy.canRead()) {
+                return persistentLegacy.readText()
+            }
+            val ipc = File(CONFIG_JSON)
+            if (ipc.exists() && ipc.canRead()) ipc.readText() else null
         } catch (_: Throwable) {
             null
         }

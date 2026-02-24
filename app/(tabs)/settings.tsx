@@ -158,6 +158,14 @@ export default function SettingsScreen() {
   const [isResetting, setIsResetting] = useState(false);
   const [targetMode, setTargetMode] = useStorage<TargetMode>(STORAGE_KEYS.TARGET_MODE, 'all');
   const [targetApps, setTargetApps] = useStorage<TargetAppItem[]>(STORAGE_KEYS.TARGET_APPS, []);
+  const [allowBroadScope, setAllowBroadScope] = useStorage<boolean>(
+    STORAGE_KEYS.ALLOW_BROAD_SCOPE,
+    false
+  );
+  const [vcamCompatibilityMode, setVcamCompatibilityMode] = useStorage<boolean>(
+    STORAGE_KEYS.VCAM_COMPATIBILITY_MODE,
+    false
+  );
   const [isPickerVisible, setIsPickerVisible] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
@@ -211,9 +219,11 @@ export default function SettingsScreen() {
     const enabledPackages = apps.filter(app => app.enabled).map(app => app.packageName);
     writeBridgeConfig({
       targetMode: mode,
+      allowBroadScope,
+      vcamCompatibilityMode,
       targetPackages: enabledPackages,
     }).catch(() => {});
-  }, []);
+  }, [allowBroadScope, vcamCompatibilityMode]);
 
   const loadInstalledApps = useCallback(async () => {
     if (!VirtuCamSettings?.getAllInstalledApps) {
@@ -776,6 +786,56 @@ export default function SettingsScreen() {
             </View>
           )}
 
+          <View
+            style={[
+              styles.scopeOverrideRow,
+              { borderColor: colors.border, backgroundColor: colors.surfaceLight },
+            ]}
+          >
+            <View style={styles.scopeOverrideInfo}>
+              <Text style={[styles.scopeOverrideTitle, { color: colors.textPrimary }]}>
+                Allow Broad LSPosed Scope
+              </Text>
+              <Text style={[styles.scopeOverrideDesc, { color: colors.textTertiary }]}>
+                Advanced override. Keep OFF to auto-prune system-wide scope entries and reduce lag.
+              </Text>
+            </View>
+            <Switch
+              value={allowBroadScope}
+              onValueChange={value => {
+                lightImpact();
+                setAllowBroadScope(value);
+              }}
+              trackColor={{ false: colors.inactive, true: colors.warningAmber + '60' }}
+              thumbColor={allowBroadScope ? colors.warningAmber : colors.textTertiary}
+            />
+          </View>
+
+          <View
+            style={[
+              styles.scopeOverrideRow,
+              { borderColor: colors.border, backgroundColor: colors.surfaceLight },
+            ]}
+          >
+            <View style={styles.scopeOverrideInfo}>
+              <Text style={[styles.scopeOverrideTitle, { color: colors.textPrimary }]}>
+                VCAM Compatibility Mode
+              </Text>
+              <Text style={[styles.scopeOverrideDesc, { color: colors.textTertiary }]}>
+                Strict single-surface takeover for compatibility with unstable camera apps (Messenger/OEM camera).
+              </Text>
+            </View>
+            <Switch
+              value={vcamCompatibilityMode}
+              onValueChange={value => {
+                lightImpact();
+                setVcamCompatibilityMode(value);
+              }}
+              trackColor={{ false: colors.inactive, true: colors.electricBlue + '60' }}
+              thumbColor={vcamCompatibilityMode ? colors.electricBlue : colors.textTertiary}
+            />
+          </View>
+
           {scopeMismatchDetail.length > 0 && (
             <View style={[styles.scopeAlertBox, { backgroundColor: colors.danger + '14', borderColor: colors.danger + '35' }]}>
               <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
@@ -1224,7 +1284,21 @@ export default function SettingsScreen() {
                 hookConfigured={String(rawXposedDebug.hookConfigured)} | hookReady={String(rawXposedDebug.hookReady)}
               </Text>
               <Text style={styles.rawDebugLine}>
+                configPrimaryReadable={String(rawXposedDebug.configPrimaryReadable)} | hookLastReadOk={String(rawXposedDebug.hookLastReadOk)}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                runtimeReady={String(rawXposedDebug.runtimeReady)} | sourceEffective={rawXposedDebug.sourceModeEffective || '(unknown)'}
+              </Text>
+              {(rawXposedDebug.lastErrorCode || rawXposedDebug.lastErrorMessage) && (
+                <Text style={styles.rawDebugLine}>
+                  runtimeError: {rawXposedDebug.lastErrorCode || 'unknown'} {rawXposedDebug.lastErrorMessage || ''}
+                </Text>
+              )}
+              <Text style={styles.rawDebugLine}>
                 broadScope={String(rawXposedDebug.broadScopeDetected)} {rawXposedDebug.broadScopePackages || ''}
+              </Text>
+              <Text style={styles.rawDebugLine}>
+                vcamCompatibilityMode={String(rawXposedDebug.vcamCompatibilityMode)}
               </Text>
               <Text style={styles.rawDebugLine}>
                 mappingHint: {rawXposedDebug.mappingHint}
@@ -1552,6 +1626,28 @@ const styles = StyleSheet.create({
   scopeMeta: {
     fontSize: FontSize.xs,
     marginBottom: Spacing.sm,
+    lineHeight: 16,
+  },
+  scopeOverrideRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  scopeOverrideInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  scopeOverrideTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+  },
+  scopeOverrideDesc: {
+    fontSize: FontSize.xs,
     lineHeight: 16,
   },
   emptyTargetApps: {

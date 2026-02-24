@@ -74,7 +74,7 @@ function AppShell() {
             void (async () => {
               const now = Date.now();
               try {
-                if (now - lastForegroundSyncAtRef.current > 2500) {
+                if (now - lastForegroundSyncAtRef.current > 15000) {
                   lastForegroundSyncAtRef.current = now;
                   await syncAllSettings();
                 }

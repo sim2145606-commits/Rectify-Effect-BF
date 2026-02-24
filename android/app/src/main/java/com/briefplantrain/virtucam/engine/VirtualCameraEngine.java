@@ -44,9 +44,12 @@ public final class VirtualCameraEngine {
     private final String packageName;
     private final String processName;
 
-    private final ConfigLoader configLoader = new ConfigLoader(500);
+    private final ConfigLoader configLoader = new ConfigLoader(2000);
     private final MappingManager mappingManager = new MappingManager();
     private final EglRenderer eglRenderer = new EglRenderer();
+    private final Object routeLock = new Object();
+    private final Map<Surface, Surface> compatibilityAliases = new ConcurrentHashMap<>();
+    private Surface compatibilityTakeoverSurface;
 
     private final HandlerThread engineThread = new HandlerThread("VirtuCamEngine");
     private Handler handler;
@@ -60,7 +63,10 @@ public final class VirtualCameraEngine {
     private Bitmap testPattern;
     private String lastMediaPath;
     private Bitmap lastMediaBitmap;
+    private long lastMediaAttemptMs;
+    private String lastMediaAttemptPath;
     private long lastTestPatternMs;
+    private volatile ConfigSnapshot.SourceMode lastEffectiveSourceMode = ConfigSnapshot.SourceMode.BLACK;
 
     private VirtualCameraEngine(String packageName, String processName) {
         this.packageName = packageName;
@@ -84,7 +90,10 @@ public final class VirtualCameraEngine {
             if (handler != null) handler.removeCallbacksAndMessages(null);
         } catch (Throwable ignored) {}
         try {
-            mappingManager.releaseAll();
+            synchronized (routeLock) {
+                clearVcamCompatibilityAliasesLocked();
+                mappingManager.releaseAll();
+            }
         } catch (Throwable ignored) {}
         try {
             eglRenderer.releaseAll();
@@ -130,69 +139,127 @@ public final class VirtualCameraEngine {
     }
 
     public Surface mapOutputSurface(Surface original, SurfaceInfo info) {
-        ConfigSnapshot cfg = configLoader.getSnapshot();
-        if (!cfg.enabled) return original;
-        if (!cfg.isTargeted(packageName)) return original;
+        synchronized (routeLock) {
+            ConfigSnapshot cfg = configLoader.getSnapshot();
+            if (!cfg.enabled) {
+                clearVcamCompatibilityAliasesLocked();
+                return original;
+            }
+            if (!cfg.isTargeted(packageName)) {
+                clearVcamCompatibilityAliasesLocked();
+                return original;
+            }
 
-        SurfaceInfo i = (info != null) ? info : inferSurfaceInfo(original);
-        if (i.kind == SurfaceInfo.Kind.UNKNOWN && (i.width <= 0 || i.height <= 0)) {
-            i = new SurfaceInfo(
-                    SurfaceInfo.Kind.UNKNOWN,
-                    1280,
-                    720,
-                    i.format,
-                    (i.note == null ? "" : i.note) + "|fallback_size");
-        }
+            SurfaceInfo i = (info != null) ? info : inferSurfaceInfo(original);
+            boolean hasKnownSize = i.width > 0 && i.height > 0;
 
-        final boolean replace;
-        if (i.kind == SurfaceInfo.Kind.SURFACE_TEXTURE) {
-            replace = true;
-        } else if (i.kind == SurfaceInfo.Kind.UNKNOWN) {
-            boolean unknownSizeLooksCameraLike =
-                    i.width >= 320 && i.height >= 240 &&
-                    i.width <= 4096 && i.height <= 4096;
-            replace = cfg.aggressiveSurfaceReplace || unknownSizeLooksCameraLike;
-            LogUtil.dRateLimited(
-                    "unknown-surface-decision",
-                    5000L,
-                    TAG,
-                    "Unknown surface decision: replace=" + replace +
-                            " size=" + i.width + "x" + i.height +
-                            " aggressive=" + cfg.aggressiveSurfaceReplace +
-                            " note=" + i.note
-            );
-        } else {
-            replace = false;
-        }
+            final boolean replace;
+            if (i.kind == SurfaceInfo.Kind.SURFACE_TEXTURE) {
+                replace = true;
+            } else if (i.kind == SurfaceInfo.Kind.UNKNOWN) {
+                boolean unknownSizeLooksCameraLike =
+                        hasKnownSize &&
+                        i.width >= 320 && i.height >= 240 &&
+                        i.width <= 4096 && i.height <= 4096;
+                replace = cfg.aggressiveSurfaceReplace || unknownSizeLooksCameraLike;
+                LogUtil.dRateLimited(
+                        "unknown-surface-decision",
+                        5000L,
+                        TAG,
+                        "Unknown surface decision: replace=" + replace +
+                                " size=" + i.width + "x" + i.height +
+                                " aggressive=" + cfg.aggressiveSurfaceReplace +
+                                " note=" + i.note
+                );
+            } else {
+                replace = false;
+            }
 
-        if (!replace) {
-            LogUtil.dRateLimited(
-                    "skip-non-target-surface",
-                    5000L,
-                    TAG,
-                    "Skipping non-target surface kind=" + i.kind + " size=" + i.width + "x" + i.height
-            );
-            return original;
-        }
+            if (!replace) {
+                LogUtil.dRateLimited(
+                        "skip-non-target-surface",
+                        5000L,
+                        TAG,
+                        "Skipping non-target surface kind=" + i.kind + " size=" + i.width + "x" + i.height
+                );
+                return original;
+            }
 
-        Surface mapped = mappingManager.getOrCreateDrainSurface(original, i);
-        if (mapped == original) {
-            LogUtil.dRateLimited(
-                    "mapping-returned-original",
-                    5000L,
-                    TAG,
-                    "Surface mapping returned original surface; kind=" + i.kind + " size=" + i.width + "x" + i.height
-            );
+            if (!hasKnownSize) {
+                i = new SurfaceInfo(
+                        i.kind,
+                        1280,
+                        720,
+                        i.format,
+                        (i.note == null ? "" : i.note) + "|fallback_size");
+            }
+
+            Surface mapped = mappingManager.getOrCreateDrainSurface(original, i);
+            if (mapped == original) {
+                LogUtil.dRateLimited(
+                        "mapping-returned-original",
+                        5000L,
+                        TAG,
+                        "Surface mapping returned original surface; kind=" + i.kind + " size=" + i.width + "x" + i.height
+                );
+            }
+            return mapped;
         }
-        return mapped;
     }
 
     public Surface mapRequestTargetSurface(Surface surface) {
-        return mappingManager.mapRequestTargetSurface(surface);
+        synchronized (routeLock) {
+            if (compatibilityTakeoverSurface != null) {
+                Surface aliased = compatibilityAliases.get(surface);
+                if (aliased != null) {
+                    return aliased;
+                }
+                return compatibilityTakeoverSurface;
+            }
+            return mappingManager.mapRequestTargetSurface(surface);
+        }
     }
 
     public void rollbackOutputSurfaceMapping(Surface original) {
-        mappingManager.removeMapping(original);
+        synchronized (routeLock) {
+            if (original != null) {
+                compatibilityAliases.remove(original);
+            }
+            if (compatibilityAliases.isEmpty()) {
+                compatibilityTakeoverSurface = null;
+            }
+            mappingManager.removeMapping(original);
+        }
+    }
+
+    public boolean isVcamCompatibilityModeEnabled() {
+        ConfigSnapshot cfg = configLoader.getSnapshot();
+        return cfg.enabled && cfg.vcamCompatibilityMode && cfg.isTargeted(packageName);
+    }
+
+    public void enableVcamCompatibilityAliases(List<Surface> originals, Surface takeoverSurface) {
+        synchronized (routeLock) {
+            clearVcamCompatibilityAliasesLocked();
+            if (takeoverSurface == null) return;
+            compatibilityTakeoverSurface = takeoverSurface;
+            if (originals == null) return;
+            for (Surface s : originals) {
+                if (s != null) {
+                    compatibilityAliases.put(s, takeoverSurface);
+                }
+            }
+        }
+    }
+
+    public void clearVcamCompatibilityAliases() {
+        synchronized (routeLock) {
+            clearVcamCompatibilityAliasesLocked();
+        }
+    }
+
+    private void clearVcamCompatibilityAliasesLocked() {
+        compatibilityAliases.clear();
+        compatibilityTakeoverSurface = null;
     }
 
     public String getRoutingDebugSummary() {
@@ -202,7 +269,9 @@ public final class VirtualCameraEngine {
                 ",targeted=" + cfg.isTargeted(packageName) +
                 ",targetMode=" + cfg.targetMode +
                 ",targetPackages=" + targetCount +
-                ",sourceMode=" + cfg.sourceMode +
+                ",sourceModeDesired=" + cfg.sourceMode +
+                ",sourceModeEffective=" + lastEffectiveSourceMode +
+                ",vcamCompat=" + cfg.vcamCompatibilityMode +
                 ",hasMedia=" + (cfg.mediaSourcePath != null && !cfg.mediaSourcePath.trim().isEmpty());
     }
 
@@ -218,7 +287,10 @@ public final class VirtualCameraEngine {
             ConfigSnapshot cfg = configLoader.getSnapshot();
             int fps = cfg.fps > 0 ? cfg.fps : 30;
             boolean activeRoute = cfg.enabled && cfg.isTargeted(packageName);
-            boolean hasMappings = mappingManager.hasMappings();
+            boolean hasMappings;
+            synchronized (routeLock) {
+                hasMappings = mappingManager.hasMappings();
+            }
             long delayMs;
             if (!activeRoute) {
                 delayMs = 750;
@@ -239,7 +311,10 @@ public final class VirtualCameraEngine {
         if (!cfg.enabled) return;
         if (!cfg.isTargeted(packageName)) return;
 
-        List<Surface> originals = mappingManager.listOriginalSurfaces();
+        List<Surface> originals;
+        synchronized (routeLock) {
+            originals = mappingManager.listOriginalSurfaces();
+        }
         if (originals.isEmpty()) return;
 
         Bitmap frame = getFrameBitmap(cfg);
@@ -250,7 +325,9 @@ public final class VirtualCameraEngine {
         for (Surface s : originals) {
             if (s == null) continue;
             if (!s.isValid()) {
-                mappingManager.removeMapping(s);
+                synchronized (routeLock) {
+                    mappingManager.removeMapping(s);
+                }
                 eglRenderer.releaseSurface(s);
                 continue;
             }
@@ -261,13 +338,25 @@ public final class VirtualCameraEngine {
     private Bitmap getFrameBitmap(ConfigSnapshot cfg) {
         switch (cfg.sourceMode) {
             case TEST_PATTERN:
+                lastEffectiveSourceMode = ConfigSnapshot.SourceMode.TEST_PATTERN;
                 return getOrUpdateTestPattern();
             case FILE:
-                if (cfg.mediaSourcePath != null) return getOrLoadMediaBitmap(cfg.mediaSourcePath);
+                if (cfg.mediaSourcePath != null) {
+                    Bitmap media = getOrLoadMediaBitmap(cfg.mediaSourcePath);
+                    if (media != null) {
+                        lastEffectiveSourceMode = ConfigSnapshot.SourceMode.FILE;
+                        return media;
+                    }
+                }
+                lastEffectiveSourceMode = ConfigSnapshot.SourceMode.BLACK;
                 return getBlackFrame();
             case STREAM:
                 if (cfg.mediaSourcePath != null) {
-                    return getOrLoadMediaBitmap(cfg.mediaSourcePath);
+                    Bitmap stream = getOrLoadMediaBitmap(cfg.mediaSourcePath);
+                    if (stream != null) {
+                        lastEffectiveSourceMode = ConfigSnapshot.SourceMode.STREAM;
+                        return stream;
+                    }
                 }
                 LogUtil.iRateLimited(
                         "stream-without-media",
@@ -275,9 +364,11 @@ public final class VirtualCameraEngine {
                         TAG,
                         "STREAM mode selected without mediaSourcePath; using black frame"
                 );
+                lastEffectiveSourceMode = ConfigSnapshot.SourceMode.BLACK;
                 return getBlackFrame();
             case BLACK:
             default:
+                lastEffectiveSourceMode = ConfigSnapshot.SourceMode.BLACK;
                 return getBlackFrame();
         }
     }
@@ -312,24 +403,44 @@ public final class VirtualCameraEngine {
     }
 
     private Bitmap getOrLoadMediaBitmap(String path) {
-        if (path == null) return getBlackFrame();
+        if (path == null) return null;
         if (path.equals(lastMediaPath) && lastMediaBitmap != null) return lastMediaBitmap;
 
+        long now = SystemClock.uptimeMillis();
+        if (path.equals(lastMediaAttemptPath) && lastMediaBitmap == null && (now - lastMediaAttemptMs) < 1500L) {
+            return null;
+        }
+
+        lastMediaAttemptPath = path;
+        lastMediaAttemptMs = now;
         lastMediaPath = path;
         lastMediaBitmap = null;
 
         try {
             File f = new File(path).getCanonicalFile();
             if (!f.exists() || !f.canRead() || f.getPath().contains("..")) {
-                LogUtil.d(TAG, "Media not readable: " + path + " -> using black");
-                return getBlackFrame();
+                LogUtil.dRateLimited(
+                        "media-unreadable:" + path,
+                        3000L,
+                        TAG,
+                        "Media not readable; forcing BLACK frame path=" + path
+                );
+                return null;
             }
 
             String lower = path.toLowerCase(Locale.ROOT);
             if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp")) {
                 Bitmap b = BitmapFactory.decodeFile(path);
-                lastMediaBitmap = (b != null) ? b : getBlackFrame();
-                return lastMediaBitmap;
+                lastMediaBitmap = b;
+                if (b == null) {
+                    LogUtil.iRateLimited(
+                            "media-decode-null:image",
+                            3000L,
+                            TAG,
+                            "Image decode returned null; forcing BLACK frame"
+                    );
+                }
+                return b;
             }
 
             MediaMetadataRetriever mmr = new MediaMetadataRetriever();
@@ -341,12 +452,25 @@ public final class VirtualCameraEngine {
                 mmr.release();
             }
 
-            lastMediaBitmap = (b != null) ? b : getBlackFrame();
-            return lastMediaBitmap;
+            lastMediaBitmap = b;
+            if (b == null) {
+                LogUtil.iRateLimited(
+                        "media-decode-null:video",
+                        3000L,
+                        TAG,
+                        "Video warm-up returned null frame; forcing BLACK frame"
+                );
+            }
+            return b;
 
         } catch (Throwable t) {
-            LogUtil.e(TAG, "Failed to load media bitmap; using black", t);
-            return getBlackFrame();
+            LogUtil.iRateLimited(
+                    "media-load-failed:" + t.getClass().getSimpleName(),
+                    3000L,
+                    TAG,
+                    "Failed to load media bitmap; forcing BLACK frame (" + t.getClass().getSimpleName() + ")"
+            );
+            return null;
         }
     }
 }

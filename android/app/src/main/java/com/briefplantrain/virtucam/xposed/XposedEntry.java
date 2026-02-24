@@ -3,6 +3,7 @@ package com.briefplantrain.virtucam.xposed;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.params.InputConfiguration;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.os.Build;
@@ -32,9 +33,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZygoteInit {
 
     private static final String TAG = "VirtuCam/XposedEntry";
+    private static final int MAX_REPLACED_SURFACES_PER_SESSION = 1;
 
     private static final Set<String> INSTALLED = ConcurrentHashMap.newKeySet();
     private static final Set<String> SKIP_ENGINE_PACKAGES = ConcurrentHashMap.newKeySet();
+    private static final Object ROUTE_OP_LOCK = new Object();
 
     static {
         SKIP_ENGINE_PACKAGES.add("com.briefplantrain.virtucam");
@@ -184,15 +187,145 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             if (engine == null) return;
+                            if (engine.isVcamCompatibilityModeEnabled()
+                                    && applyVcamCompatTakeoverSurfaceList(
+                                    engine,
+                                    param,
+                                    0,
+                                    "createCaptureSession(List<Surface>)")) {
+                                return;
+                            }
+                            engine.clearVcamCompatibilityAliases();
                             Object arg0 = param.args[0];
                             if (!(arg0 instanceof List)) return;
                             @SuppressWarnings("unchecked")
                             List<Object> in = (List<Object>) arg0;
                             if (in.isEmpty()) return;
-                            param.args[0] = mapSurfaceList(engine, in);
+                            param.args[0] = mapSurfaceList(engine, in, "createCaptureSession(List<Surface>)");
                         }
                     }
             );
+
+            XposedHelpers.findAndHookMethod(
+                    finalCameraDeviceImpl,
+                    "createConstrainedHighSpeedCaptureSession",
+                    List.class,
+                    CameraCaptureSession.StateCallback.class,
+                    Handler.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (engine == null) return;
+                            if (engine.isVcamCompatibilityModeEnabled()
+                                    && applyVcamCompatTakeoverSurfaceList(
+                                    engine,
+                                    param,
+                                    0,
+                                    "createConstrainedHighSpeedCaptureSession")) {
+                                return;
+                            }
+                            engine.clearVcamCompatibilityAliases();
+                            Object arg0 = param.args[0];
+                            if (!(arg0 instanceof List)) return;
+                            @SuppressWarnings("unchecked")
+                            List<Object> in = (List<Object>) arg0;
+                            if (in.isEmpty()) return;
+                            param.args[0] = mapSurfaceList(engine, in, "createConstrainedHighSpeedCaptureSession");
+                        }
+                    }
+            );
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                XposedHelpers.findAndHookMethod(
+                        finalCameraDeviceImpl,
+                        "createReprocessableCaptureSession",
+                        InputConfiguration.class,
+                        List.class,
+                        CameraCaptureSession.StateCallback.class,
+                        Handler.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                if (engine == null) return;
+                                if (engine.isVcamCompatibilityModeEnabled()
+                                        && applyVcamCompatTakeoverSurfaceList(
+                                        engine,
+                                        param,
+                                        1,
+                                        "createReprocessableCaptureSession")) {
+                                    return;
+                                }
+                                engine.clearVcamCompatibilityAliases();
+                                Object arg1 = param.args[1];
+                                if (!(arg1 instanceof List)) return;
+                                @SuppressWarnings("unchecked")
+                                List<Object> in = (List<Object>) arg1;
+                                if (in.isEmpty()) return;
+                                param.args[1] = mapSurfaceList(engine, in, "createReprocessableCaptureSession");
+                            }
+                        }
+                );
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                XposedHelpers.findAndHookMethod(
+                        finalCameraDeviceImpl,
+                        "createReprocessableCaptureSessionByConfigurations",
+                        InputConfiguration.class,
+                        List.class,
+                        CameraCaptureSession.StateCallback.class,
+                        Handler.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                if (engine == null) return;
+                                if (engine.isVcamCompatibilityModeEnabled()
+                                        && applyVcamCompatTakeoverOutputConfigList(
+                                        engine,
+                                        param,
+                                        1,
+                                        "createReprocessableCaptureSessionByConfigurations")) {
+                                    return;
+                                }
+                                engine.clearVcamCompatibilityAliases();
+                                Object arg1 = param.args[1];
+                                if (!(arg1 instanceof List)) return;
+                                @SuppressWarnings("unchecked")
+                                List<Object> in = (List<Object>) arg1;
+                                if (in.isEmpty()) return;
+
+                                List<Object> remapped = new ArrayList<>(in.size());
+                                int replaced = 0;
+                                int preferredIndex = selectPreferredOutputConfigIndex(engine, in);
+                                for (Object item : in) {
+                                    if (item instanceof OutputConfiguration) {
+                                        int index = remapped.size();
+                                        if (index != preferredIndex || replaced >= MAX_REPLACED_SURFACES_PER_SESSION) {
+                                            remapped.add(item);
+                                            continue;
+                                        }
+                                        Surface candidate = getSurfaceFromOutputConfig((OutputConfiguration) item);
+                                        if (!isEligibleForReplacement(engine, candidate)) {
+                                            remapped.add(item);
+                                            continue;
+                                        }
+                                        MappedOutputConfigResult mapped = mapOutputConfiguration(
+                                                engine,
+                                                (OutputConfiguration) item,
+                                                "createReprocessableCaptureSessionByConfigurations"
+                                        );
+                                        remapped.add(mapped.outputConfig);
+                                        replaced += mapped.replacedCount;
+                                    } else {
+                                        remapped.add(item);
+                                    }
+                                }
+                                param.args[1] = remapped;
+                                logMappingSummary(engine, "createReprocessableCaptureSessionByConfigurations", replaced);
+                            }
+                        }
+                );
+            }
 
             XposedHelpers.findAndHookMethod(
                     finalCameraDeviceImpl,
@@ -204,6 +337,15 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             if (engine == null) return;
+                            if (engine.isVcamCompatibilityModeEnabled()
+                                    && applyVcamCompatTakeoverOutputConfigList(
+                                    engine,
+                                    param,
+                                    0,
+                                    "createCaptureSessionByOutputConfigurations")) {
+                                return;
+                            }
+                            engine.clearVcamCompatibilityAliases();
                             Object arg0 = param.args[0];
                             if (!(arg0 instanceof List)) return;
                             @SuppressWarnings("unchecked")
@@ -211,8 +353,19 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                             if (in.isEmpty()) return;
                             List<Object> remapped = new ArrayList<>(in.size());
                             int replaced = 0;
+                            int preferredIndex = selectPreferredOutputConfigIndex(engine, in);
                             for (Object item : in) {
                                 if (item instanceof OutputConfiguration) {
+                                    int index = remapped.size();
+                                    if (index != preferredIndex || replaced >= MAX_REPLACED_SURFACES_PER_SESSION) {
+                                        remapped.add(item);
+                                        continue;
+                                    }
+                                    Surface candidate = getSurfaceFromOutputConfig((OutputConfiguration) item);
+                                    if (!isEligibleForReplacement(engine, candidate)) {
+                                        remapped.add(item);
+                                        continue;
+                                    }
                                     MappedOutputConfigResult mapped = mapOutputConfiguration(
                                             engine,
                                             (OutputConfiguration) item,
@@ -243,6 +396,15 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) {
                                 if (engine == null) return;
+                                if (engine.isVcamCompatibilityModeEnabled()
+                                        && applyVcamCompatTakeoverSessionConfiguration(
+                                        engine,
+                                        param,
+                                        0,
+                                        "createCaptureSession(SessionConfiguration)")) {
+                                    return;
+                                }
+                                engine.clearVcamCompatibilityAliases();
                                 Object arg0 = param.args[0];
                                 if (!(arg0 instanceof SessionConfiguration)) return;
                                 SessionConfiguration sc = (SessionConfiguration) arg0;
@@ -250,7 +412,18 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                 if (outputs == null || outputs.isEmpty()) return;
                                 List<OutputConfiguration> remapped = new ArrayList<>(outputs.size());
                                 int replaced = 0;
+                                int preferredIndex = selectPreferredOutputConfigIndex(engine, outputs);
                                 for (OutputConfiguration oc : outputs) {
+                                    int index = remapped.size();
+                                    if (index != preferredIndex || replaced >= MAX_REPLACED_SURFACES_PER_SESSION) {
+                                        remapped.add(oc);
+                                        continue;
+                                    }
+                                    Surface candidate = getSurfaceFromOutputConfig(oc);
+                                    if (!isEligibleForReplacement(engine, candidate)) {
+                                        remapped.add(oc);
+                                        continue;
+                                    }
                                     MappedOutputConfigResult mapped = mapOutputConfiguration(
                                             engine,
                                             oc,
@@ -298,46 +471,63 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
 
     private static MappedOutputConfigResult mapOutputConfiguration(
             VirtualCameraEngine engine, OutputConfiguration oc, String hookName) {
-        if (oc == null) return new MappedOutputConfigResult(oc, 0);
-        Surface original = null;
-        try {
-            original = oc.getSurface();
-        } catch (Throwable ignored) {
-        }
-        if (original == null) return new MappedOutputConfigResult(oc, 0);
-        SurfaceInfo info = engine.inferSurfaceInfo(original);
-        Surface mapped = engine.mapOutputSurface(original, info);
-        if (mapped == original) return new MappedOutputConfigResult(oc, 0);
-        try {
-            XposedHelpers.callMethod(oc, "setSurface", mapped);
-            return new MappedOutputConfigResult(oc, 1);
-        } catch (Throwable t) {
-            OutputConfiguration rebuilt = buildOutputConfigurationFallback(oc, original, mapped);
-            if (rebuilt != null) {
-                LogUtil.iRateLimited(
-                        "output-config-rebuild:" + hookName,
-                        5000L,
-                        TAG,
-                        hookName + ": setSurface unavailable; using rebuild fallback"
-                );
-                return new MappedOutputConfigResult(rebuilt, 1);
+        return mapOutputConfiguration(engine, oc, hookName, true);
+    }
+
+    private static MappedOutputConfigResult mapOutputConfiguration(
+            VirtualCameraEngine engine,
+            OutputConfiguration oc,
+            String hookName,
+            boolean preserveExtraSurfaces
+    ) {
+        synchronized (ROUTE_OP_LOCK) {
+            if (oc == null) return new MappedOutputConfigResult(oc, 0);
+            Surface original = null;
+            try {
+                original = oc.getSurface();
+            } catch (Throwable ignored) {
             }
-            engine.rollbackOutputSurfaceMapping(original);
-            String summary = summarizeThrowable(t);
-            LogUtil.iRateLimited(
-                    "output-config-rollback:" + hookName + ":" + summary,
-                    4000L,
-                    TAG,
-                    hookName + ": failed to set mapped surface; rolled back (" + summary + ")"
-            );
-            return new MappedOutputConfigResult(oc, 0);
+            if (original == null) return new MappedOutputConfigResult(oc, 0);
+            SurfaceInfo info = engine.inferSurfaceInfo(original);
+            Surface mapped = engine.mapOutputSurface(original, info);
+            if (mapped == original) return new MappedOutputConfigResult(oc, 0);
+            try {
+                XposedHelpers.callMethod(oc, "setSurface", mapped);
+                return new MappedOutputConfigResult(oc, 1);
+            } catch (Throwable t) {
+                OutputConfiguration rebuilt = buildOutputConfigurationFallback(
+                        oc,
+                        original,
+                        mapped,
+                        preserveExtraSurfaces
+                );
+                if (rebuilt != null) {
+                    LogUtil.iRateLimited(
+                            "output-config-rebuild:" + hookName,
+                            5000L,
+                            TAG,
+                            hookName + ": setSurface unavailable; using rebuild fallback"
+                    );
+                    return new MappedOutputConfigResult(rebuilt, 1);
+                }
+                engine.rollbackOutputSurfaceMapping(original);
+                String summary = summarizeThrowable(t);
+                LogUtil.iRateLimited(
+                        "output-config-rollback:" + hookName + ":" + summary,
+                        4000L,
+                        TAG,
+                        hookName + ": failed to set mapped surface; rolled back (" + summary + ")"
+                );
+                return new MappedOutputConfigResult(oc, 0);
+            }
         }
     }
 
     private static OutputConfiguration buildOutputConfigurationFallback(
             OutputConfiguration originalConfig,
             Surface originalSurface,
-            Surface mappedSurface
+            Surface mappedSurface,
+            boolean preserveExtraSurfaces
     ) {
         try {
             Object rebuiltObj = null;
@@ -376,23 +566,25 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             } catch (Throwable ignored) {
             }
 
-            try {
-                @SuppressWarnings("unchecked")
-                List<Surface> surfaces = (List<Surface>) XposedHelpers.callMethod(originalConfig, "getSurfaces");
-                if (surfaces != null && surfaces.size() > 1) {
-                    try {
-                        XposedHelpers.callMethod(rebuilt, "enableSurfaceSharing");
-                    } catch (Throwable ignored) {
-                    }
-                    for (Surface extra : surfaces) {
-                        if (extra == null || extra == originalSurface || extra == mappedSurface) continue;
+            if (preserveExtraSurfaces) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    List<Surface> surfaces = (List<Surface>) XposedHelpers.callMethod(originalConfig, "getSurfaces");
+                    if (surfaces != null && surfaces.size() > 1) {
                         try {
-                            XposedHelpers.callMethod(rebuilt, "addSurface", extra);
+                            XposedHelpers.callMethod(rebuilt, "enableSurfaceSharing");
                         } catch (Throwable ignored) {
                         }
+                        for (Surface extra : surfaces) {
+                            if (extra == null || extra == originalSurface || extra == mappedSurface) continue;
+                            try {
+                                XposedHelpers.callMethod(rebuilt, "addSurface", extra);
+                            } catch (Throwable ignored) {
+                            }
+                        }
                     }
+                } catch (Throwable ignored) {
                 }
-            } catch (Throwable ignored) {
             }
 
             copyOutputConfigurationField(originalConfig, rebuilt, "getStreamUseCase", "setStreamUseCase");
@@ -465,22 +657,279 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         }
     }
 
-    private static List<Object> mapSurfaceList(VirtualCameraEngine engine, List<Object> in) {
-        List<Object> out = new ArrayList<>(in.size());
-        int replaced = 0;
-        for (Object o : in) {
-            if (o instanceof Surface) {
-                Surface original = (Surface) o;
-                SurfaceInfo info = engine.inferSurfaceInfo(original);
-                Surface mapped = engine.mapOutputSurface(original, info);
-                if (mapped != original) replaced++;
-                out.add(mapped);
-            } else {
-                out.add(o);
+    private static boolean applyVcamCompatTakeoverSurfaceList(
+            VirtualCameraEngine engine,
+            XC_MethodHook.MethodHookParam param,
+            int argIndex,
+            String hookName
+    ) {
+        Object arg = param.args[argIndex];
+        if (!(arg instanceof List)) return false;
+        @SuppressWarnings("unchecked")
+        List<Object> in = (List<Object>) arg;
+        if (in.isEmpty()) return false;
+        int preferredIndex = selectPreferredSurfaceIndex(engine, in);
+        if (preferredIndex < 0 || preferredIndex >= in.size()) return false;
+        Object preferred = in.get(preferredIndex);
+        if (!(preferred instanceof Surface)) return false;
+        Surface preferredSurface = (Surface) preferred;
+        Surface takeoverSurface = engine.mapOutputSurface(
+                preferredSurface,
+                engine.inferSurfaceInfo(preferredSurface)
+        );
+        if (takeoverSurface == null || takeoverSurface == preferredSurface) {
+            return false;
+        }
+        List<Object> takeoverOnly = new ArrayList<>(1);
+        takeoverOnly.add(takeoverSurface);
+        List<Surface> originals = collectSurfacesFromSurfaceList(in);
+        if (originals.isEmpty()) {
+            return false;
+        }
+        engine.enableVcamCompatibilityAliases(originals, takeoverSurface);
+        param.args[argIndex] = takeoverOnly;
+        LogUtil.iRateLimited(
+                "vcam-compat-surface-list:" + hookName,
+                2000L,
+                TAG,
+                hookName + " compat takeover active originals=" + originals.size() + " outputs=1"
+        );
+        logMappingSummary(engine, hookName, 1);
+        return true;
+    }
+
+    private static boolean applyVcamCompatTakeoverOutputConfigList(
+            VirtualCameraEngine engine,
+            XC_MethodHook.MethodHookParam param,
+            int argIndex,
+            String hookName
+    ) {
+        Object arg = param.args[argIndex];
+        if (!(arg instanceof List)) return false;
+        @SuppressWarnings("unchecked")
+        List<Object> in = (List<Object>) arg;
+        if (in.isEmpty()) return false;
+        int preferredIndex = selectPreferredOutputConfigIndex(engine, in);
+        if (preferredIndex < 0 || preferredIndex >= in.size()) return false;
+        Object preferred = in.get(preferredIndex);
+        if (!(preferred instanceof OutputConfiguration)) return false;
+        List<Surface> originals = collectSurfacesFromOutputConfigList(in);
+        if (originals.isEmpty()) return false;
+        Surface preferredSurface = getSurfaceFromOutputConfig((OutputConfiguration) preferred);
+        MappedOutputConfigResult mapped = mapOutputConfiguration(
+                engine,
+                (OutputConfiguration) preferred,
+                hookName,
+                false
+        );
+        if (mapped.replacedCount <= 0 || !(mapped.outputConfig instanceof OutputConfiguration)) {
+            return false;
+        }
+        Surface takeoverSurface = getSurfaceFromOutputConfig((OutputConfiguration) mapped.outputConfig);
+        if (takeoverSurface == null) {
+            if (preferredSurface != null) {
+                engine.rollbackOutputSurfaceMapping(preferredSurface);
+            }
+            return false;
+        }
+        List<Object> takeoverOnly = new ArrayList<>(1);
+        takeoverOnly.add(mapped.outputConfig);
+        engine.enableVcamCompatibilityAliases(originals, takeoverSurface);
+        param.args[argIndex] = takeoverOnly;
+        LogUtil.iRateLimited(
+                "vcam-compat-output-config-list:" + hookName,
+                2000L,
+                TAG,
+                hookName + " compat takeover active originals=" + originals.size() + " outputs=1"
+        );
+        logMappingSummary(engine, hookName, mapped.replacedCount);
+        return true;
+    }
+
+    private static boolean applyVcamCompatTakeoverSessionConfiguration(
+            VirtualCameraEngine engine,
+            XC_MethodHook.MethodHookParam param,
+            int argIndex,
+            String hookName
+    ) {
+        Object arg = param.args[argIndex];
+        if (!(arg instanceof SessionConfiguration)) return false;
+        SessionConfiguration sc = (SessionConfiguration) arg;
+        List<OutputConfiguration> outputs = sc.getOutputConfigurations();
+        if (outputs == null || outputs.isEmpty()) return false;
+        List<Surface> originals = collectSurfacesFromOutputConfigList(outputs);
+        if (originals.isEmpty()) return false;
+        int preferredIndex = selectPreferredOutputConfigIndex(engine, outputs);
+        if (preferredIndex < 0 || preferredIndex >= outputs.size()) return false;
+        OutputConfiguration preferred = outputs.get(preferredIndex);
+        Surface preferredSurface = getSurfaceFromOutputConfig(preferred);
+        MappedOutputConfigResult mapped = mapOutputConfiguration(engine, preferred, hookName, false);
+        if (mapped.replacedCount <= 0 || !(mapped.outputConfig instanceof OutputConfiguration)) {
+            return false;
+        }
+        OutputConfiguration takeoverOutputConfig = (OutputConfiguration) mapped.outputConfig;
+        Surface takeoverSurface = getSurfaceFromOutputConfig(takeoverOutputConfig);
+        if (takeoverSurface == null) {
+            if (preferredSurface != null) {
+                engine.rollbackOutputSurfaceMapping(preferredSurface);
+            }
+            return false;
+        }
+        List<OutputConfiguration> takeoverOnly = new ArrayList<>(1);
+        takeoverOnly.add(takeoverOutputConfig);
+        SessionConfiguration rebuilt = rebuildSessionConfiguration(sc, takeoverOnly);
+        if (rebuilt == null) {
+            if (preferredSurface != null) {
+                engine.rollbackOutputSurfaceMapping(preferredSurface);
+            }
+            return false;
+        }
+        engine.enableVcamCompatibilityAliases(originals, takeoverSurface);
+        param.args[argIndex] = rebuilt;
+        LogUtil.iRateLimited(
+                "vcam-compat-session-config:" + hookName,
+                2000L,
+                TAG,
+                hookName + " compat takeover active originals=" + originals.size() + " outputs=1"
+        );
+        logMappingSummary(engine, hookName, mapped.replacedCount);
+        return true;
+    }
+
+    private static List<Surface> collectSurfacesFromSurfaceList(List<?> entries) {
+        List<Surface> surfaces = new ArrayList<>();
+        if (entries == null) return surfaces;
+        for (Object entry : entries) {
+            if (entry instanceof Surface) {
+                surfaces.add((Surface) entry);
             }
         }
-        logMappingSummary(engine, "createCaptureSession(List<Surface>)", replaced);
-        return out;
+        return surfaces;
+    }
+
+    private static List<Surface> collectSurfacesFromOutputConfigList(List<?> entries) {
+        List<Surface> surfaces = new ArrayList<>();
+        if (entries == null) return surfaces;
+        for (Object entry : entries) {
+            if (!(entry instanceof OutputConfiguration)) continue;
+            collectSurfacesFromOutputConfig((OutputConfiguration) entry, surfaces);
+        }
+        return surfaces;
+    }
+
+    private static void collectSurfacesFromOutputConfig(OutputConfiguration config, List<Surface> out) {
+        if (config == null || out == null) return;
+        boolean collected = false;
+        try {
+            @SuppressWarnings("unchecked")
+            List<Surface> surfaces = (List<Surface>) XposedHelpers.callMethod(config, "getSurfaces");
+            if (surfaces != null) {
+                for (Surface s : surfaces) {
+                    if (s == null) continue;
+                    out.add(s);
+                    collected = true;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        if (!collected) {
+            Surface surface = getSurfaceFromOutputConfig(config);
+            if (surface != null) {
+                out.add(surface);
+            }
+        }
+    }
+
+    private static List<Object> mapSurfaceList(
+            VirtualCameraEngine engine,
+            List<Object> in,
+            String hookName
+    ) {
+        synchronized (ROUTE_OP_LOCK) {
+            List<Object> out = new ArrayList<>(in.size());
+            int replaced = 0;
+            int preferredIndex = selectPreferredSurfaceIndex(engine, in);
+            for (Object o : in) {
+                if (o instanceof Surface) {
+                    Surface original = (Surface) o;
+                    int index = out.size();
+                    if (index != preferredIndex ||
+                            replaced >= MAX_REPLACED_SURFACES_PER_SESSION ||
+                            !isEligibleForReplacement(engine, original)) {
+                        out.add(original);
+                        continue;
+                    }
+                    SurfaceInfo info = engine.inferSurfaceInfo(original);
+                    Surface mapped = engine.mapOutputSurface(original, info);
+                    if (mapped != original) replaced++;
+                    out.add(mapped);
+                } else {
+                    out.add(o);
+                }
+            }
+            logMappingSummary(engine, hookName, replaced);
+            return out;
+        }
+    }
+
+    private static Surface getSurfaceFromOutputConfig(OutputConfiguration oc) {
+        if (oc == null) return null;
+        try {
+            return oc.getSurface();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static boolean isEligibleForReplacement(VirtualCameraEngine engine, Surface surface) {
+        if (engine == null || surface == null) return false;
+        SurfaceInfo info = engine.inferSurfaceInfo(surface);
+        if (info == null) return false;
+        if (info.kind == SurfaceInfo.Kind.SURFACE_TEXTURE) return true;
+        if (info.kind != SurfaceInfo.Kind.UNKNOWN) return false;
+        return info.width > 0 && info.height > 0;
+    }
+
+    private static int selectPreferredSurfaceIndex(VirtualCameraEngine engine, List<?> surfaces) {
+        int bestIndex = -1;
+        int bestPriority = -1;
+        if (surfaces == null) return -1;
+        for (int i = 0; i < surfaces.size(); i++) {
+            Object item = surfaces.get(i);
+            if (!(item instanceof Surface)) continue;
+            int priority = replacementPriority(engine, (Surface) item);
+            if (priority > bestPriority) {
+                bestPriority = priority;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    private static int selectPreferredOutputConfigIndex(VirtualCameraEngine engine, List<?> outputConfigs) {
+        int bestIndex = -1;
+        int bestPriority = -1;
+        if (outputConfigs == null) return -1;
+        for (int i = 0; i < outputConfigs.size(); i++) {
+            Object item = outputConfigs.get(i);
+            if (!(item instanceof OutputConfiguration)) continue;
+            Surface surface = getSurfaceFromOutputConfig((OutputConfiguration) item);
+            int priority = replacementPriority(engine, surface);
+            if (priority > bestPriority) {
+                bestPriority = priority;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    private static int replacementPriority(VirtualCameraEngine engine, Surface surface) {
+        if (!isEligibleForReplacement(engine, surface)) return -1;
+        SurfaceInfo info = engine.inferSurfaceInfo(surface);
+        if (info == null) return -1;
+        if (info.kind == SurfaceInfo.Kind.SURFACE_TEXTURE) return 2;
+        if (info.kind == SurfaceInfo.Kind.UNKNOWN) return 1;
+        return -1;
     }
 
     private static void logMappingSummary(VirtualCameraEngine engine, String hookName, int replaced) {
@@ -525,7 +974,10 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             Surface s = (Surface) param.args[0];
-                            Surface mapped = engine.mapRequestTargetSurface(s);
+                            Surface mapped;
+                            synchronized (ROUTE_OP_LOCK) {
+                                mapped = engine.mapRequestTargetSurface(s);
+                            }
                             if (mapped != s) param.args[0] = mapped;
                         }
                     }
@@ -539,7 +991,10 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             Surface s = (Surface) param.args[0];
-                            Surface mapped = engine.mapRequestTargetSurface(s);
+                            Surface mapped;
+                            synchronized (ROUTE_OP_LOCK) {
+                                mapped = engine.mapRequestTargetSurface(s);
+                            }
                             if (mapped != s) param.args[0] = mapped;
                         }
                     }

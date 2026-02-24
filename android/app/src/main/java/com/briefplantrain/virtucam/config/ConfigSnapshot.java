@@ -27,7 +27,37 @@ public final class ConfigSnapshot {
 
     public boolean debug = false;
     public boolean aggressiveSurfaceReplace = false;
+    public boolean vcamCompatibilityMode = false;
     public int fps = 30;
+
+    public static ConfigSnapshot copyOf(ConfigSnapshot other) {
+        ConfigSnapshot out = new ConfigSnapshot();
+        if (other == null) return out;
+
+        out.enabled = other.enabled;
+        out.sourceMode = other.sourceMode;
+        out.mediaSourcePath = other.mediaSourcePath;
+
+        out.cameraTarget = other.cameraTarget;
+        out.mirrored = other.mirrored;
+        out.rotation = other.rotation;
+        out.scaleX = other.scaleX;
+        out.scaleY = other.scaleY;
+        out.offsetX = other.offsetX;
+        out.offsetY = other.offsetY;
+        out.scaleMode = other.scaleMode;
+
+        out.targetMode = other.targetMode;
+        out.targetPackages = other.targetPackages == null
+                ? Collections.emptySet()
+                : new HashSet<>(other.targetPackages);
+
+        out.debug = other.debug;
+        out.aggressiveSurfaceReplace = other.aggressiveSurfaceReplace;
+        out.vcamCompatibilityMode = other.vcamCompatibilityMode;
+        out.fps = other.fps;
+        return out;
+    }
 
     public boolean isTargeted(String packageName) {
         if (packageName == null) return false;

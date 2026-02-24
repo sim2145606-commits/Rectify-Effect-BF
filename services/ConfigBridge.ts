@@ -14,8 +14,10 @@ export type BridgeSyncFailureCode =
   | 'write_failed'
   | 'ipc_unready';
 
-export type BridgeWriteWarningCode = 'prefs_epoch_mismatch' | 'companion_refresh_deferred';
-
+export type BridgeWriteWarningCode =
+  | 'prefs_epoch_mismatch'
+  | 'companion_refresh_deferred'
+  | 'ipc_mirror_write_failed';
 export type BridgeSyncState = {
   ok: boolean;
   code: BridgeSyncFailureCode | null;
@@ -232,6 +234,9 @@ function normalizeWarningCode(raw: unknown): BridgeWriteWarningCode | null {
   ) {
     return 'companion_refresh_deferred';
   }
+  if (normalized === 'ipc_mirror_write_failed') {
+    return 'ipc_mirror_write_failed';
+  }
   return null;
 }
 
@@ -311,6 +316,8 @@ async function verifyIpcReadinessAfterWrite(): Promise<void> {
   const ipcRootExists = ipcStatus.ipcRootExists === true;
   const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
   const configState = String(ipcStatus.configStatus ?? '').trim().toLowerCase();
+  const configPrimaryReadable =
+    ipcStatus.configPrimaryReadable === true || ipcStatus.config_primary_readable === true;
   const configJsonReady =
     (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
     configState === 'config_ready';
@@ -319,8 +326,12 @@ async function verifyIpcReadinessAfterWrite(): Promise<void> {
     throw new Error('IPC root missing after bridge write');
   }
 
+  if (!configPrimaryReadable) {
+    throw new Error('Primary config is missing/unreadable after bridge write');
+  }
+
   if (!configJsonReady) {
-    throw new Error('IPC config JSON is missing/unreadable after bridge write');
+    logger.warn('IPC mirror config is missing/unreadable after bridge write', 'ConfigBridge');
   }
 
   if (companionState === 'scope_mismatch') {
@@ -342,6 +353,8 @@ export type BridgeConfig = {
   scaleMode: string;
   targetMode: 'all' | 'whitelist' | 'blacklist';
   sourceMode: SourceMode;
+  allowBroadScope: boolean;
+  vcamCompatibilityMode: boolean;
   targetPackages: string[];
 };
 
@@ -364,6 +377,10 @@ function buildWritePayload(config: Partial<BridgeConfig>): Record<string, unknow
   if (Object.prototype.hasOwnProperty.call(config, 'targetMode'))
     payload.targetMode = config.targetMode;
   if (Object.prototype.hasOwnProperty.call(config, 'sourceMode')) payload.sourceMode = config.sourceMode;
+  if (Object.prototype.hasOwnProperty.call(config, 'allowBroadScope'))
+    payload.allowBroadScope = config.allowBroadScope;
+  if (Object.prototype.hasOwnProperty.call(config, 'vcamCompatibilityMode'))
+    payload.vcamCompatibilityMode = config.vcamCompatibilityMode;
   if (Object.prototype.hasOwnProperty.call(config, 'targetPackages'))
     payload.targetPackages = config.targetPackages;
   return payload;
@@ -476,6 +493,8 @@ async function runWriteQueue(): Promise<void> {
               ? 'Bridge write successful (prefs verification deferred)'
               : warningCode === 'companion_refresh_deferred'
                 ? 'Bridge write successful (companion refresh deferred)'
+                : warningCode === 'ipc_mirror_write_failed'
+                  ? 'Bridge write successful (IPC mirror write failed)'
                 : 'Bridge write successful',
           timestamp: Date.now(),
           attempts: 1,
@@ -572,6 +591,8 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
     scaleMode: 'fit',
     targetMode: 'all',
     sourceMode: 'black',
+    allowBroadScope: false,
+    vcamCompatibilityMode: false,
     targetPackages: [],
   };
 
@@ -645,6 +666,8 @@ export async function syncAllSettings(force = false): Promise<void> {
       offsetY,
       targetModeRaw,
       targetAppsRaw,
+      allowBroadScopeRaw,
+      vcamCompatibilityModeRaw,
     ] = await Promise.all([
       AsyncStorage.getItem(STORAGE_KEYS.HOOK_ENABLED),
       AsyncStorage.getItem(STORAGE_KEYS.HOOK_MEDIA_PATH),
@@ -658,6 +681,8 @@ export async function syncAllSettings(force = false): Promise<void> {
       AsyncStorage.getItem(STORAGE_KEYS.OFFSET_Y),
       AsyncStorage.getItem(STORAGE_KEYS.TARGET_MODE),
       AsyncStorage.getItem(STORAGE_KEYS.TARGET_APPS),
+      AsyncStorage.getItem(STORAGE_KEYS.ALLOW_BROAD_SCOPE),
+      AsyncStorage.getItem(STORAGE_KEYS.VCAM_COMPATIBILITY_MODE),
     ]);
 
     const enabledValue = parseStoredBoolean(enabled, false);
@@ -671,6 +696,8 @@ export async function syncAllSettings(force = false): Promise<void> {
     const scaleYValue = parseStoredNumber(scaleY, 1.0);
     const offsetXValue = parseStoredNumber(offsetX, 0.0);
     const offsetYValue = parseStoredNumber(offsetY, 0.0);
+    const allowBroadScopeValue = parseStoredBoolean(allowBroadScopeRaw, false);
+    const vcamCompatibilityModeValue = parseStoredBoolean(vcamCompatibilityModeRaw, false);
 
     let cameraTarget: CameraTarget = 'none';
     if (front && back) {
@@ -720,6 +747,8 @@ export async function syncAllSettings(force = false): Promise<void> {
       offsetY: offsetYValue,
       targetMode: effectiveTargetMode,
       sourceMode,
+      allowBroadScope: allowBroadScopeValue,
+      vcamCompatibilityMode: vcamCompatibilityModeValue,
       targetPackages: enabledPackages,
     };
 

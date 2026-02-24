@@ -25,6 +25,18 @@ type XposedStatusResult = {
   markerRequired?: boolean;
   runtimeObservedAt?: number;
   mappingFailureReason?: string;
+  configPrimaryReadable?: boolean;
+  configIpcReadable?: boolean;
+  hookLastReadOk?: boolean;
+  runtimeReady?: boolean;
+  activeSourceMode?: string;
+  sourceModeEffective?: string;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
+  lastOkEpochMs?: number;
+  runtimeUpdatedEpochMs?: number;
+  allowBroadScope?: boolean;
+  vcamCompatibilityMode?: boolean;
 };
 
 type IpcStatusResult = {
@@ -50,6 +62,27 @@ type IpcStatusResult = {
   stagedMediaExists?: boolean;
   stagedMediaReadable?: boolean;
   stagedMediaHookReadable?: boolean;
+  configPrimaryReadable?: boolean;
+  config_primary_readable?: boolean;
+  configIpcReadable?: boolean;
+  config_ipc_readable?: boolean;
+  hookLastReadOk?: boolean;
+  hook_last_read_ok?: boolean;
+  runtimeReady?: boolean;
+  runtime_ready?: boolean;
+  activeSourceMode?: string;
+  active_source_mode?: string;
+  sourceModeEffective?: string;
+  source_mode_effective?: string;
+  lastErrorCode?: string;
+  last_error_code?: string;
+  lastErrorMessage?: string;
+  last_error_message?: string;
+  lastOkEpochMs?: number;
+  last_ok_epoch_ms?: number;
+  updatedEpochMs?: number;
+  updated_epoch_ms?: number;
+  runtimeStateFresh?: boolean;
 };
 
 type MappingLogStatus = {
@@ -101,6 +134,14 @@ export type RawXposedDebugInfo = {
   mappingLogSource: string;
   latestMappedCount: number | null;
   latestZeroReason: string;
+  configPrimaryReadable: boolean;
+  hookLastReadOk: boolean;
+  runtimeReady: boolean;
+  activeSourceMode: string;
+  sourceModeEffective: string;
+  lastErrorCode: string;
+  lastErrorMessage: string;
+  vcamCompatibilityMode: boolean;
   mappingHint: string;
   quickFixHint: string;
 };
@@ -405,10 +446,32 @@ export async function runDiagnostics(
     const ready = xposedStatus.hookReady === true;
     const moduleLoaded = xposedStatus.moduleLoaded === true;
     const hookConfigured = xposedStatus.hookConfigured === true;
-    const ipcConfigReady = xposedStatus.ipcConfigReady === true;
+    const configPrimaryReady =
+      (ipcStatus?.configPrimaryReadable === true || ipcStatus?.config_primary_readable === true) ||
+      xposedStatus.configPrimaryReadable === true ||
+      xposedStatus.ipcConfigReady === true;
+    const configIpcReady =
+      ipcStatus?.configIpcReadable === true ||
+      ipcStatus?.config_ipc_readable === true ||
+      (ipcStatus?.configJsonExists === true && ipcStatus?.configJsonReadable === true) ||
+      xposedStatus.configIpcReadable === true;
+    const hookLastReadOk =
+      ipcStatus?.hookLastReadOk === true ||
+      ipcStatus?.hook_last_read_ok === true ||
+      xposedStatus.hookLastReadOk === true;
+    const runtimeReady =
+      ipcStatus?.runtimeReady === true ||
+      ipcStatus?.runtime_ready === true ||
+      xposedStatus.runtimeReady === true;
     const stagedMediaReady = xposedStatus.stagedMediaReady === true;
     const runtimeHookObserved = xposedStatus.runtimeHookObserved === true;
     const mappingFailureReason = String(xposedStatus.mappingFailureReason ?? '').trim();
+    const runtimeErrorCode = String(
+      ipcStatus?.lastErrorCode ??
+        ipcStatus?.last_error_code ??
+        xposedStatus.lastErrorCode ??
+        ''
+    ).trim();
     const scopeHint = readScopeMismatchHint(String(xposedStatus.scopeEvaluationReason ?? ''));
     let detailStatus: 'pass' | 'warn' | 'fail' = ready ? 'pass' : 'fail';
     let baseDetail = ready
@@ -418,12 +481,18 @@ export async function runDiagnostics(
     if (!ready && moduleLoaded && !hookConfigured) {
       detailStatus = 'warn';
       baseDetail = 'Hook engine loaded but disabled by config';
-    } else if (!ready && moduleLoaded && hookConfigured && !ipcConfigReady) {
+    } else if (!ready && moduleLoaded && hookConfigured && !configPrimaryReady) {
       detailStatus = 'fail';
-      baseDetail = 'Hook config exists but IPC config is not readable';
+      baseDetail = 'Hook config exists but primary config is not hook-readable';
+    } else if (!ready && moduleLoaded && hookConfigured && !hookLastReadOk) {
+      detailStatus = 'fail';
+      baseDetail = 'Hook runtime readback is unhealthy';
     } else if (!ready && moduleLoaded && hookConfigured && !stagedMediaReady) {
       detailStatus = 'fail';
       baseDetail = 'Hook config exists but staged media is not readable';
+    } else if (!ready && moduleLoaded && hookConfigured && !runtimeReady) {
+      detailStatus = 'warn';
+      baseDetail = 'Runtime status is not ready yet';
     } else if (!ready && moduleLoaded && hookConfigured && !runtimeHookObserved) {
       detailStatus = 'warn';
       baseDetail = 'Config is ready but runtime hook has not been observed yet';
@@ -447,11 +516,19 @@ export async function runDiagnostics(
       baseDetail = 'Hook configured but no mapped surfaces yet';
     }
 
+    const extras: string[] = [];
+    if (!configIpcReady) {
+      extras.push('IPC mirror unreadable');
+    }
+    if (runtimeErrorCode.length > 0) {
+      extras.push(`runtime_error=${runtimeErrorCode}`);
+    }
+
     pushCheck({
       name: 'Hook Ready',
       description: 'Module loaded + scoped + configured',
       status: detailStatus,
-      detail: `${baseDetail} - ${scopeHint}`,
+      detail: `${baseDetail} - ${scopeHint}${extras.length > 0 ? ` - ${extras.join(', ')}` : ''}`,
     });
   }
 
@@ -470,17 +547,19 @@ export async function runDiagnostics(
     const readSourceHint =
       stateReadSource === 'root_read' ? ' (state read via root fallback)' : '';
     const companionVersion = String(ipcStatus.companionVersion ?? '').trim();
-    const configReady =
-      (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
-      String(ipcStatus.configStatus ?? '').trim().toLowerCase() === 'config_ready';
+    const configPrimaryReady =
+      ipcStatus.configPrimaryReadable === true || ipcStatus.config_primary_readable === true;
+    const hookLastReadOk = ipcStatus.hookLastReadOk === true || ipcStatus.hook_last_read_ok === true;
+    const runtimeReady = ipcStatus.runtimeReady === true || ipcStatus.runtime_ready === true;
     if (companionState === 'ready') {
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
-        status: configReady ? 'pass' : 'fail',
-        detail: configReady
-          ? `Companion ready${readSourceHint}${companionVersion ? ` (${companionVersion})` : ''}`
-          : `Companion ready but config not staged${readSourceHint}`,
+        status: configPrimaryReady && hookLastReadOk && runtimeReady ? 'pass' : 'fail',
+        detail:
+          configPrimaryReady && hookLastReadOk && runtimeReady
+            ? `Companion ready${readSourceHint}${companionVersion ? ` (${companionVersion})` : ''}`
+            : `Companion ready but runtime contract is not healthy${readSourceHint}`,
       });
     } else if (companionState === 'waiting_runtime') {
       pushCheck({
@@ -531,25 +610,21 @@ export async function runDiagnostics(
       status: 'fail',
       detail: 'IPC root missing - companion module likely not active',
     });
-  } else if (ipcStatus.configJsonExists && ipcStatus.configJsonReadable) {
+  } else if (ipcStatus.configPrimaryReadable === true || ipcStatus.config_primary_readable === true) {
     const stateReadSource = String(ipcStatus.stateReadSource ?? '').trim().toLowerCase();
     const readSourceHint =
       stateReadSource === 'root_read' ? ' (state read via root fallback)' : '';
+    const ipcMirrorReady =
+      ipcStatus.configIpcReadable === true ||
+      ipcStatus.config_ipc_readable === true ||
+      (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true);
     pushCheck({
       name: 'IPC Config',
       description: '/dev/virtucam_ipc/config/virtucam_config.json',
-      status: 'pass',
-      detail: `Config JSON exists and is readable${readSourceHint}`,
-    });
-  } else if (String(ipcStatus.configStatus ?? '').trim().toLowerCase() === 'config_ready') {
-    const stateReadSource = String(ipcStatus.stateReadSource ?? '').trim().toLowerCase();
-    const readSourceHint =
-      stateReadSource === 'root_read' ? ' (state read via root fallback)' : '';
-    pushCheck({
-      name: 'IPC Config',
-      description: '/dev/virtucam_ipc/config/virtucam_config.json',
-      status: 'pass',
-      detail: `Companion reports config_ready even though JSON is not app-readable${readSourceHint}`,
+      status: ipcMirrorReady ? 'pass' : 'warn',
+      detail: ipcMirrorReady
+        ? `Primary config is readable and IPC mirror is available${readSourceHint}`
+        : `Primary config is readable but IPC mirror is unavailable${readSourceHint}`,
     });
   } else {
     const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
@@ -559,8 +634,8 @@ export async function runDiagnostics(
       status: 'fail',
       detail:
         companionState === 'ready'
-          ? 'Companion ready but IPC config is missing/unreadable'
-          : 'Config JSON missing or unreadable',
+          ? 'Companion ready but primary config is not hook-readable'
+          : 'Primary config is missing or unreadable',
     });
   }
 
@@ -728,6 +803,14 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
       mappingLogSource: mappingStatus.source,
       latestMappedCount: mappingStatus.latestMappedCount,
       latestZeroReason: String(mappingStatus.latestZeroReason ?? ''),
+      configPrimaryReadable: xposedStatus.configPrimaryReadable === true,
+      hookLastReadOk: xposedStatus.hookLastReadOk === true,
+      runtimeReady: xposedStatus.runtimeReady === true,
+      activeSourceMode: String(xposedStatus.activeSourceMode ?? ''),
+      sourceModeEffective: String(xposedStatus.sourceModeEffective ?? ''),
+      lastErrorCode: String(xposedStatus.lastErrorCode ?? ''),
+      lastErrorMessage: String(xposedStatus.lastErrorMessage ?? ''),
+      vcamCompatibilityMode: xposedStatus.vcamCompatibilityMode === true,
       mappingHint,
       quickFixHint,
     };

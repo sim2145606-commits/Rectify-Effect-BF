@@ -12,10 +12,10 @@ export function useSystemStatus(autoRefreshMs: number = 0) {
   const [initialized, setInitialized] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const runCheck = useCallback(async () => {
+  const runCheck = useCallback(async (heavy: boolean) => {
     setIsChecking(true);
     try {
-      const result = await runFullSystemCheck();
+      const result = await runFullSystemCheck({ heavy });
       setStatus(result);
     } catch {
       // Keep previous state on error
@@ -37,7 +37,7 @@ export function useSystemStatus(autoRefreshMs: number = 0) {
 
       // Then run fresh check
       if (mounted) {
-        void runCheck();
+        void runCheck(false);
         setInitialized(true);
       }
     };
@@ -52,7 +52,9 @@ export function useSystemStatus(autoRefreshMs: number = 0) {
   // Auto-refresh interval
   useEffect(() => {
     if (autoRefreshMs > 0 && initialized) {
-      intervalRef.current = setInterval(runCheck, autoRefreshMs);
+      intervalRef.current = setInterval(() => {
+        void runCheck(false);
+      }, autoRefreshMs);
     }
 
     return () => {
@@ -66,6 +68,7 @@ export function useSystemStatus(autoRefreshMs: number = 0) {
     status,
     isChecking,
     initialized,
-    refresh: runCheck,
+    refresh: () => runCheck(true),
+    refreshQuick: () => runCheck(false),
   };
 }
