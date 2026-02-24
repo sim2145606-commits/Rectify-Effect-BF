@@ -8,9 +8,33 @@ const { VirtuCamSettings } = NativeModules;
 export type CameraTarget = 'front' | 'back' | 'both' | 'none';
 export type MediaSourceType = 'file' | 'stream';
 export type SourceMode = 'black' | 'file' | 'stream' | 'test';
+export type BridgeSyncFailureCode =
+  | 'native_unavailable'
+  | 'unauthorized'
+  | 'write_failed'
+  | 'ipc_unready';
+
+export type BridgeSyncState = {
+  ok: boolean;
+  code: BridgeSyncFailureCode | null;
+  message: string;
+  timestamp: number;
+  attempts: number;
+};
 
 
 type StoredTargetApp = { enabled: boolean; packageName: string };
+
+type BridgeSyncListener = (state: BridgeSyncState) => void;
+
+const bridgeSyncListeners = new Set<BridgeSyncListener>();
+let latestBridgeSyncState: BridgeSyncState = {
+  ok: true,
+  code: null,
+  message: 'Waiting for first sync',
+  timestamp: 0,
+  attempts: 0,
+};
 
 function parseStoredJson<T>(raw: string | null, fallback: T): T {
   if (raw === null) return fallback;
@@ -79,6 +103,99 @@ function safeParseTargetApps(targetAppsRaw: string | null): StoredTargetApp[] {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err ?? 'Unknown error');
+}
+
+function normalizeBridgeError(err: unknown): { code: BridgeSyncFailureCode; message: string } {
+  const message = getErrorMessage(err);
+  const nativeCode =
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    typeof (err as { code?: unknown }).code === 'string'
+      ? String((err as { code: string }).code)
+      : '';
+
+  if (!VirtuCamSettings || nativeCode === 'NOT_INITIALIZED') {
+    return { code: 'native_unavailable', message: 'VirtuCamSettings native module not available' };
+  }
+  if (nativeCode === 'UNAUTHORIZED') {
+    return { code: 'unauthorized', message: 'Native bridge rejected call (UNAUTHORIZED)' };
+  }
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes('ipc') || lowerMessage.includes('companion')) {
+    return { code: 'ipc_unready', message };
+  }
+
+  return { code: 'write_failed', message };
+}
+
+function publishBridgeSyncState(state: BridgeSyncState): void {
+  latestBridgeSyncState = state;
+  bridgeSyncListeners.forEach(listener => {
+    try {
+      listener(state);
+    } catch (err: unknown) {
+      logger.warn('Bridge sync listener threw', 'ConfigBridge', err);
+    }
+  });
+}
+
+export function subscribeBridgeSyncState(listener: BridgeSyncListener): () => void {
+  bridgeSyncListeners.add(listener);
+  listener(latestBridgeSyncState);
+  return () => {
+    bridgeSyncListeners.delete(listener);
+  };
+}
+
+export function getLatestBridgeSyncState(): BridgeSyncState {
+  return latestBridgeSyncState;
+}
+
+async function bumpBridgeVersion(): Promise<number> {
+  const versionKey = 'virtucam_config_version';
+  const stored = await AsyncStorage.getItem(versionKey);
+  const current = stored ? Number.parseInt(stored, 10) : 0;
+  const next = Number.isFinite(current) ? current + 1 : 1;
+  await AsyncStorage.setItem(versionKey, String(next));
+  return next;
+}
+
+async function verifyIpcReadinessAfterWrite(): Promise<void> {
+  if (!VirtuCamSettings?.getIpcStatus) return;
+
+  let ipcStatus: Record<string, unknown> | null = null;
+  try {
+    ipcStatus = (await VirtuCamSettings.getIpcStatus()) as Record<string, unknown>;
+  } catch (err: unknown) {
+    throw new Error(`IPC status check failed: ${getErrorMessage(err)}`);
+  }
+
+  if (!ipcStatus) return;
+
+  const ipcRootExists = ipcStatus.ipcRootExists === true;
+  const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
+  const configJsonReady = ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true;
+
+  if (!ipcRootExists) {
+    throw new Error('IPC root missing after bridge write');
+  }
+
+  if (companionState !== 'ready') {
+    throw new Error(`IPC companion not ready (${companionState || 'empty'})`);
+  }
+
+  if (!configJsonReady) {
+    throw new Error('Companion ready but IPC config JSON is missing/unreadable');
+  }
+}
+
 export type BridgeConfig = {
   enabled: boolean;
   mediaSourcePath: string | null;
@@ -102,7 +219,15 @@ export type BridgeConfig = {
 export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<void> {
   if (!VirtuCamSettings) {
     logger.warn('VirtuCamSettings native module not available', 'ConfigBridge');
-    throw new Error('Native module not available');
+    const state: BridgeSyncState = {
+      ok: false,
+      code: 'native_unavailable',
+      message: 'VirtuCamSettings native module not available',
+      timestamp: Date.now(),
+      attempts: 1,
+    };
+    publishBridgeSyncState(state);
+    throw new Error(state.message);
   }
 
   try {
@@ -127,9 +252,27 @@ export async function writeBridgeConfig(config: Partial<BridgeConfig>): Promise<
     if (Object.keys(payload).length === 0) return;
 
     await VirtuCamSettings.writeConfig(payload);
+    await bumpBridgeVersion();
+    publishBridgeSyncState({
+      ok: true,
+      code: null,
+      message: 'Bridge write successful',
+      timestamp: Date.now(),
+      attempts: 1,
+    });
   } catch (err: unknown) {
-    logger.error('Failed to write config', 'ConfigBridge', err);
-    throw err;
+    const normalized = normalizeBridgeError(err);
+    logger.error(`Failed to write config (${normalized.code})`, 'ConfigBridge', err);
+    publishBridgeSyncState({
+      ok: false,
+      code: normalized.code,
+      message: normalized.message,
+      timestamp: Date.now(),
+      attempts: 1,
+    });
+    const error = new Error(normalized.message) as Error & { bridgeCode?: BridgeSyncFailureCode };
+    error.bridgeCode = normalized.code;
+    throw error;
   }
 }
 
@@ -282,7 +425,54 @@ export async function syncAllSettings(): Promise<void> {
       targetPackages: enabledPackages,
     };
 
-    await writeBridgeConfig(config);
+    const maxAttempts = 3;
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await writeBridgeConfig(config);
+        await verifyIpcReadinessAfterWrite();
+        publishBridgeSyncState({
+          ok: true,
+          code: null,
+          message: `Bridge sync successful (attempt ${attempt})`,
+          timestamp: Date.now(),
+          attempts: attempt,
+        });
+        return;
+      } catch (err: unknown) {
+        lastError = err;
+        const normalized = normalizeBridgeError(err);
+        const retryable = normalized.code === 'write_failed' || normalized.code === 'ipc_unready';
+        if (retryable && attempt < maxAttempts) {
+          logger.warn(
+            `Bridge sync attempt ${attempt} failed (${normalized.code}), retrying`,
+            'ConfigBridge',
+            err
+          );
+          await sleep(attempt * 300);
+          continue;
+        }
+
+        publishBridgeSyncState({
+          ok: false,
+          code: normalized.code,
+          message: normalized.message,
+          timestamp: Date.now(),
+          attempts: attempt,
+        });
+        logger.error(`Failed to sync settings (${normalized.code})`, 'ConfigBridge', err);
+        const finalError = new Error(normalized.message) as Error & {
+          bridgeCode?: BridgeSyncFailureCode;
+        };
+        finalError.bridgeCode = normalized.code;
+        throw finalError;
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
   } catch (err: unknown) {
     logger.error('Failed to sync settings', 'ConfigBridge', err);
     throw err;
@@ -297,6 +487,7 @@ export async function getBridgeStatus(): Promise<{
   path: string | null;
   version: number;
   readable: boolean;
+  syncState: BridgeSyncState;
 }> {
   try {
     const path = await getConfigPath();
@@ -321,6 +512,7 @@ export async function getBridgeStatus(): Promise<{
       path,
       version,
       readable,
+      syncState: getLatestBridgeSyncState(),
     };
   } catch (err: unknown) {
     logger.error('Failed to get bridge status', 'ConfigBridge', err);
@@ -329,6 +521,7 @@ export async function getBridgeStatus(): Promise<{
       path: null,
       version: 0,
       readable: false,
+      syncState: getLatestBridgeSyncState(),
     };
   }
 }

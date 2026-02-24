@@ -49,18 +49,28 @@ import GlowButton from '@/components/GlowButton';
 const { VirtuCamSettings } = NativeModules;
 
 type TargetMode = 'all' | 'whitelist' | 'blacklist';
-type TargetAppSource = 'preset' | 'custom';
+type TargetAppSource = 'preset' | 'custom' | 'system_manual';
+type TargetAppRisk = 'system_manual';
 type TargetAppItem = {
   id: string;
   name: string;
   packageName: string;
   enabled: boolean;
   source: TargetAppSource;
+  riskTag?: TargetAppRisk;
 };
 type InstalledAppItem = {
   packageName: string;
   name: string;
 };
+type PackageMetadata = {
+  packageName: string;
+  name: string;
+  installed: boolean;
+  systemApp: boolean;
+};
+
+const PACKAGE_NAME_REGEX = /^[a-zA-Z0-9._]+$/;
 
 const TARGET_APP_PRESETS: Array<Omit<TargetAppItem, 'enabled'>> = [
   { id: 'camera', name: 'Camera', packageName: 'com.android.camera', source: 'preset' },
@@ -83,7 +93,11 @@ function sanitizeTargetApp(input: unknown): TargetAppItem | null {
   if (!packageName || !name) return null;
 
   const source: TargetAppSource =
-    candidate.source === 'preset' || PRESET_PACKAGE_SET.has(packageName) ? 'preset' : 'custom';
+    candidate.source === 'system_manual' || candidate.riskTag === 'system_manual'
+      ? 'system_manual'
+      : candidate.source === 'preset' || PRESET_PACKAGE_SET.has(packageName)
+        ? 'preset'
+        : 'custom';
 
   return {
     id: typeof candidate.id === 'string' && candidate.id.trim()
@@ -93,6 +107,7 @@ function sanitizeTargetApp(input: unknown): TargetAppItem | null {
     packageName,
     enabled: candidate.enabled === true,
     source,
+    riskTag: source === 'system_manual' ? 'system_manual' : undefined,
   };
 }
 
@@ -117,7 +132,12 @@ function mergeTargetApps(stored: TargetAppItem[] | null | undefined): TargetAppI
 
   const customApps = safeStored
     .filter(app => !PRESET_PACKAGE_SET.has(app.packageName))
-    .map(app => ({ ...app, source: 'custom' as const }))
+    .map(app => {
+      if (app.source === 'system_manual') {
+        return { ...app, source: 'system_manual' as const, riskTag: 'system_manual' as const };
+      }
+      return { ...app, source: 'custom' as const };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return [...presets, ...customApps];
@@ -142,6 +162,9 @@ export default function SettingsScreen() {
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
   const [installedApps, setInstalledApps] = useState<InstalledAppItem[]>([]);
+  const [isManualPickerVisible, setIsManualPickerVisible] = useState(false);
+  const [manualPackageInput, setManualPackageInput] = useState('');
+  const [manualLookupLoading, setManualLookupLoading] = useState(false);
 
   const resolvedTargetApps = useMemo(() => mergeTargetApps(targetApps), [targetApps]);
   const enabledTargetApps = useMemo(
@@ -178,6 +201,11 @@ export default function SettingsScreen() {
         );
     return base.slice(0, 200);
   }, [installedApps, pickerQuery]);
+  const manualPackageTrimmed = useMemo(() => manualPackageInput.trim(), [manualPackageInput]);
+  const manualPackageValid = useMemo(
+    () => PACKAGE_NAME_REGEX.test(manualPackageTrimmed),
+    [manualPackageTrimmed]
+  );
 
   const pushTargetBridgeConfig = useCallback((mode: TargetMode, apps: TargetAppItem[]) => {
     const enabledPackages = apps.filter(app => app.enabled).map(app => app.packageName);
@@ -221,12 +249,46 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  const lookupPackageMetadata = useCallback(
+    async (packageName: string): Promise<PackageMetadata> => {
+      if (VirtuCamSettings?.resolvePackageMetadata) {
+        const metadata = await VirtuCamSettings.resolvePackageMetadata(packageName);
+        return {
+          packageName,
+          name:
+            typeof metadata?.name === 'string' && metadata.name.trim().length > 0
+              ? metadata.name.trim()
+              : packageName,
+          installed: metadata?.installed === true,
+          systemApp: metadata?.systemApp === true,
+        };
+      }
+
+      const installed = installedApps.some(app => app.packageName === packageName);
+      const fallbackName = installedApps.find(app => app.packageName === packageName)?.name ?? packageName;
+      return {
+        packageName,
+        name: fallbackName,
+        installed,
+        systemApp: false,
+      };
+    },
+    [installedApps]
+  );
+
   const handleOpenAddAppPicker = useCallback(async () => {
     lightImpact();
     setPickerQuery('');
     await loadInstalledApps();
     setIsPickerVisible(true);
   }, [lightImpact, loadInstalledApps]);
+
+  const handleOpenManualPicker = useCallback(() => {
+    lightImpact();
+    setManualPackageInput('');
+    setManualLookupLoading(false);
+    setIsManualPickerVisible(true);
+  }, [lightImpact]);
 
   const handleRequestPermission = useCallback(
     async (type: string) => {
@@ -307,7 +369,7 @@ export default function SettingsScreen() {
     if (existing) {
       nextApps = resolvedTargetApps.map(item =>
         item.packageName === app.packageName
-          ? { ...item, enabled: true, name: app.name }
+          ? { ...item, enabled: true, name: app.name, source: item.source }
           : item
       );
     } else {
@@ -319,6 +381,7 @@ export default function SettingsScreen() {
           packageName: app.packageName,
           enabled: true,
           source: 'custom',
+          riskTag: undefined,
         },
       ];
     }
@@ -326,7 +389,92 @@ export default function SettingsScreen() {
     pushTargetBridgeConfig(targetMode, nextApps);
   }, [lightImpact, resolvedTargetApps, setTargetApps, pushTargetBridgeConfig, targetMode]);
 
-  const handleRemoveCustomTargetApp = useCallback((packageName: string) => {
+  const handleAddManualSystemTarget = useCallback(async () => {
+    const packageName = manualPackageInput.trim();
+    if (!PACKAGE_NAME_REGEX.test(packageName)) {
+      Alert.alert(
+        'Invalid Package Name',
+        'Package name must match [a-zA-Z0-9._]+ and contain no spaces.'
+      );
+      return;
+    }
+
+    setManualLookupLoading(true);
+    let metadata: PackageMetadata;
+    try {
+      metadata = await lookupPackageMetadata(packageName);
+    } catch (err: unknown) {
+      setManualLookupLoading(false);
+      Alert.alert(
+        'Lookup Failed',
+        err instanceof Error ? err.message : 'Unable to resolve package metadata'
+      );
+      return;
+    }
+    setManualLookupLoading(false);
+
+    const resolvedName = metadata.name || packageName;
+    const installDetail = metadata.installed
+      ? `Installed as "${resolvedName}" (${metadata.systemApp ? 'System app' : 'User app'}).`
+      : 'Package is not currently installed; it will be saved as a manual custom entry.';
+
+    Alert.alert(
+      'Add System App Target',
+      `Manual system targeting can cause lag, camera instability, or app crashes.\n\n${installDetail}\n\nProceed only if this package is intentionally scoped in LSPosed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Add with Precaution',
+          style: 'destructive',
+          onPress: () => {
+            lightImpact();
+            const existing = resolvedTargetApps.find(item => item.packageName === packageName);
+            let nextApps: TargetAppItem[];
+            if (existing) {
+              nextApps = resolvedTargetApps.map(item =>
+                item.packageName === packageName
+                  ? {
+                      ...item,
+                      enabled: true,
+                      name: resolvedName,
+                      source: item.source === 'preset' ? 'preset' : 'system_manual',
+                      riskTag: item.source === 'preset' ? undefined : 'system_manual',
+                    }
+                  : item
+              );
+            } else {
+              nextApps = [
+                ...resolvedTargetApps,
+                {
+                  id: `system-manual-${packageName}`,
+                  name: resolvedName,
+                  packageName,
+                  enabled: true,
+                  source: 'system_manual',
+                  riskTag: 'system_manual',
+                },
+              ];
+            }
+
+            setTargetApps(nextApps);
+            pushTargetBridgeConfig(targetMode, nextApps);
+            setManualPackageInput('');
+            setIsManualPickerVisible(false);
+          },
+        },
+      ]
+    );
+  }, [
+    manualPackageInput,
+    lookupPackageMetadata,
+    lightImpact,
+    resolvedTargetApps,
+    setTargetApps,
+    pushTargetBridgeConfig,
+    targetMode,
+  ]);
+
+  const handleRemoveTargetApp = useCallback((packageName: string) => {
     lightImpact();
     const nextApps = resolvedTargetApps.filter(app => app.packageName !== packageName);
     setTargetApps(nextApps);
@@ -590,6 +738,8 @@ export default function SettingsScreen() {
             <Text style={[styles.targetActionsHint, { color: colors.textTertiary }]}>
               {enabledTargetApps.length} enabled app{enabledTargetApps.length === 1 ? '' : 's'}
             </Text>
+          </View>
+          <View style={styles.targetActionButtons}>
             <Pressable
               onPress={() => void handleOpenAddAppPicker()}
               style={[styles.addAppButton, { backgroundColor: colors.electricBlue + '18', borderColor: colors.electricBlue + '35' }]}
@@ -601,6 +751,20 @@ export default function SettingsScreen() {
               )}
               <Text style={[styles.addAppButtonText, { color: colors.electricBlue }]}>Add Application</Text>
             </Pressable>
+            <Pressable
+              onPress={handleOpenManualPicker}
+              style={[styles.addAppButton, { backgroundColor: colors.warningAmber + '18', borderColor: colors.warningAmber + '35' }]}
+            >
+              <Ionicons name="shield-outline" size={15} color={colors.warningAmber} />
+              <Text style={[styles.addAppButtonText, { color: colors.warningAmber }]}>Add System App</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.scopeAlertBox, { backgroundColor: colors.warningAmber + '14', borderColor: colors.warningAmber + '35' }]}>
+            <Ionicons name="warning-outline" size={14} color={colors.warningAmber} />
+            <Text style={[styles.scopeAlertText, { color: colors.warningAmber }]}>
+              System app targeting is manual allowlist only. Add exact package names and scope them in LSPosed with caution.
+            </Text>
           </View>
 
           {broadScopePackages.length > 0 && (
@@ -620,9 +784,16 @@ export default function SettingsScreen() {
           )}
 
           {rawXposedDebug && (
-            <Text style={[styles.scopeMeta, { color: colors.textTertiary }]}>
-              Scope reason: {rawXposedDebug.scopeEvaluationReason} | Mapping: {rawXposedDebug.mappingHint}
-            </Text>
+            <>
+              <Text style={[styles.scopeMeta, { color: colors.textTertiary }]}>
+                Scope reason: {rawXposedDebug.scopeEvaluationReason} | Mapping: {rawXposedDebug.mappingHint}
+              </Text>
+              {rawXposedDebug.latestZeroReason.toLowerCase().includes('enabled=false') && (
+                <Text style={[styles.scopeMeta, { color: colors.warningAmber }]}>
+                  {rawXposedDebug.quickFixHint}
+                </Text>
+              )}
+            </>
           )}
 
           {resolvedTargetApps.length === 0 ? (
@@ -632,6 +803,24 @@ export default function SettingsScreen() {
           ) : (
             resolvedTargetApps.map((app, index) => {
               const isCustom = app.source === 'custom';
+              const isManualSystem = app.source === 'system_manual';
+              const isRemovable = app.source !== 'preset';
+              const badgeBg = isManualSystem
+                ? colors.warningAmber + '20'
+                : isCustom
+                  ? colors.cyan + '20'
+                  : colors.surfaceLight;
+              const badgeBorder = isManualSystem
+                ? colors.warningAmber + '40'
+                : isCustom
+                  ? colors.cyan + '40'
+                  : colors.border;
+              const badgeText = isManualSystem
+                ? colors.warningAmber
+                : isCustom
+                  ? colors.cyan
+                  : colors.textTertiary;
+              const badgeLabel = isManualSystem ? 'System (Manual)' : isCustom ? 'Custom' : 'Preset';
               return (
                 <View
                   key={app.packageName}
@@ -650,27 +839,27 @@ export default function SettingsScreen() {
                         style={[
                           styles.targetSourceBadge,
                           {
-                            backgroundColor: isCustom ? colors.cyan + '20' : colors.surfaceLight,
-                            borderColor: isCustom ? colors.cyan + '40' : colors.border,
+                            backgroundColor: badgeBg,
+                            borderColor: badgeBorder,
                           },
                         ]}
                       >
                         <Text
                           style={[
                             styles.targetSourceBadgeText,
-                            { color: isCustom ? colors.cyan : colors.textTertiary },
+                            { color: badgeText },
                           ]}
                         >
-                          {isCustom ? 'Custom' : 'Preset'}
+                          {badgeLabel}
                         </Text>
                       </View>
                     </View>
                     <Text style={[styles.targetAppPkg, { color: colors.textTertiary }]}>{app.packageName}</Text>
                   </View>
                   <View style={styles.targetRowActions}>
-                    {isCustom && (
+                    {isRemovable && (
                       <Pressable
-                        onPress={() => handleRemoveCustomTargetApp(app.packageName)}
+                        onPress={() => handleRemoveTargetApp(app.packageName)}
                         style={[styles.removeAppButton, { borderColor: colors.danger + '40', backgroundColor: colors.danger + '12' }]}
                       >
                         <Ionicons name="trash-outline" size={13} color={colors.danger} />
@@ -759,6 +948,72 @@ export default function SettingsScreen() {
                 }
               />
             )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isManualPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsManualPickerVisible(false)}
+      >
+        <View style={styles.pickerBackdrop}>
+          <View style={[styles.manualSheet, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
+            <View style={[styles.pickerHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.pickerTitle, { color: colors.textPrimary }]}>Add System App (Manual)</Text>
+              <Pressable onPress={() => setIsManualPickerVisible(false)} style={styles.pickerCloseButton}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <View style={[styles.scopeAlertBox, { backgroundColor: colors.warningAmber + '14', borderColor: colors.warningAmber + '35' }]}>
+              <Ionicons name="warning-outline" size={14} color={colors.warningAmber} />
+              <Text style={[styles.scopeAlertText, { color: colors.warningAmber }]}>
+                Add only exact package names. Manual system entries can increase lag or break camera behavior in scoped apps.
+              </Text>
+            </View>
+
+            <TextInput
+              value={manualPackageInput}
+              onChangeText={setManualPackageInput}
+              placeholder="e.g. com.android.camera"
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.pickerSearchInput, { color: colors.textPrimary, borderColor: colors.border, backgroundColor: colors.surfaceLight }]}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <Text style={[styles.manualHint, { color: manualPackageTrimmed.length === 0 || manualPackageValid ? colors.textTertiary : colors.danger }]}>
+              Allowed format: [a-zA-Z0-9._]+
+            </Text>
+
+            <View style={styles.manualActionsRow}>
+              <Pressable
+                onPress={() => setIsManualPickerVisible(false)}
+                style={[styles.manualActionButton, { borderColor: colors.border, backgroundColor: colors.surfaceLight }]}
+              >
+                <Text style={[styles.manualActionText, { color: colors.textSecondary }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void handleAddManualSystemTarget()}
+                disabled={!manualPackageValid || manualLookupLoading}
+                style={[
+                  styles.manualActionButton,
+                  {
+                    borderColor: colors.warningAmber + '40',
+                    backgroundColor: manualPackageValid ? colors.warningAmber + '18' : colors.surfaceLighter,
+                    opacity: manualPackageValid ? 1 : 0.65,
+                  },
+                ]}
+              >
+                {manualLookupLoading ? (
+                  <ActivityIndicator size="small" color={colors.warningAmber} />
+                ) : (
+                  <Text style={[styles.manualActionText, { color: colors.warningAmber }]}>Validate and Add</Text>
+                )}
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -946,6 +1201,7 @@ export default function SettingsScreen() {
             <View style={styles.rawDebugBox}>
               <Text style={styles.rawDebugTitle}>Raw Detection Debug</Text>
               <Text style={styles.rawDebugLine}>detectionMethod: {rawXposedDebug.detectionMethod}</Text>
+              <Text style={styles.rawDebugLine}>markerSource: {rawXposedDebug.markerSource}</Text>
               <Text style={styles.rawDebugLine}>
                 scopeEvaluationReason: {rawXposedDebug.scopeEvaluationReason}
               </Text>
@@ -974,7 +1230,7 @@ export default function SettingsScreen() {
                 mappingHint: {rawXposedDebug.mappingHint}
               </Text>
               <Text style={styles.rawDebugHint}>
-                Tip: if moduleLoaded=false after reboot, open a scoped target app once, then run diagnostics again.
+                {rawXposedDebug.quickFixHint}
               </Text>
             </View>
           )}
@@ -1250,13 +1506,17 @@ const styles = StyleSheet.create({
   targetActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.sm,
-    gap: Spacing.md,
+    marginBottom: Spacing.xs,
   },
   targetActionsHint: {
     fontSize: FontSize.xs,
     flex: 1,
+  },
+  targetActionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
   },
   addAppButton: {
     flexDirection: 'row',
@@ -1266,6 +1526,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
+    flex: 1,
+    justifyContent: 'center',
   },
   addAppButtonText: {
     fontSize: FontSize.xs,
@@ -1343,6 +1605,15 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.md,
     paddingBottom: Spacing.xl,
   },
+  manualSheet: {
+    marginHorizontal: Spacing.lg,
+    marginTop: '28%',
+    borderRadius: BorderRadius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.lg,
+  },
   pickerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1408,6 +1679,28 @@ const styles = StyleSheet.create({
   },
   pickerEmptyText: {
     fontSize: FontSize.sm,
+  },
+  manualHint: {
+    fontSize: FontSize.xs,
+    marginBottom: Spacing.md,
+  },
+  manualActionsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  manualActionButton: {
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.md,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.sm,
+  },
+  manualActionText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   permissionRow: {
     flexDirection: 'row',

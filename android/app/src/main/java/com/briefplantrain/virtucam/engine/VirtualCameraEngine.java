@@ -152,22 +152,37 @@ public final class VirtualCameraEngine {
                     i.width >= 320 && i.height >= 240 &&
                     i.width <= 4096 && i.height <= 4096;
             replace = cfg.aggressiveSurfaceReplace || unknownSizeLooksCameraLike;
-            LogUtil.d(TAG, "Unknown surface decision: replace=" + replace +
-                    " size=" + i.width + "x" + i.height +
-                    " aggressive=" + cfg.aggressiveSurfaceReplace +
-                    " note=" + i.note);
+            LogUtil.dRateLimited(
+                    "unknown-surface-decision",
+                    5000L,
+                    TAG,
+                    "Unknown surface decision: replace=" + replace +
+                            " size=" + i.width + "x" + i.height +
+                            " aggressive=" + cfg.aggressiveSurfaceReplace +
+                            " note=" + i.note
+            );
         } else {
             replace = false;
         }
 
         if (!replace) {
-            LogUtil.d(TAG, "Skipping non-target surface kind=" + i.kind + " size=" + i.width + "x" + i.height);
+            LogUtil.dRateLimited(
+                    "skip-non-target-surface",
+                    5000L,
+                    TAG,
+                    "Skipping non-target surface kind=" + i.kind + " size=" + i.width + "x" + i.height
+            );
             return original;
         }
 
         Surface mapped = mappingManager.getOrCreateDrainSurface(original, i);
         if (mapped == original) {
-            LogUtil.d(TAG, "Surface mapping returned original surface; kind=" + i.kind + " size=" + i.width + "x" + i.height);
+            LogUtil.dRateLimited(
+                    "mapping-returned-original",
+                    5000L,
+                    TAG,
+                    "Surface mapping returned original surface; kind=" + i.kind + " size=" + i.width + "x" + i.height
+            );
         }
         return mapped;
     }
@@ -245,7 +260,12 @@ public final class VirtualCameraEngine {
                 if (cfg.mediaSourcePath != null) {
                     return getOrLoadMediaBitmap(cfg.mediaSourcePath);
                 }
-                LogUtil.d(TAG, "STREAM mode selected without mediaSourcePath; using black frame");
+                LogUtil.iRateLimited(
+                        "stream-without-media",
+                        10000L,
+                        TAG,
+                        "STREAM mode selected without mediaSourcePath; using black frame"
+                );
                 return getBlackFrame();
             case BLACK:
             default:

@@ -1,5 +1,6 @@
 package com.briefplantrain.virtucam.util
 
+import android.util.Log
 import java.io.File
 
 /**
@@ -45,23 +46,44 @@ object VirtuCamIPC {
     }
 
     fun isModuleActive(): Boolean {
-        return File(MODULE_ACTIVE).exists()
+        return File(MODULE_ACTIVE).exists() || File(LEGACY_TMP_ACTIVE).exists()
     }
 
     @JvmStatic
     fun writeModuleActiveMarker() {
+        var wroteIpc = false
+        var wroteLegacy = false
         try {
             val stateDir = File(STATE_DIR)
-            if (!stateDir.exists()) {
-                // Companion may not be installed or fully initialized yet.
-                return
+            if (stateDir.exists()) {
+                wroteIpc = writeMarkerFile(File(MODULE_ACTIVE))
+            } else {
+                Log.w("VirtuCamIPC", "IPC state dir not ready; skipping IPC marker write")
             }
-            val marker = File(MODULE_ACTIVE)
-            marker.writeText("active\n")
-            marker.setLastModified(System.currentTimeMillis())
-            marker.setReadable(true, false)
-        } catch (_: Throwable) {
-            // Never crash hooks if marker write fails.
+
+            wroteLegacy = writeMarkerFile(File(LEGACY_TMP_ACTIVE))
+        } catch (t: Throwable) {
+            Log.w("VirtuCamIPC", "Unexpected marker write error: ${t.message}")
+        }
+
+        if (!wroteIpc && !wroteLegacy) {
+            Log.w("VirtuCamIPC", "Failed to write module marker to IPC and legacy paths")
+        }
+    }
+
+    private fun writeMarkerFile(file: File): Boolean {
+        return try {
+            val parent = file.parentFile
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs()
+            }
+            file.writeText("active\n")
+            file.setLastModified(System.currentTimeMillis())
+            file.setReadable(true, false)
+            true
+        } catch (t: Throwable) {
+            Log.w("VirtuCamIPC", "Failed marker write at ${file.path}: ${t.message}")
+            false
         }
     }
 

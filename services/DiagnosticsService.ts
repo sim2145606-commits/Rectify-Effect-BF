@@ -10,6 +10,7 @@ type XposedStatusResult = {
   hookConfigured?: boolean;
   hookReady?: boolean;
   detectionMethod?: string;
+  markerSource?: string;
   scopeEvaluationReason?: string;
   lsposedPath?: string;
   configuredTargets?: string;
@@ -28,7 +29,11 @@ type IpcStatusResult = {
   configXmlReadable?: boolean;
   mediaDirExists?: boolean;
   moduleMarkerExists?: boolean;
+  moduleMarkerExistsIpc?: boolean;
+  moduleMarkerExistsLegacy?: boolean;
+  moduleMarkerSource?: string;
   companionStatus?: string;
+  configStaged?: boolean;
   stagedMediaPath?: string;
   stagedMediaExists?: boolean;
   stagedMediaReadable?: boolean;
@@ -59,6 +64,7 @@ export type DiagnosticsReport = {
 
 export type RawXposedDebugInfo = {
   detectionMethod: string;
+  markerSource: string;
   scopeEvaluationReason: string;
   lsposedPath: string;
   configuredTargets: string;
@@ -72,7 +78,9 @@ export type RawXposedDebugInfo = {
   broadScopeDetected: boolean;
   broadScopePackages: string;
   latestMappedCount: number | null;
+  latestZeroReason: string;
   mappingHint: string;
+  quickFixHint: string;
 };
 
 function parseMappingLogStatus(logs: string): MappingLogStatus {
@@ -134,6 +142,23 @@ function readScopeMismatchHint(scopeReason: string): string {
     default:
       return scopeReason || 'Unknown scope state';
   }
+}
+
+function getMappingQuickFixHint(reason: string | null): string {
+  const normalized = String(reason ?? '').toLowerCase();
+  if (normalized.includes('enabled=false')) {
+    return 'Quick fix: enable Hook Enabled and trigger sync from the dashboard.';
+  }
+  if (normalized.includes('targeted=false')) {
+    return 'Quick fix: add this package to LSPosed scope or adjust target mode.';
+  }
+  if (normalized.includes('hasmedia=false')) {
+    return 'Quick fix: select media in Studio and keep source mode set to file.';
+  }
+  if (normalized.includes('sourcemode=black')) {
+    return 'Quick fix: switch source mode from black to file or test.';
+  }
+  return 'Quick fix: open a scoped camera app, then rerun diagnostics.';
 }
 
 async function fetchXposedStatus(): Promise<XposedStatusResult | null> {
@@ -340,14 +365,31 @@ export async function runDiagnostics(
     });
   } else {
     const ready = xposedStatus.hookReady === true;
+    const moduleLoaded = xposedStatus.moduleLoaded === true;
+    const hookConfigured = xposedStatus.hookConfigured === true;
     const scopeHint = readScopeMismatchHint(String(xposedStatus.scopeEvaluationReason ?? ''));
-    const baseDetail = ready
+    let detailStatus: 'pass' | 'warn' | 'fail' = ready ? 'pass' : 'fail';
+    let baseDetail = ready
       ? 'Hook pipeline is ready'
       : 'Hook not fully ready (load/scope/config issue)';
+
+    if (!ready && moduleLoaded && !hookConfigured) {
+      detailStatus = 'warn';
+      baseDetail = 'Hook engine loaded but disabled by config';
+    } else if (
+      !ready &&
+      hookConfigured &&
+      mappingStatus.hasMappingLog &&
+      (mappingStatus.latestMappedCount ?? 0) === 0
+    ) {
+      detailStatus = 'warn';
+      baseDetail = 'Hook configured but no mapped surfaces yet';
+    }
+
     pushCheck({
       name: 'Hook Ready',
       description: 'Module loaded + scoped + configured',
-      status: ready ? 'pass' : 'fail',
+      status: detailStatus,
       detail: `${baseDetail} - ${scopeHint}`,
     });
   }
@@ -362,12 +404,13 @@ export async function runDiagnostics(
     });
   } else {
     const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
+    const configReady = ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true;
     if (companionState === 'ready') {
       pushCheck({
         name: 'Companion Status',
         description: '/dev/virtucam_ipc/state/companion_status',
-        status: 'pass',
-        detail: 'Companion ready',
+        status: configReady ? 'pass' : 'warn',
+        detail: configReady ? 'Companion ready' : 'Companion ready but config not staged',
       });
     } else if (!companionState) {
       pushCheck({
@@ -409,11 +452,15 @@ export async function runDiagnostics(
       detail: 'Config JSON exists and is readable',
     });
   } else {
+    const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
     pushCheck({
       name: 'IPC Config',
       description: '/dev/virtucam_ipc/config/virtucam_config.json',
       status: 'fail',
-      detail: 'Config JSON missing or unreadable',
+      detail:
+        companionState === 'ready'
+          ? 'Companion ready but IPC config is missing/unreadable'
+          : 'Config JSON missing or unreadable',
     });
   }
 
@@ -467,14 +514,17 @@ export async function runDiagnostics(
       detail: `Mapped surfaces detected (latest=${mappingStatus.latestMappedCount ?? 0})`,
     });
   } else {
-    const reason = mappingStatus.latestZeroReason
-      ? ` Reason: ${mappingStatus.latestZeroReason}.`
-      : '';
+    const reasonRaw = mappingStatus.latestZeroReason ?? '';
+    const reason = reasonRaw ? ` Reason: ${reasonRaw}.` : '';
+    const disabledByConfig = reasonRaw.toLowerCase().includes('enabled=false');
+    const quickFix = getMappingQuickFixHint(reasonRaw);
     pushCheck({
       name: 'Camera Mapping',
       description: 'createCaptureSession... mapped=<n>',
-      status: 'fail',
-      detail: `Mapped count is zero; hook loaded but camera outputs are not being replaced.${reason}`,
+      status: disabledByConfig ? 'warn' : 'fail',
+      detail: disabledByConfig
+        ? `Mapped=0 because hook config is disabled.${reason} ${quickFix}`
+        : `Mapped count is zero; hook loaded but camera outputs are not being replaced.${reason} ${quickFix}`,
     });
   }
 
@@ -511,6 +561,7 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
     if (!xposedStatus) return null;
 
     const mappingStatus = await fetchMappingLogStatus();
+    const quickFixHint = getMappingQuickFixHint(mappingStatus.latestZeroReason);
     const mappingHint = !mappingStatus.hasMappingLog
       ? 'No mapping logs yet; open a scoped target camera app'
       : (mappingStatus.latestMappedCount ?? 0) > 0
@@ -523,6 +574,7 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
 
     return {
       detectionMethod: String(xposedStatus.detectionMethod ?? 'unknown'),
+      markerSource: String(xposedStatus.markerSource ?? 'unknown'),
       scopeEvaluationReason: String(xposedStatus.scopeEvaluationReason ?? 'unknown'),
       lsposedPath: String(xposedStatus.lsposedPath ?? ''),
       configuredTargets: String(xposedStatus.configuredTargets ?? ''),
@@ -540,7 +592,9 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
       broadScopeDetected: xposedStatus.broadScopeDetected === true,
       broadScopePackages: String(xposedStatus.broadScopePackages ?? ''),
       latestMappedCount: mappingStatus.latestMappedCount,
+      latestZeroReason: String(mappingStatus.latestZeroReason ?? ''),
       mappingHint,
+      quickFixHint,
     };
   } catch {
     return null;

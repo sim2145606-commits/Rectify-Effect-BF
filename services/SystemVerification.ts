@@ -62,6 +62,7 @@ type XposedStatusResult = {
   moduleScoped?: boolean;
   hookConfigured?: boolean;
   detectionMethod?: string;
+  markerSource?: string;
   scopeEvaluationReason?: string;
   configuredTargets?: string;
   broadScopeDetected?: boolean;
@@ -72,6 +73,9 @@ type IpcStatusResult = {
   configJsonExists?: boolean;
   configJsonReadable?: boolean;
   companionStatus?: string;
+  moduleMarkerSource?: string;
+  moduleMarkerExistsIpc?: boolean;
+  moduleMarkerExistsLegacy?: boolean;
   stagedMediaPath?: string;
   stagedMediaExists?: boolean;
   stagedMediaReadable?: boolean;
@@ -179,6 +183,20 @@ function getScopeDetail(scopeReason: string, hasTargets: boolean): string {
     return 'No local target app constraints configured';
   }
   return scopeReason || 'Scope status unclear';
+}
+
+function getMappingQuickFix(reason: string | null): string {
+  const normalized = String(reason ?? '').toLowerCase();
+  if (normalized.includes('enabled=false')) {
+    return 'Enable Hook Enabled and run sync from dashboard';
+  }
+  if (normalized.includes('targeted=false')) {
+    return 'Scope this package in LSPosed or relax local target mode';
+  }
+  if (normalized.includes('hasmedia=false') || normalized.includes('sourcemode=black')) {
+    return 'Select media in Studio and keep source mode set to file or test';
+  }
+  return 'Open a scoped target camera app and check mapping again';
 }
 
 async function getMappingStatus(): Promise<MappingLogStatus> {
@@ -315,6 +333,12 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           stagedMediaPath.length === 0
             ? null
             : ipcStatus?.stagedMediaExists === true && ipcStatus?.stagedMediaReadable === true;
+        const moduleLoaded = xposedResult.moduleLoaded === true;
+        const hookConfigured = xposedResult.hookConfigured === true;
+        const markerSource = String(
+          xposedResult.markerSource ?? ipcStatus?.moduleMarkerSource ?? 'unknown'
+        );
+        const mappingFix = getMappingQuickFix(mappingStatus.latestZeroReason);
 
         if (xposedResult.hookReady) {
           result.xposedFramework = {
@@ -329,7 +353,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
               : '';
             result.moduleActive = {
               label: 'VirtuCam Module',
-              detail: `Hook loaded but mapped=0${reasonSuffix}`,
+              detail: `Hook loaded but mapped=0${reasonSuffix}; ${mappingFix}`,
               status: 'warning',
             };
           } else if (
@@ -345,7 +369,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           } else {
             result.moduleActive = {
               label: 'VirtuCam Module',
-              detail: `Hook ready (${xposedResult.detectionMethod || 'detected'})`,
+              detail: `Hook ready (${xposedResult.detectionMethod || 'detected'}, ${markerSource})`,
               status: 'ok',
             };
           }
@@ -366,16 +390,20 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
             };
           }
 
-          let hookConfigStatus: SystemCheckStatus = xposedResult.hookConfigured ? 'ok' : 'warning';
+          let hookConfigStatus: SystemCheckStatus = hookConfigured ? 'ok' : 'warning';
           const hookConfigNotes: string[] = [];
-          if (xposedResult.hookConfigured) {
+          if (hookConfigured) {
             hookConfigNotes.push('Hook config valid');
           } else {
             hookConfigNotes.push('Enable hook and select media source');
           }
           if (configJsonReady === false) {
             hookConfigStatus = 'warning';
-            hookConfigNotes.push('IPC config missing/unreadable');
+            hookConfigNotes.push(
+              companionReady === true
+                ? 'Companion ready but config not staged'
+                : 'IPC config missing/unreadable'
+            );
           }
           if (companionReady === false) {
             hookConfigStatus = 'warning';
@@ -398,9 +426,16 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           };
           result.moduleActive = {
             label: 'VirtuCam Module',
-            detail: xposedResult.moduleLoaded
-              ? 'Module loaded but not fully ready'
-              : 'Module not loaded in hooked process yet',
+            detail: moduleLoaded && !hookConfigured
+              ? 'Hook engine loaded but disabled by config'
+              : moduleLoaded &&
+                  hookConfigured &&
+                  mappingStatus.hasMappingLog &&
+                  (mappingStatus.latestMappedCount ?? 0) === 0
+                ? `Hook configured but no mapped surfaces yet; ${mappingFix}`
+                : moduleLoaded
+                  ? 'Module loaded but not fully ready'
+                  : 'Module not loaded in hooked process yet',
             status: 'warning',
           };
 
@@ -421,13 +456,17 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           }
 
           const notes: string[] = [];
-          if (xposedResult.hookConfigured) {
+          if (hookConfigured) {
             notes.push('Hook config valid');
           } else {
-            notes.push('Enable hook and select media source');
+            notes.push(moduleLoaded ? 'Hook engine loaded but disabled by config' : 'Enable hook and select media source');
           }
           if (configJsonReady === false) {
-            notes.push('IPC config missing/unreadable');
+            notes.push(
+              companionReady === true
+                ? 'Companion ready but config not staged'
+                : 'IPC config missing/unreadable'
+            );
           }
           if (companionReady === false) {
             notes.push('Companion not ready');
@@ -438,7 +477,7 @@ export async function runFullSystemCheck(): Promise<SystemVerificationState> {
           result.hookConfigured = {
             label: 'Hook Configuration',
             detail: notes.join(' - '),
-            status: xposedResult.hookConfigured ? 'ok' : 'warning',
+            status: hookConfigured ? 'ok' : 'warning',
           };
         } else {
           result.xposedFramework = {

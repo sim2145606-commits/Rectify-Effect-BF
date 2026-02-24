@@ -8,6 +8,7 @@ import { STORAGE_KEYS } from '@/constants/theme';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { StatusBar } from 'expo-status-bar';
 import { syncAllSettings } from '@/services/ConfigBridge';
+import { logger } from '@/services/LogService';
 
 const { VirtuCamSettings } = NativeModules;
 
@@ -43,7 +44,9 @@ function AppShell() {
       // Ensure native bridge receives baseline config early, even before the Command tab opens.
       await syncAllSettings();
     };
-    migrate().catch(() => {});
+    migrate().catch((err: unknown) => {
+      logger.error('Startup bridge sync failed', 'RootLayout', err);
+    });
   }, []);
 
   useEffect(() => {
@@ -61,6 +64,11 @@ function AppShell() {
         const alreadyRunning = await VirtuCamSettings.isOverlayRunning();
 
         if (nextState === 'active') {
+          try {
+            await syncAllSettings();
+          } catch (err: unknown) {
+            logger.warn('Foreground bridge sync failed', 'RootLayout', err);
+          }
           if (alreadyRunning) {
             await VirtuCamSettings.stopFloatingOverlay();
           }

@@ -16,6 +16,7 @@ import com.briefplantrain.virtucam.hooks.IHookStrategy;
 import com.briefplantrain.virtucam.util.LogUtil;
 import com.briefplantrain.virtucam.util.VirtuCamIPC;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -44,7 +45,8 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
 
     @Override
     public void initZygote(StartupParam startupParam) {
-        LogUtil.d(TAG, "initZygote: installing early framework hooks");
+        LogUtil.setVerboseLogging(isVerboseGateEnabled());
+        LogUtil.d(TAG, "initZygote: preparing framework hooks");
         try {
             installZygoteSurfaceHooks();
         } catch (Throwable t) {
@@ -54,6 +56,7 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
+        LogUtil.setVerboseLogging(isVerboseGateEnabled());
         if (SKIP_ENGINE_PACKAGES.contains(lpparam.packageName)) {
             if ("android".equals(lpparam.packageName)) {
                 try {
@@ -95,29 +98,18 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             XposedBridge.log(TAG + ": HookStrategyRegistry failed for " + lpparam.packageName + ": " + t.getMessage());
         }
 
-        XposedBridge.log(TAG + ": module active in process: " + key);
+        LogUtil.always(TAG, "module active in process: " + key);
         // Write module active state to IPC dir (companion-managed, SELinux-safe)
         try {
             VirtuCamIPC.writeModuleActiveMarker();
-        } catch (Throwable ignored) {
-            // Never crash the hook
+        } catch (Throwable t) {
+            LogUtil.w(TAG, "Failed to write module active marker", t);
         }
     }
 
     private static void installZygoteSurfaceHooks() {
-        XposedHelpers.findAndHookMethod(
-                SurfaceTexture.class,
-                "setDefaultBufferSize",
-                int.class,
-                int.class,
-                new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        XposedBridge.log(TAG + ": [zygote] SurfaceTexture.setDefaultBufferSize called");
-                    }
-                }
-        );
-        LogUtil.d(TAG, "Zygote Surface hooks installed");
+        // Quiet profile: avoid global per-frame hooks in zygote.
+        LogUtil.d(TAG, "Zygote hot-path logging hooks disabled");
     }
 
     private static void installPerProcessHooks(ClassLoader classLoader, VirtualCameraEngine engine) {
@@ -223,10 +215,11 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                 if (tryMapOutputConfigurationSurface(engine, (OutputConfiguration) item,
                                         "createCaptureSessionByOutputConfigurations")) replaced++;
                             }
-                            LogUtil.d(TAG, "createCaptureSessionByOutputConfigurations mapped=" + replaced);
-                            if (replaced == 0) {
-                                logZeroMapping(engine, "createCaptureSessionByOutputConfigurations");
-                            }
+                            logMappingSummary(
+                                    engine,
+                                    "createCaptureSessionByOutputConfigurations",
+                                    replaced
+                            );
                         }
                     }
             );
@@ -250,10 +243,11 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                     if (tryMapOutputConfigurationSurface(engine, oc,
                                             "createCaptureSession(SessionConfiguration)")) replaced++;
                                 }
-                                LogUtil.d(TAG, "createCaptureSession(SessionConfiguration) mapped=" + replaced);
-                                if (replaced == 0) {
-                                    logZeroMapping(engine, "createCaptureSession(SessionConfiguration)");
-                                }
+                                logMappingSummary(
+                                        engine,
+                                        "createCaptureSession(SessionConfiguration)",
+                                        replaced
+                                );
                             }
                         }
                 );
@@ -298,19 +292,39 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                 out.add(o);
             }
         }
-        LogUtil.d(TAG, "createCaptureSession(List<Surface>) mapped=" + replaced);
-        if (replaced == 0) {
-            logZeroMapping(engine, "createCaptureSession(List<Surface>)");
-        }
+        logMappingSummary(engine, "createCaptureSession(List<Surface>)", replaced);
         return out;
+    }
+
+    private static void logMappingSummary(VirtualCameraEngine engine, String hookName, int replaced) {
+        if (replaced > 0) {
+            LogUtil.iRateLimited(
+                    "mapping-positive:" + hookName,
+                    1500L,
+                    TAG,
+                    hookName + " mapped=" + replaced
+            );
+            return;
+        }
+        logZeroMapping(engine, hookName);
     }
 
     private static void logZeroMapping(VirtualCameraEngine engine, String hookName) {
         if (engine == null) return;
         try {
-            LogUtil.d(TAG, hookName + " mapped=0 reason={" + engine.getRoutingDebugSummary() + "}");
+            LogUtil.iRateLimited(
+                    "mapping-zero:" + hookName,
+                    5000L,
+                    TAG,
+                    hookName + " mapped=0 reason={" + engine.getRoutingDebugSummary() + "}"
+            );
         } catch (Throwable t) {
-            LogUtil.d(TAG, hookName + " mapped=0 reason={summary_unavailable:" + t.getClass().getSimpleName() + "}");
+            LogUtil.iRateLimited(
+                    "mapping-zero-unavailable:" + hookName,
+                    5000L,
+                    TAG,
+                    hookName + " mapped=0 reason={summary_unavailable:" + t.getClass().getSimpleName() + "}"
+            );
         }
     }
 
@@ -347,6 +361,14 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             LogUtil.d(TAG, "CaptureRequest hooks installed");
         } catch (Throwable t) {
             LogUtil.e(TAG, "CaptureRequest hooks failed", t);
+        }
+    }
+
+    private static boolean isVerboseGateEnabled() {
+        try {
+            return new File("/data/local/tmp/virtucam_verbose_logging").exists();
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 }

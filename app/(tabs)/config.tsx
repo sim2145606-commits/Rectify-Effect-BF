@@ -31,7 +31,8 @@ import { useStorage } from '@/hooks/useStorage';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useTheme } from '@/context/ThemeContext';
 import { resolveMediaPath, type ResolvedPath } from '@/services/PathResolver';
-import { writeBridgeConfig } from '@/services/ConfigBridge';
+import { writeBridgeConfig, type BridgeConfig } from '@/services/ConfigBridge';
+import { logger } from '@/services/LogService';
 import HUDViewfinder from '@/components/media-studio/HUDViewfinder';
 import SpanScalePanel from '@/components/media-studio/SpanScalePanel';
 import PositionControl from '@/components/media-studio/PositionControl';
@@ -74,6 +75,7 @@ export default function StudioScreen() {
   const [selectedType, setSelectedType] = useState<'image' | 'video' | null>(null);
   const [loading, setLoading] = useState(false);
   const [resolvedPath, setResolvedPath] = useState<ResolvedPath | null>(null);
+  const [bridgeWriteError, setBridgeWriteError] = useState<string | null>(null);
 
   // Transform state
   const [rotation, setRotation] = useStorage(STORAGE_KEYS.ROTATION, 0);
@@ -82,6 +84,28 @@ export default function StudioScreen() {
   const [scaleMode, setScaleMode] = useStorage<ScaleMode>(STORAGE_KEYS.SCALE_MODE, 'fit');
   const [offsetX, setOffsetX] = useStorage(STORAGE_KEYS.OFFSET_X, 0);
   const [offsetY, setOffsetY] = useStorage(STORAGE_KEYS.OFFSET_Y, 0);
+
+  const commitBridgeUpdate = useCallback(
+    async (
+      partial: Partial<BridgeConfig>,
+      context: string,
+      options?: { quiet?: boolean }
+    ): Promise<void> => {
+      try {
+        await writeBridgeConfig(partial);
+        setBridgeWriteError(null);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const detail = `${context}: ${message}`;
+        setBridgeWriteError(detail);
+        logger.error(`Bridge write failed (${context})`, 'StudioScreen', err);
+        if (!options?.quiet) {
+          Alert.alert('Bridge Write Failed', detail);
+        }
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (selectedMedia && recentFiles.length > 0) {
@@ -96,17 +120,29 @@ export default function StudioScreen() {
         .then(resolved => {
           setResolvedPath(resolved);
           // Update bridge config with resolved absolute path
-          writeBridgeConfig({
-            mediaSourcePath: resolved.absolutePath,
-            sourceMode: 'file',
-          }).catch(() => {});
+          void commitBridgeUpdate(
+            {
+              mediaSourcePath: resolved.absolutePath,
+              sourceMode: 'file',
+            },
+            'set media source',
+            { quiet: true }
+          );
         })
-        .catch(() => setResolvedPath(null));
+        .catch((err: unknown) => {
+          setResolvedPath(null);
+          const message = err instanceof Error ? err.message : String(err);
+          setBridgeWriteError(`resolve media path: ${message}`);
+        });
     } else {
       setResolvedPath(null);
-      writeBridgeConfig({ mediaSourcePath: null, sourceMode: 'black' }).catch(() => {});
+      void commitBridgeUpdate(
+        { mediaSourcePath: null, sourceMode: 'black' },
+        'clear media source',
+        { quiet: true }
+      );
     }
-  }, [selectedMedia, recentFiles]);
+  }, [selectedMedia, recentFiles, commitBridgeUpdate]);
 
   const refreshOverlayRuntimeState = useCallback(async () => {
     if (!VirtuCamSettings) {
@@ -221,24 +257,24 @@ export default function StudioScreen() {
     lightImpact();
     setSelectedMedia(null);
     setSelectedType(null);
-    writeBridgeConfig({ mediaSourcePath: null, sourceMode: 'black' }).catch(() => {});
-  }, [lightImpact, setSelectedMedia]);
+    void commitBridgeUpdate({ mediaSourcePath: null, sourceMode: 'black' }, 'clear media');
+  }, [lightImpact, setSelectedMedia, commitBridgeUpdate]);
 
   const handleScaleModeChange = useCallback(
     (mode: ScaleMode) => {
       setScaleMode(mode);
-      writeBridgeConfig({ scaleMode: mode }).catch(() => {});
+      void commitBridgeUpdate({ scaleMode: mode }, 'update scale mode', { quiet: true });
     },
-    [setScaleMode]
+    [setScaleMode, commitBridgeUpdate]
   );
 
   const handleMirrorToggle = useCallback(() => {
     setMirrored((prev: boolean) => {
       const newVal = !prev;
-      writeBridgeConfig({ mirrored: newVal }).catch(() => {});
+      void commitBridgeUpdate({ mirrored: newVal }, 'toggle mirror', { quiet: true });
       return newVal;
     });
-  }, [setMirrored]);
+  }, [setMirrored, commitBridgeUpdate]);
 
   const handleFlipToggle = useCallback(() => {
     setFlippedVertical((prev: boolean) => !prev);
@@ -248,9 +284,9 @@ export default function StudioScreen() {
     (x: number, y: number) => {
       setOffsetX(x);
       setOffsetY(y);
-      writeBridgeConfig({ offsetX: x, offsetY: y }).catch(() => {});
+      void commitBridgeUpdate({ offsetX: x, offsetY: y }, 'update position', { quiet: true });
     },
-    [setOffsetX, setOffsetY]
+    [setOffsetX, setOffsetY, commitBridgeUpdate]
   );
 
   const handleResetAll = useCallback(() => {
@@ -270,13 +306,16 @@ export default function StudioScreen() {
             setScaleMode('fit');
             setOffsetX(0);
             setOffsetY(0);
-            writeBridgeConfig({
-              rotation: 0,
-              mirrored: false,
-              scaleMode: 'fit',
-              offsetX: 0,
-              offsetY: 0,
-            }).catch(() => {});
+            void commitBridgeUpdate(
+              {
+                rotation: 0,
+                mirrored: false,
+                scaleMode: 'fit',
+                offsetX: 0,
+                offsetY: 0,
+              },
+              'reset transform'
+            );
             success();
           },
         },
@@ -285,6 +324,7 @@ export default function StudioScreen() {
   }, [
     heavyImpact,
     success,
+    commitBridgeUpdate,
     setRotation,
     setMirrored,
     setFlippedVertical,
@@ -465,6 +505,20 @@ export default function StudioScreen() {
           </LinearGradient>
         </View>
       </Animated.View>
+
+      {bridgeWriteError && (
+        <View
+          style={[
+            styles.bridgeErrorBanner,
+            { backgroundColor: colors.danger + '12', borderColor: colors.danger + '35' },
+          ]}
+        >
+          <Ionicons name="alert-circle-outline" size={15} color={colors.danger} />
+          <Text style={[styles.bridgeErrorText, { color: colors.danger }]} numberOfLines={3}>
+            {bridgeWriteError}
+          </Text>
+        </View>
+      )}
 
       {/* Floating Overlay Toggle */}
       <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(75).duration(500)}>
@@ -879,6 +933,22 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  bridgeErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  bridgeErrorText: {
+    flex: 1,
+    fontSize: FontSize.xs,
+    lineHeight: 16,
   },
   statusGradient: {
     flexDirection: 'row',

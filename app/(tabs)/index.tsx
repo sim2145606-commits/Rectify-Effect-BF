@@ -29,7 +29,15 @@ import {
   type SystemCheckStatus,
   type SystemInfo,
 } from '@/services/SystemVerification';
-import { syncAllSettings, getBridgeStatus, readBridgeConfig } from '@/services/ConfigBridge';
+import {
+  syncAllSettings,
+  getBridgeStatus,
+  readBridgeConfig,
+  writeBridgeConfig,
+  subscribeBridgeSyncState,
+  getLatestBridgeSyncState,
+  type BridgeSyncState,
+} from '@/services/ConfigBridge';
 import Card from '@/components/Card';
 import PulseIndicator from '@/components/PulseIndicator';
 import SystemToggle from '@/components/SystemToggle';
@@ -59,6 +67,9 @@ export default function Dashboard() {
   const [bridgeHookEnabled, setBridgeHookEnabled] = useState(false);
   const [bridgeMediaPath, setBridgeMediaPath] = useState<string | null>(null);
   const [bridgeCameraTarget, setBridgeCameraTarget] = useState<string>('front');
+  const [bridgeSyncState, setBridgeSyncState] = useState<BridgeSyncState>(() =>
+    getLatestBridgeSyncState()
+  );
 
   const masterGlow = useSharedValue(0);
   const masterScale = useSharedValue(1);
@@ -72,8 +83,15 @@ export default function Dashboard() {
         setBridgeMediaPath(config.mediaSourcePath || null);
         setBridgeCameraTarget(config.cameraTarget || 'front');
       }
-    } catch {
-      // Silent
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setBridgeSyncState({
+        ok: false,
+        code: 'write_failed',
+        message,
+        timestamp: Date.now(),
+        attempts: 1,
+      });
     }
   }, []);
 
@@ -84,12 +102,28 @@ export default function Dashboard() {
       setBridgeVersion(bridgeSt.version);
       setBridgePath(bridgeSt.path);
       setBridgeReadable(bridgeSt.readable);
+      setBridgeSyncState(bridgeSt.syncState);
       setLastSyncTime(new Date().toLocaleTimeString());
       await applyBridgeConfig();
-    } catch {
-      // Silent
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setLastSyncTime(`Failed (${new Date().toLocaleTimeString()})`);
+      setBridgeSyncState({
+        ok: false,
+        code: 'write_failed',
+        message,
+        timestamp: Date.now(),
+        attempts: 1,
+      });
     }
   }, [applyBridgeConfig]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeBridgeSyncState(state => {
+      setBridgeSyncState(state);
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     void syncBridgeState();
@@ -172,8 +206,24 @@ export default function Dashboard() {
       heavyImpact();
       setTimeout(() => success(), 200);
     }
-    setHookEnabled(!hookEnabled);
-  }, [hookEnabled, setHookEnabled, heavyImpact, success, warning, canEnableHook, systemStatus]);
+    const nextEnabled = !hookEnabled;
+    setHookEnabled(nextEnabled);
+    try {
+      await writeBridgeConfig({ enabled: nextEnabled });
+    } catch {
+      // syncBridgeState surfaces bridge failures in UI state
+    }
+    await syncBridgeState();
+  }, [
+    hookEnabled,
+    setHookEnabled,
+    heavyImpact,
+    success,
+    warning,
+    canEnableHook,
+    systemStatus,
+    syncBridgeState,
+  ]);
 
   const handleRefreshStatus = useCallback(async () => {
     mediumImpact();
@@ -461,11 +511,13 @@ export default function Dashboard() {
             style={[
               styles.bridgeBanner,
               {
-                backgroundColor: bridgeReadable && bridgeHookEnabled
-                  ? colors.success + '18'
-                  : bridgeReadable
-                    ? colors.warningAmber + '18'
-                    : colors.danger + '18',
+                backgroundColor: !bridgeSyncState.ok
+                  ? colors.danger + '18'
+                  : bridgeReadable && bridgeHookEnabled
+                    ? colors.success + '18'
+                    : bridgeReadable
+                      ? colors.warningAmber + '18'
+                      : colors.danger + '18',
               },
             ]}
           >
@@ -473,9 +525,11 @@ export default function Dashboard() {
               style={[
                 styles.miniDot,
                 {
-                  backgroundColor: bridgeReadable
-                    ? bridgeHookEnabled ? colors.success : colors.warningAmber
-                    : colors.danger,
+                  backgroundColor: !bridgeSyncState.ok
+                    ? colors.danger
+                    : bridgeReadable
+                      ? bridgeHookEnabled ? colors.success : colors.warningAmber
+                      : colors.danger,
                   width: 8, height: 8, borderRadius: 4,
                 },
               ]}
@@ -484,19 +538,36 @@ export default function Dashboard() {
               style={[
                 styles.bridgeBannerText,
                 {
-                  color: bridgeReadable
-                    ? bridgeHookEnabled ? colors.success : colors.warningAmber
-                    : colors.danger,
+                  color: !bridgeSyncState.ok
+                    ? colors.danger
+                    : bridgeReadable
+                      ? bridgeHookEnabled ? colors.success : colors.warningAmber
+                      : colors.danger,
                 },
               ]}
             >
-              {bridgeReadable && bridgeHookEnabled
-                ? 'BRIDGE ACTIVE — HOOK LIVE'
-                : bridgeReadable
-                  ? 'BRIDGE CONNECTED — HOOK INACTIVE'
-                  : 'BRIDGE OFFLINE'}
+              {!bridgeSyncState.ok
+                ? `BRIDGE SYNC FAILED (${bridgeSyncState.code ?? 'unknown'})`
+                : bridgeReadable && bridgeHookEnabled
+                  ? 'BRIDGE ACTIVE - HOOK LIVE'
+                  : bridgeReadable
+                    ? 'BRIDGE CONNECTED - HOOK INACTIVE'
+                    : 'BRIDGE OFFLINE'}
             </Text>
           </View>
+          {!bridgeSyncState.ok && (
+            <View
+              style={[
+                styles.bridgeErrorBox,
+                { backgroundColor: colors.danger + '12', borderColor: colors.danger + '35' },
+              ]}
+            >
+              <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
+              <Text style={[styles.bridgeErrorText, { color: colors.danger }]}>
+                {bridgeSyncState.message}
+              </Text>
+            </View>
+          )}
           <InfoRow
             icon="link-outline"
             label="Bridge Status"
@@ -508,6 +579,12 @@ export default function Dashboard() {
                 </Text>
               </View>
             }
+          />
+          <InfoRow
+            icon="sync-outline"
+            label="Sync State"
+            value={bridgeSyncState.ok ? 'OK' : `${bridgeSyncState.code ?? 'error'}`}
+            valueColor={bridgeSyncState.ok ? colors.success : colors.danger}
           />
           <InfoRow
             icon="power-outline"
@@ -616,6 +693,7 @@ function InfoRow({
   right,
   last,
   dimValue,
+  valueColor,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
@@ -623,6 +701,7 @@ function InfoRow({
   right?: ReactNode;
   last?: boolean;
   dimValue?: boolean;
+  valueColor?: string;
 }) {
   const { colors } = useTheme();
   return (
@@ -639,7 +718,11 @@ function InfoRow({
       </View>
       {right ?? (
         <Text
-          style={[styles.infoValue, styles.infoValueFlex, { color: dimValue ? colors.textTertiary : colors.textPrimary }]}
+          style={[
+            styles.infoValue,
+            styles.infoValueFlex,
+            { color: valueColor ?? (dimValue ? colors.textTertiary : colors.textPrimary) },
+          ]}
           numberOfLines={1}
         >
           {value}
@@ -957,6 +1040,21 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     fontWeight: '800',
     letterSpacing: 1,
+  },
+  bridgeErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  bridgeErrorText: {
+    flex: 1,
+    fontSize: FontSize.xs,
+    lineHeight: 16,
   },
   infoRowLeft: {
     flexDirection: 'row',

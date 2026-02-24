@@ -1,30 +1,139 @@
 #!/system/bin/sh
 # VirtuCam Companion - action.sh
-# Triggered by KSU/APatch Action button. Re-runs setup tasks on demand.
+# Triggered by KSU/APatch Action button.
 
 VIRTUCAM_PKG="com.briefplantrain.virtucam"
 IPC_DIR="/dev/virtucam_ipc"
 CFG_JSON="$IPC_DIR/config/virtucam_config.json"
 CFG_XML="$IPC_DIR/config/virtucam_config.xml"
-MARKER_FILE="$IPC_DIR/state/module_active"
+MARKER_IPC="$IPC_DIR/state/module_active"
+MARKER_LEGACY="/data/local/tmp/virtucam_module_active"
 STATUS_FILE="$IPC_DIR/state/companion_status"
+CONFIG_STATE_FILE="$IPC_DIR/state/config_status"
+MARKER_STATE_FILE="$IPC_DIR/state/marker_status"
+MARKER_SOURCE_FILE="$IPC_DIR/state/marker_source"
+SCOPE_STATE_FILE="$IPC_DIR/state/scope_status"
 COMPLETE_FILE="$IPC_DIR/state/service_complete_time"
+
+write_state_file() {
+    local file="$1"
+    local value="$2"
+    printf '%s\n' "$value" > "$file" 2>/dev/null
+    chmod 0644 "$file" 2>/dev/null
+}
+
+find_lspd_config() {
+    for dir in \
+        /data/adb/lspd \
+        /data/adb/modules/zygisk_lsposed \
+        /data/adb/modules/riru_lsposed \
+        /data/adb/modules/lsposed \
+        /data/adb/modules/zygisk-lsposed; do
+        if [ -d "$dir/config" ]; then
+            echo "$dir/config"
+            return 0
+        fi
+    done
+    return 1
+}
+
+is_scope_enabled() {
+    local lspd_config
+    lspd_config="$(find_lspd_config)"
+    if [ -z "$lspd_config" ]; then
+        return 1
+    fi
+
+    local db="$lspd_config/modules_config.db"
+    if [ -f "$db" ] && command -v sqlite3 >/dev/null 2>&1; then
+        if sqlite3 "$db" ".dump modules" 2>/dev/null | grep -q "INSERT INTO modules VALUES(.*'$VIRTUCAM_PKG'.*,1,"; then
+            return 0
+        fi
+    fi
+
+    if [ -d "$lspd_config/scope/$VIRTUCAM_PKG" ]; then
+        return 0
+    fi
+
+    local modules_list="$lspd_config/modules.list"
+    if [ -f "$modules_list" ] && grep -qF "$VIRTUCAM_PKG" "$modules_list" 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
+update_companion_state() {
+    local config_state="config_missing"
+    local marker_state="marker_missing"
+    local marker_source="none"
+    local scope_state="scope_mismatch"
+    local companion_state="pending"
+
+    if [ -r "$CFG_JSON" ] || [ -r "$CFG_XML" ]; then
+        config_state="config_ready"
+    fi
+
+    if [ -e "$MARKER_IPC" ]; then
+        marker_state="marker_present"
+        marker_source="ipc"
+    elif [ -e "$MARKER_LEGACY" ]; then
+        marker_state="marker_present"
+        marker_source="legacy"
+    fi
+
+    if is_scope_enabled; then
+        scope_state="scope_ok"
+    fi
+
+    if [ "$scope_state" != "scope_ok" ]; then
+        companion_state="scope_mismatch"
+    elif [ "$config_state" != "config_ready" ]; then
+        companion_state="config_missing"
+    elif [ "$marker_state" != "marker_present" ]; then
+        companion_state="marker_missing"
+    else
+        companion_state="ready"
+    fi
+
+    write_state_file "$STATUS_FILE" "$companion_state"
+    write_state_file "$CONFIG_STATE_FILE" "$config_state"
+    write_state_file "$MARKER_STATE_FILE" "$marker_state"
+    write_state_file "$MARKER_SOURCE_FILE" "$marker_source"
+    write_state_file "$SCOPE_STATE_FILE" "$scope_state"
+    write_state_file "$COMPLETE_FILE" "$(date '+%s')"
+    local state_uid
+    state_uid="$(stat -c '%u' "$IPC_DIR/state/boot_time" 2>/dev/null)"
+    if [ -n "$state_uid" ]; then
+        chown "$state_uid:$state_uid" \
+            "$STATUS_FILE" "$CONFIG_STATE_FILE" "$MARKER_STATE_FILE" \
+            "$MARKER_SOURCE_FILE" "$SCOPE_STATE_FILE" "$COMPLETE_FILE" 2>/dev/null
+    fi
+
+    echo "[STATE] companion_status=$companion_state"
+    echo "[STATE] config_state=$config_state"
+    echo "[STATE] marker_state=$marker_state"
+    echo "[STATE] marker_source=$marker_source"
+    echo "[STATE] scope_state=$scope_state"
+}
 
 echo "======================================"
 echo "  VirtuCam Companion - Manual Refresh"
 echo "======================================"
 
-# Re-fix SharedPreferences permissions
+mkdir -p "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" 2>/dev/null
+chmod 0777 "$IPC_DIR" "$IPC_DIR/config" "$IPC_DIR/state" "$IPC_DIR/logs" "$IPC_DIR/media" 2>/dev/null
+
 PREFS_FILE="/data/data/$VIRTUCAM_PKG/shared_prefs/virtucam_config.xml"
 if [ -f "$PREFS_FILE" ]; then
     chmod 0644 "$PREFS_FILE"
     cp "$PREFS_FILE" "$CFG_XML" 2>/dev/null
-    echo "[OK] Config permissions fixed and synced"
+    chmod 0644 "$CFG_XML" 2>/dev/null
+    echo "[OK] SharedPrefs permissions fixed and XML synced"
 else
-    echo "[WARN] virtucam_config.xml not found (app not configured yet)"
+    echo "[WARN] SharedPrefs config missing ($PREFS_FILE)"
 fi
 
-# Normalize SELinux label on IPC dir/files
 if command -v chcon >/dev/null 2>&1; then
     if chcon -R u:object_r:tmpfs:s0 "$IPC_DIR" 2>/dev/null; then
         echo "[OK] IPC SELinux context normalized (tmpfs)"
@@ -33,17 +142,13 @@ if command -v chcon >/dev/null 2>&1; then
     fi
 fi
 
-# Re-grant SYSTEM_ALERT_WINDOW
 cmd appops set "$VIRTUCAM_PKG" SYSTEM_ALERT_WINDOW allow 2>/dev/null
-echo "[OK] SYSTEM_ALERT_WINDOW re-granted"
+cmd appops set "$VIRTUCAM_PKG" MANAGE_EXTERNAL_STORAGE allow 2>/dev/null
+echo "[OK] AppOps grants refreshed"
 
 echo " "
 echo "IPC Directory ($IPC_DIR):"
 ls -la "$IPC_DIR" 2>/dev/null || echo "  Not mounted"
-
-echo " "
-echo "Config:"
-ls -la "$IPC_DIR/config/" 2>/dev/null || echo "  Empty"
 
 echo " "
 echo "Bridge Config Files:"
@@ -75,6 +180,19 @@ else
 fi
 
 echo " "
+echo "Marker files:"
+if [ -e "$MARKER_IPC" ]; then
+    echo "  IPC marker: present"
+else
+    echo "  IPC marker: missing"
+fi
+if [ -e "$MARKER_LEGACY" ]; then
+    echo "  Legacy marker: present"
+else
+    echo "  Legacy marker: missing"
+fi
+
+echo " "
 echo "Media staging:"
 if [ -d "$IPC_DIR/media" ]; then
     MEDIA_COUNT="$(ls -1 "$IPC_DIR/media" 2>/dev/null | wc -l | tr -d ' ')"
@@ -86,15 +204,11 @@ else
 fi
 
 echo " "
-echo "State:"
-cat "$STATUS_FILE" 2>/dev/null | xargs echo "  Status:"
-cat "$MARKER_FILE" 2>/dev/null | xargs echo "  Module active:"
-cat "$COMPLETE_FILE" 2>/dev/null | xargs echo "  Service complete epoch:"
-if [ -e "$MARKER_FILE" ]; then
-    ls -l "$MARKER_FILE" 2>/dev/null | xargs echo "  Marker file:"
-else
-    echo "  Marker file: missing"
-fi
+update_companion_state
+
+echo " "
+echo "Recent service logs:"
+tail -30 "$IPC_DIR/logs/service.log" 2>/dev/null || tail -30 /data/adb/modules/virtucam_companion/logs/service.log 2>/dev/null || echo "  No logs"
 
 echo " "
 echo "======================================"

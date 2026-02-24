@@ -1,4 +1,4 @@
-package com.briefplantrain.virtucam
+﻿package com.briefplantrain.virtucam
 
 import android.content.Context
 import android.content.Intent
@@ -28,7 +28,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
     
     companion object {
-        // intentionally empty — no shared constants needed at this time
+        private val PACKAGE_NAME_REGEX = Regex("^[a-zA-Z0-9._]+$")
     }
 
     override fun getName(): String {
@@ -383,6 +383,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val configXml = File(VirtuCamIPC.CONFIG_XML)
             val mediaDir = File(VirtuCamIPC.MEDIA_DIR)
             val markerFile = File(VirtuCamIPC.MODULE_ACTIVE)
+            val legacyMarkerFile = File(VirtuCamIPC.LEGACY_TMP_ACTIVE)
             val companionStatus = File(VirtuCamIPC.COMPANION_STATUS)
 
             val stagedPath = prefs.getString("mediaSourcePath", null)
@@ -398,11 +399,23 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("configXmlExists", configXml.exists())
             result.putBoolean("configXmlReadable", configXml.exists() && configXml.canRead())
             result.putBoolean("mediaDirExists", mediaDir.exists())
-            result.putBoolean("moduleMarkerExists", markerFile.exists())
+            val markerExistsIpc = markerFile.exists()
+            val markerExistsLegacy = legacyMarkerFile.exists()
+            val markerSource = when {
+                markerExistsIpc -> "ipc"
+                markerExistsLegacy -> "legacy"
+                else -> "none"
+            }
+
+            result.putBoolean("moduleMarkerExists", markerExistsIpc || markerExistsLegacy)
+            result.putBoolean("moduleMarkerExistsIpc", markerExistsIpc)
+            result.putBoolean("moduleMarkerExistsLegacy", markerExistsLegacy)
+            result.putString("moduleMarkerSource", markerSource)
             result.putString("companionStatus", safeReadSmallFile(companionStatus))
             result.putString("stagedMediaPath", stagedPath ?: "")
             result.putBoolean("stagedMediaExists", stagedFile?.exists() == true)
             result.putBoolean("stagedMediaReadable", stagedFile?.canRead() == true)
+            result.putBoolean("configStaged", configJson.exists() && configJson.canRead())
 
             promise.resolve(result)
         } catch (e: Exception) {
@@ -632,35 +645,36 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             
             // Check if module is loaded/scoped - split these signals to avoid false positives
             var moduleLoaded = false
-            var moduleLoadedInTargetProcess = false
             var moduleScoped = false
             var detectionMethod = "none"
+            var markerSource = "none"
             var scopeEvaluationReason = "no_scope_match"
             
-            // Method 1: Check marker file (created when module hooks an app)
-            // The marker file persists until reboot in companion-managed IPC storage.
-            // No time-based validation needed - if it exists, module has loaded at least once since boot
-            val markerFile = File(VirtuCamIPC.MODULE_ACTIVE)
-            // Validate file path, name, and extension to prevent unsafe file access (CWE-434)
-            val expectedPath = VirtuCamIPC.MODULE_ACTIVE
-            val isValidPath = markerFile.canonicalPath == expectedPath &&
-                              markerFile.name == "module_active" &&
-                              markerFile.extension.isEmpty()
-            
-            if (!isValidPath) {
-                android.util.Log.w("VirtuCamSettings", "Invalid marker file path")
-            } else if (markerFile.exists()) {
+            // Method 1: Check marker files (IPC primary + legacy fallback).
+            if (hasMarkerFile(
+                    VirtuCamIPC.MODULE_ACTIVE,
+                    expectedPath = VirtuCamIPC.MODULE_ACTIVE,
+                    expectedName = "module_active"
+                )) {
                 moduleLoaded = true
-                moduleLoadedInTargetProcess = true
-                detectionMethod = "marker_file"
-                android.util.Log.d("VirtuCamSettings", "Module detected via marker file")
-            } else {
-                val markerRootCheck = executeRootCommand("ls ${escapeShellArg(VirtuCamIPC.MODULE_ACTIVE)} 2>/dev/null")
-                if (markerRootCheck.contains("module_active")) {
-                    moduleLoaded = true
-                    detectionMethod = "marker_file_root"
-                    android.util.Log.d("VirtuCamSettings", "Module detected via root marker file check")
-                }
+                markerSource = "marker_ipc"
+                detectionMethod = "marker_ipc"
+            } else if (hasMarkerViaRoot(VirtuCamIPC.MODULE_ACTIVE, "module_active")) {
+                moduleLoaded = true
+                markerSource = "marker_ipc_root"
+                detectionMethod = "marker_ipc_root"
+            } else if (hasMarkerFile(
+                    VirtuCamIPC.LEGACY_TMP_ACTIVE,
+                    expectedPath = VirtuCamIPC.LEGACY_TMP_ACTIVE,
+                    expectedName = "virtucam_module_active"
+                )) {
+                moduleLoaded = true
+                markerSource = "marker_legacy"
+                detectionMethod = "marker_legacy"
+            } else if (hasMarkerViaRoot(VirtuCamIPC.LEGACY_TMP_ACTIVE, "virtucam_module_active")) {
+                moduleLoaded = true
+                markerSource = "marker_legacy_root"
+                detectionMethod = "marker_legacy_root"
             }
             
             // Read configured targets for scope checks (do not use module package here)
@@ -699,7 +713,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
             // Method 5: Check modules directory registration (module package itself)
             if (checkModulesDirectory(modulePackageName)) {
-                if (!moduleScoped) {
+                if (detectionMethod == "none") {
                     detectionMethod = "modules_dir"
                 }
                 moduleLoaded = true
@@ -762,6 +776,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("hookConfigured", hookConfigured)
             result.putBoolean("hookReady", hookReady)
             result.putString("detectionMethod", detectionMethod)
+            result.putString("markerSource", markerSource)
             result.putInt("configuredTargetsCount", configuredTargets.size)
             result.putInt("scopedTargetsCount", scopedTargets.size)
             result.putString("configuredTargets", configuredTargets.joinToString(","))
@@ -773,7 +788,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             android.util.Log.d("VirtuCamSettings",
                 "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +
                 "hookConfigured=$hookConfigured, hookReady=$hookReady, lsposedInstalled=$lsposedExists, " +
-                "method=$detectionMethod, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets, " +
+                "method=$detectionMethod, markerSource=$markerSource, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets, " +
                 "broadScope=$broadScopePackages")
             
             promise.resolve(result)
@@ -788,6 +803,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("hookConfigured", false)
             result.putBoolean("hookReady", false)
             result.putString("detectionMethod", "error")
+            result.putString("markerSource", "none")
             result.putInt("configuredTargetsCount", 0)
             result.putInt("scopedTargetsCount", 0)
             result.putString("configuredTargets", "")
@@ -1373,6 +1389,50 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Resolve package metadata for manual target-app entry flow.
+     * Supports system-app validation without changing getAllInstalledApps behavior.
+     */
+    @ReactMethod
+    fun resolvePackageMetadata(rawPackageName: String, promise: Promise) {
+        if (!assertAuthenticated(promise)) return
+        if (reactApplicationContext == null) {
+            promise.reject("NOT_INITIALIZED", "Module not ready")
+            return
+        }
+
+        val packageName = rawPackageName.trim()
+        if (!isValidPackageName(packageName)) {
+            promise.reject("INVALID_PACKAGE", "Package name must match [a-zA-Z0-9._]+")
+            return
+        }
+
+        try {
+            val pm = reactApplicationContext.packageManager
+            val result = Arguments.createMap()
+            result.putString("packageName", packageName)
+
+            try {
+                val appInfo = pm.getApplicationInfo(packageName, 0)
+                val label = pm.getApplicationLabel(appInfo).toString()
+                val isSystemApp = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                    (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+
+                result.putBoolean("installed", true)
+                result.putBoolean("systemApp", isSystemApp)
+                result.putString("name", label)
+            } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                result.putBoolean("installed", false)
+                result.putBoolean("systemApp", false)
+                result.putString("name", packageName)
+            }
+
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("PACKAGE_LOOKUP_ERROR", e.message, e)
+        }
+    }
+
+    /**
      * Detect which manager app to use for LSPosed configuration
      * Returns package name of the appropriate manager app
      */
@@ -1546,6 +1606,28 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         } catch (_: Exception) {
             ""
         }
+    }
+
+    private fun hasMarkerFile(path: String, expectedPath: String, expectedName: String): Boolean {
+        return try {
+            val markerFile = File(path)
+            val validPath = markerFile.canonicalPath == expectedPath &&
+                markerFile.name == expectedName &&
+                markerFile.extension.isEmpty()
+            validPath && markerFile.exists()
+        } catch (e: Exception) {
+            android.util.Log.w("VirtuCamSettings", "Marker path validation failed for $path: ${e.message}")
+            false
+        }
+    }
+
+    private fun hasMarkerViaRoot(path: String, expectedToken: String): Boolean {
+        val markerRootCheck = executeRootCommand("ls ${escapeShellArg(path)} 2>/dev/null")
+        return markerRootCheck.contains(expectedToken)
+    }
+
+    private fun isValidPackageName(packageName: String): Boolean {
+        return packageName.isNotEmpty() && PACKAGE_NAME_REGEX.matches(packageName)
     }
 
     /**

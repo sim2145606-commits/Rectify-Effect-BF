@@ -41,6 +41,7 @@
       align-items: center;
       padding: 6px 0;
       border-bottom: 1px solid #2a2a2a;
+      gap: 8px;
     }
     .row:last-child { border-bottom: none; }
     .label { font-size: 0.9rem; }
@@ -49,6 +50,7 @@
       border-radius: 20px;
       font-size: 0.75rem;
       font-weight: 600;
+      white-space: nowrap;
     }
     .ok { background: rgba(76, 175, 80, 0.2); color: var(--ok); }
     .warn { background: rgba(255, 152, 0, 0.2); color: var(--warn); }
@@ -71,7 +73,7 @@
       padding: 10px;
       border-radius: 8px;
       overflow-x: auto;
-      max-height: 200px;
+      max-height: 260px;
       overflow-y: auto;
       white-space: pre-wrap;
     }
@@ -92,16 +94,16 @@
       <span id="st-ipc" class="badge warn">Loading...</span>
     </div>
     <div class="row">
-      <span class="label">LSPosed Scope</span>
+      <span class="label">Scope State</span>
       <span id="st-scope" class="badge warn">Loading...</span>
     </div>
     <div class="row">
-      <span class="label">SharedPrefs</span>
-      <span id="st-prefs" class="badge warn">Loading...</span>
+      <span class="label">Config Staging</span>
+      <span id="st-config" class="badge warn">Loading...</span>
     </div>
     <div class="row">
-      <span class="label">Module Active</span>
-      <span id="st-module" class="badge warn">Loading...</span>
+      <span class="label">Marker Source</span>
+      <span id="st-marker" class="badge warn">Loading...</span>
     </div>
   </div>
 
@@ -120,7 +122,6 @@
 
   <script>
     const IPC = "/dev/virtucam_ipc";
-    const PKG = "com.briefplantrain.virtucam";
 
     async function ksuExec(cmd) {
       try {
@@ -142,12 +143,9 @@
             nested.stdout, nested.stderr, nested.output, nested.result, nested.response, nested.Response,
           ].filter(v => typeof v === "string" && v.length > 0);
 
-          if (candidates.length > 0) {
-            return candidates.join("");
-          }
+          if (candidates.length > 0) return candidates.join("");
           return raw;
         } catch {
-          // Some hosts return plain text instead of JSON.
           return raw;
         }
       } catch (e) {
@@ -161,59 +159,67 @@
       el.className = "badge " + cls;
     }
 
+    function toState(raw) {
+      return String(raw || "").trim().toLowerCase();
+    }
+
     async function loadStatus() {
-      const companionStatus = await ksuExec(`cat ${IPC}/state/companion_status 2>/dev/null`);
-      const companionReady = companionStatus.trim().toLowerCase() === "ready";
-      setBadge(
-        "st-companion",
-        companionReady ? "Ready" : "Pending",
-        companionReady ? "ok" : "warn"
-      );
+      const ipcMount = await ksuExec(`mountpoint -q ${IPC} && echo mounted || echo missing`);
+      setBadge("st-ipc", toState(ipcMount) === "mounted" ? "Mounted" : "Missing", toState(ipcMount) === "mounted" ? "ok" : "err");
 
-      const ipcMount = await ksuExec(`mountpoint -q ${IPC} && echo "mounted" || echo "not mounted"`);
-      const ipcMounted = ipcMount.trim().toLowerCase() === "mounted";
-      setBadge(
-        "st-ipc",
-        ipcMounted ? "Mounted" : "Not Mounted",
-        ipcMounted ? "ok" : "err"
-      );
+      const companionStatus = toState(await ksuExec(`cat ${IPC}/state/companion_status 2>/dev/null`));
+      if (companionStatus === "ready") {
+        setBadge("st-companion", "READY", "ok");
+      } else if (!companionStatus) {
+        setBadge("st-companion", "PENDING", "warn");
+      } else {
+        setBadge("st-companion", companionStatus.toUpperCase(), companionStatus === "scope_mismatch" ? "err" : "warn");
+      }
 
-      const prefsPerms = await ksuExec(
-        `ls -la /data/data/${PKG}/shared_prefs/virtucam_config.xml 2>/dev/null | awk '{print $1}'`
-      );
-      const worldReadable = prefsPerms.includes("-r--r--") || prefsPerms.includes("-rw-r--r--");
-      setBadge(
-        "st-prefs",
-        worldReadable ? "World-Readable" : (prefsPerms.trim() ? "Restricted" : "Not Found"),
-        worldReadable ? "ok" : (prefsPerms.trim() ? "warn" : "err")
-      );
-
-      const moduleActive = await ksuExec(`cat ${IPC}/state/module_active 2>/dev/null`);
-      const moduleActiveNow = moduleActive.trim().toLowerCase() === "active";
-      setBadge(
-        "st-module",
-        moduleActiveNow ? "Active" : "Inactive",
-        moduleActiveNow ? "ok" : "warn"
-      );
-
-      const scopeCheck = await ksuExec(
-        `sqlite3 /data/adb/lspd/config/modules_config.db ` +
-        `"SELECT enabled FROM modules WHERE module_pkg_name='${PKG}';" 2>/dev/null || echo "unknown"`
-      );
+      const scopeState = toState(await ksuExec(`cat ${IPC}/state/scope_status 2>/dev/null`));
       setBadge(
         "st-scope",
-        scopeCheck.trim() === "1" ? "Scoped" : "Check Manually",
-        scopeCheck.trim() === "1" ? "ok" : "warn"
+        scopeState ? scopeState.toUpperCase() : "UNKNOWN",
+        scopeState === "scope_ok" ? "ok" : (scopeState ? "err" : "warn")
       );
 
-      const logs = await ksuExec(`tail -50 ${IPC}/logs/service.log 2>/dev/null || tail -50 /data/adb/modules/virtucam_companion/logs/service.log 2>/dev/null || echo "No logs yet"`);
+      const configStateRaw = toState(await ksuExec(`cat ${IPC}/state/config_status 2>/dev/null`));
+      let configState = configStateRaw;
+      if (!configState) {
+        const configReady = toState(await ksuExec(`[ -r ${IPC}/config/virtucam_config.json ] && echo yes || echo no`));
+        configState = configReady === "yes" ? "config_ready" : "config_missing";
+      }
+      setBadge(
+        "st-config",
+        configState.toUpperCase(),
+        configState === "config_ready" ? "ok" : "warn"
+      );
+
+      const markerSourceRaw = toState(await ksuExec(`cat ${IPC}/state/marker_source 2>/dev/null`));
+      let markerSource = markerSourceRaw;
+      if (!markerSource) {
+        const markerIpc = toState(await ksuExec(`[ -e ${IPC}/state/module_active ] && echo ipc || echo none`));
+        if (markerIpc === "ipc") {
+          markerSource = "ipc";
+        } else {
+          const markerLegacy = toState(await ksuExec(`[ -e /data/local/tmp/virtucam_module_active ] && echo legacy || echo none`));
+          markerSource = markerLegacy;
+        }
+      }
+      setBadge(
+        "st-marker",
+        markerSource === "none" || !markerSource ? "NONE" : markerSource.toUpperCase(),
+        markerSource === "ipc" || markerSource === "legacy" ? "ok" : "warn"
+      );
+
+      const logs = await ksuExec(`tail -80 ${IPC}/logs/service.log 2>/dev/null || tail -80 /data/adb/modules/virtucam_companion/logs/service.log 2>/dev/null || echo "No logs yet"`);
       document.getElementById("log-output").textContent = logs || "No logs";
     }
 
     async function runAction() {
       const out = await ksuExec(`sh /data/adb/modules/virtucam_companion/action.sh 2>&1`);
       document.getElementById("log-output").textContent = out;
-      setTimeout(loadStatus, 1500);
+      setTimeout(loadStatus, 1200);
     }
 
     loadStatus();
