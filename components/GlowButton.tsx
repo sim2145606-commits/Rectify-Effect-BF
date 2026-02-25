@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -35,7 +35,7 @@ const SIZE_MAP: Record<
   large: { paddingVertical: Spacing.lg, paddingHorizontal: Spacing.xl, fontSize: FontSize.md },
 };
 
-export default function GlowButton({
+function GlowButton({
   label,
   variant = 'primary',
   size = 'medium',
@@ -48,20 +48,23 @@ export default function GlowButton({
 }: Props) {
   const { colors } = useTheme();
 
-  const palette =
-    variant === 'primary'
-      ? {
-          background: colors.accent + '22',
-          border: colors.accent + '55',
-          text: colors.textPrimary,
-          spinner: colors.textPrimary,
-        }
-      : {
-          background: colors.surfaceLight,
-          border: colors.border,
-          text: colors.textSecondary,
-          spinner: colors.textSecondary,
-        };
+  const palette = useMemo(
+    () =>
+      variant === 'primary'
+        ? {
+            background: colors.accent + '22',
+            border: colors.accent + '55',
+            text: colors.textPrimary,
+            spinner: colors.textPrimary,
+          }
+        : {
+            background: colors.surfaceLight,
+            border: colors.border,
+            text: colors.textSecondary,
+            spinner: colors.textSecondary,
+          },
+    [variant, colors]
+  );
 
   const sizeStyle = SIZE_MAP[size];
   const isDisabled = disabled || loading;
@@ -95,6 +98,8 @@ export default function GlowButton({
     </Pressable>
   );
 }
+
+export default React.memo(GlowButton);
 
 const styles = StyleSheet.create({
   button: {

@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, PanResponder } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -73,8 +73,14 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange, onOf
     onOffsetCommit?.(0, 0);
   }, [onOffsetChange, onOffsetCommit, heavyImpact]);
 
-  const indicatorX = ((offsetX + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE;
-  const indicatorY = ((offsetY + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE;
+  const indicatorX = useMemo(
+    () => ((offsetX + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE,
+    [offsetX]
+  );
+  const indicatorY = useMemo(
+    () => ((offsetY + MAX_OFFSET) / (MAX_OFFSET * 2)) * GRID_SIZE,
+    [offsetY]
+  );
 
   return (
     <Animated.View entering={FadeInDown.delay(400).duration(500)} style={styles.container}>
@@ -170,7 +176,7 @@ export default function PositionControl({ offsetX, offsetY, onOffsetChange, onOf
   );
 }
 
-function NudgeButton({
+const NudgeButton = React.memo(function NudgeButton({
   icon,
   onPress,
 }: {
@@ -202,7 +208,7 @@ function NudgeButton({
       </Pressable>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
