@@ -53,15 +53,13 @@ export default function LogsScreen() {
     try {
       const allLogs = logger.getLogs();
       setLogs(allLogs);
-      applyFilters(allLogs, searchQuery, filterLevel);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       if (__DEV__) console.error('Failed to load logs:', errorMessage);
       Alert.alert('Error', `Failed to load logs: ${errorMessage}`);
       setLogs([]);
-      setFilteredLogs([]);
     }
-  }, [searchQuery, filterLevel, applyFilters]);
+  }, []);
 
   useEffect(() => {
     loadLogs();

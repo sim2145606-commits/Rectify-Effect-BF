@@ -21,6 +21,8 @@ const MAX_LOGS = 1000;
 class LogService {
   private listeners: Set<LogListener> = new Set();
   private logs: LogEntry[] = [];
+  private cachedErrorCount: number = 0;
+  private cachedWarnCount: number = 0;
 
   subscribe(listener: LogListener): () => void {
     this.listeners.add(listener);
@@ -49,8 +51,15 @@ class LogService {
 
     this.logs.push(entry);
 
+    if (level === 'error') this.cachedErrorCount++;
+    else if (level === 'warn') this.cachedWarnCount++;
+
     if (this.logs.length > MAX_LOGS) {
-      this.logs = this.logs.slice(-MAX_LOGS);
+      const removed = this.logs.splice(0, this.logs.length - MAX_LOGS);
+      for (const r of removed) {
+        if (r.level === 'error') this.cachedErrorCount--;
+        else if (r.level === 'warn') this.cachedWarnCount--;
+      }
     }
 
     this.listeners.forEach(listener => listener(entry));
@@ -98,6 +107,8 @@ class LogService {
 
   clear() {
     this.logs = [];
+    this.cachedErrorCount = 0;
+    this.cachedWarnCount = 0;
     this.listeners.forEach(listener => listener({ timestamp: Date.now(), message: '', level: 'info' }));
   }
 
@@ -328,11 +339,11 @@ class LogService {
   }
 
   getErrorCount(): number {
-    return this.logs.filter(log => log.level === 'error').length;
+    return this.cachedErrorCount;
   }
 
   getWarningCount(): number {
-    return this.logs.filter(log => log.level === 'warn').length;
+    return this.cachedWarnCount;
   }
 }
 

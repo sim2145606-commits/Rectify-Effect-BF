@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -17,6 +17,8 @@ import { FontSize, Spacing, BorderRadius, platformShadow } from '@/constants/the
 import { useTheme } from '@/context/ThemeContext';
 
 type ScaleMode = 'fit' | 'fill' | 'stretch';
+
+const VIDEO_EXTENSION_REGEX = /\.(mp4|mov|mkv|avi|webm)$/i;
 
 type Props = {
   mediaUri: string | null;
@@ -78,7 +80,7 @@ export default function HUDViewfinder({
     opacity: cornerPulse.value,
   }));
 
-  const getContentFit = (): 'contain' | 'cover' | 'fill' => {
+  const getContentFit = useMemo((): 'contain' | 'cover' | 'fill' => {
     switch (scaleMode) {
       case 'fit':
         return 'contain';
@@ -89,7 +91,7 @@ export default function HUDViewfinder({
       default:
         return 'contain';
     }
-  };
+  }, [scaleMode]);
 
   return (
     <Animated.View entering={FadeIn.duration(600)} style={styles.container}>
@@ -106,7 +108,7 @@ export default function HUDViewfinder({
         <View style={styles.viewfinder}>
           {mediaUri ? (
             <View style={styles.mediaContainer}>
-              {mediaUri.match(/\.(mp4|mov|mkv|avi|webm)$/i) ? (
+              {VIDEO_EXTENSION_REGEX.test(mediaUri) ? (
                 <Video
                   source={{ uri: mediaUri }}
                   style={[
@@ -141,7 +143,7 @@ export default function HUDViewfinder({
                       ],
                     },
                   ]}
-                  contentFit={getContentFit()}
+                  contentFit={getContentFit}
                   transition={200}
                 />
               )}
