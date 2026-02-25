@@ -79,7 +79,6 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         VirtualCameraEngine engine = null;
         try {
             engine = VirtualCameraEngine.getOrCreate(lpparam.packageName, lpparam.processName);
-            engine.start();
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": VirtualCameraEngine init failed for " + lpparam.packageName + ": " + t.getMessage());
         }

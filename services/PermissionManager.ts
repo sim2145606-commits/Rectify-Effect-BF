@@ -32,6 +32,10 @@ type XposedStatusResult = {
   configPrimaryReadable?: boolean;
   hookLastReadOk?: boolean;
   runtimeReady?: boolean;
+  runtimeObservedFresh?: boolean;
+  runtimeObservedProcess?: string;
+  runtimeObservedAgeMs?: number;
+  runtimeEvidenceSource?: string;
   lastErrorCode?: string;
   lastErrorMessage?: string;
 };
@@ -48,6 +52,14 @@ type IpcStatusResult = {
   hook_last_read_ok?: boolean;
   runtimeReady?: boolean;
   runtime_ready?: boolean;
+  runtimeObservedFresh?: boolean;
+  runtime_observed_fresh?: boolean;
+  runtimeObservedProcess?: string;
+  runtime_observed_process?: string;
+  runtimeObservedAgeMs?: number;
+  runtime_observed_age_ms?: number;
+  runtimeEvidenceSource?: string;
+  runtime_evidence_source?: string;
   lastErrorCode?: string;
   last_error_code?: string;
 };
@@ -113,9 +125,27 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       ipcResult?.hook_last_read_ok === true ||
       result.hookLastReadOk === true;
     const runtimeReady =
-      ipcResult?.runtimeReady === true ||
-      ipcResult?.runtime_ready === true ||
-      result.runtimeReady === true;
+      (ipcResult?.runtimeReady === true ||
+        ipcResult?.runtime_ready === true ||
+        result.runtimeReady === true) &&
+      (ipcResult?.runtimeObservedFresh === true ||
+        ipcResult?.runtime_observed_fresh === true ||
+        result.runtimeObservedFresh === true);
+    const runtimeObservedFresh =
+      ipcResult?.runtimeObservedFresh === true ||
+      ipcResult?.runtime_observed_fresh === true ||
+      result.runtimeObservedFresh === true;
+    const runtimeObservedProcess = normalizeState(
+      ipcResult?.runtimeObservedProcess ??
+        ipcResult?.runtime_observed_process ??
+        result.runtimeObservedProcess
+    );
+    const runtimeObservedAgeMs = Number(
+      ipcResult?.runtimeObservedAgeMs ??
+        ipcResult?.runtime_observed_age_ms ??
+        result.runtimeObservedAgeMs ??
+        0
+    );
     const runtimeErrorCode = normalizeState(
       ipcResult?.lastErrorCode ?? ipcResult?.last_error_code ?? result.lastErrorCode
     );
@@ -146,7 +176,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     if (scopeReason === 'whitelist_targets_not_in_scope' || companionState === 'scope_mismatch') {
       return {
         status: 'denied',
-        detail: 'Scoped target app(s) missing in LSPosed scope. Update scope and reboot.',
+        detail: 'Scoped target app(s) are not synced in LSPosed scope. Run companion refresh and reopen camera app.',
         canRequest: true,
       };
     }
@@ -180,12 +210,18 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     }
 
     if (companionState === 'waiting_runtime') {
+      const staleDetail =
+        runtimeObservedAgeMs > 0
+          ? ` Runtime evidence age=${Math.trunc(runtimeObservedAgeMs)}ms.`
+          : '';
       return {
         status: 'granted',
         detail:
-          runtimeState === 'runtime_observed' || runtimeReady
-            ? 'Companion waiting state is stale; runtime hook already observed.'
-            : 'Module configured; waiting for first runtime hook observation in a scoped app.',
+          runtimeObservedFresh || runtimeReady
+            ? 'Companion waiting state is stale; runtime hook already observed fresh.'
+            : runtimeState === 'runtime_stale'
+              ? `Companion runtime evidence is stale.${staleDetail}`
+              : 'Module configured; waiting for fresh runtime observation in a scoped app.',
         canRequest: false,
       };
     }
@@ -202,9 +238,11 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       return {
         status: 'granted',
         detail: hookConfigured
-          ? runtimeHookObserved
-            ? 'Module loaded and scoped in LSPosed'
-            : 'Module scoped; waiting for first runtime hook observation in a target app.'
+          ? runtimeObservedFresh
+            ? `Module loaded and scoped in LSPosed${runtimeObservedProcess ? ` (${runtimeObservedProcess})` : ''}`
+            : runtimeHookObserved
+              ? 'Runtime evidence exists but is stale; open camera app again to refresh observation.'
+              : 'Module scoped; waiting for first runtime hook observation in a target app.'
           : 'Module + scope detected. Finish hook configuration in VirtuCam app.',
         canRequest: false,
       };
@@ -214,13 +252,13 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       if (scopeReason === 'whitelist_no_targets_configured') {
         return {
           status: 'granted',
-          detail: 'Module loaded. No local target list configured; LSPosed scope will be used.',
+          detail: 'Module loaded. No local targets configured; companion sync keeps base scope active.',
           canRequest: false,
         };
       }
       return {
         status: 'denied',
-        detail: 'Module loaded, but scope missing for configured target app(s). Add scope in LSPosed and reboot.',
+        detail: 'Module loaded, but scope missing for configured target app(s). Refresh companion scope sync and retry.',
         canRequest: true,
       };
     }
@@ -236,7 +274,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     if (scopeReason === 'whitelist_no_targets_configured') {
       return {
         status: 'granted',
-        detail: 'LSPosed detected. No local target list configured; LSPosed scope will be used.',
+        detail: 'LSPosed detected. No local targets configured; companion sync keeps base scope active.',
         canRequest: false,
       };
     }

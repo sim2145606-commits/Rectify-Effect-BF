@@ -22,6 +22,12 @@
       padding: 16px;
     }
     h1 { font-size: 1.3rem; color: var(--accent); margin-bottom: 16px; }
+    .note {
+      font-size: 0.8rem;
+      opacity: 0.78;
+      margin: -8px 0 14px;
+      line-height: 1.35;
+    }
     .card {
       background: var(--card);
       border-radius: 12px;
@@ -82,6 +88,7 @@
 </head>
 <body>
   <h1>VirtuCam Companion</h1>
+  <p class="note">Scope is companion-managed and auto-synced from local target config (including stock camera).</p>
 
   <div class="card">
     <h2>Status</h2>
@@ -102,8 +109,16 @@
       <span id="st-hookread" class="badge warn">Loading...</span>
     </div>
     <div class="row">
+      <span class="label">Scope Sync</span>
+      <span id="st-scope" class="badge warn">Loading...</span>
+    </div>
+    <div class="row">
       <span class="label">Runtime Fresh</span>
       <span id="st-fresh" class="badge warn">Loading...</span>
+    </div>
+    <div class="row">
+      <span class="label">Runtime Process</span>
+      <span id="st-process" class="badge warn">Loading...</span>
     </div>
     <div class="row">
       <span class="label">Effective Source</span>
@@ -195,16 +210,29 @@
       setBadge("st-ipc", toState(ipcMount) === "mounted" ? "Mounted" : "Missing", toState(ipcMount) === "mounted" ? "ok" : "err");
 
       const companionState = toState(await ksuExec(`cat ${IPC}/state/companion_status 2>/dev/null`));
+      const scopeState = toState(await ksuExec(`cat ${IPC}/state/scope_status 2>/dev/null`));
+      const runtimeState = toState(await ksuExec(`cat ${IPC}/state/runtime_status 2>/dev/null`));
       const runtime = await readRuntimeState();
-      const runtimeReady = runtime.runtime_ready === true;
+      const runtimeObservedFresh = runtime.runtime_observed_fresh === true;
+      const runtimeObservedAgeMs = Number(runtime.runtime_observed_age_ms || 0);
+      const runtimeObservedProcess = String(runtime.runtime_observed_process || "").trim();
+      const runtimeEvidenceSource = String(runtime.runtime_evidence_source || "none").trim().toLowerCase();
+      const runtimeReady = runtime.runtime_ready === true && runtimeObservedFresh;
       const hookReadOk = runtime.hook_last_read_ok === true;
       const primaryReadable = runtime.config_primary_readable === true;
-      const updatedEpochMs = Number(runtime.updated_epoch_ms || 0);
-      const fresh = updatedEpochMs > 0 && (Date.now() - updatedEpochMs) <= RUNTIME_STALE_MS;
-      const healthy = runtimeReady && hookReadOk && fresh;
+      const fresh = runtimeObservedFresh;
+      const healthy = runtimeReady && hookReadOk && primaryReadable && scopeState === "scope_ok" && companionState === "ready";
 
-      if (healthy && companionState === "ready") {
+      if (healthy) {
         setBadge("st-companion", "READY", "ok");
+      } else if (scopeState !== "scope_ok" || companionState === "scope_mismatch") {
+        setBadge("st-companion", "SCOPE_MISMATCH", "err");
+      } else if (companionState === "waiting_runtime" && runtimeState === "runtime_stale") {
+        setBadge("st-companion", "RUNTIME_STALE", "warn");
+      } else if (companionState === "waiting_runtime") {
+        setBadge("st-companion", "WAIT_RUNTIME", "warn");
+      } else if (companionState === "ready" && !runtimeObservedFresh) {
+        setBadge("st-companion", "STALE_EVIDENCE", "err");
       } else if (!companionState) {
         setBadge("st-companion", "PENDING", "warn");
       } else {
@@ -213,12 +241,26 @@
 
       setBadge("st-primary", primaryReadable ? "READABLE" : "UNREADABLE", primaryReadable ? "ok" : "err");
       setBadge("st-hookread", hookReadOk ? "OK" : "FAILED", hookReadOk ? "ok" : "err");
-      setBadge("st-fresh", fresh ? "FRESH" : "STALE", fresh ? "ok" : "warn");
+      setBadge("st-scope", scopeState === "scope_ok" ? "SYNCED" : (scopeState || "UNKNOWN").toUpperCase(), scopeState === "scope_ok" ? "ok" : "err");
+      setBadge(
+        "st-fresh",
+        fresh
+          ? (runtimeObservedAgeMs > 0 ? `FRESH (${Math.trunc(runtimeObservedAgeMs)}ms)` : "FRESH")
+          : (runtimeState === "runtime_stale" ? "STALE" : "MISSING"),
+        fresh ? "ok" : "warn"
+      );
+      setBadge(
+        "st-process",
+        runtimeObservedProcess ? runtimeObservedProcess : runtimeEvidenceSource.toUpperCase(),
+        runtimeObservedProcess ? "ok" : "warn"
+      );
 
       const sourceEffective = String(runtime.source_mode_effective || "black").trim().toUpperCase();
       setBadge("st-source", sourceEffective || "BLACK", sourceEffective === "BLACK" ? "warn" : "ok");
 
-      const errCode = String(runtime.last_error_code || "").trim();
+      let errCode = String(runtime.last_error_code || "").trim();
+      if (!errCode && scopeState !== "scope_ok") errCode = "scope_mismatch";
+      if (!errCode && !runtimeObservedFresh && runtimeState === "runtime_stale") errCode = "runtime_stale";
       if (!errCode || errCode === "none") {
         setBadge("st-error", "NONE", "ok");
       } else {

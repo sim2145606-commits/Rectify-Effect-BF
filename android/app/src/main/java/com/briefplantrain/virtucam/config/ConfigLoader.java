@@ -24,9 +24,13 @@ public final class ConfigLoader {
     public static final String LEGACY_FALLBACK_JSON_PATH = VirtuCamIPC.LEGACY_TMP_JSON;
     private static final long MAX_CONFIG_SIZE_BYTES = 512 * 1024;
     private static final long LOG_RATE_LIMIT_MS = 30_000L;
+    private static final long XSP_FAILURE_COOLDOWN_MS = 30_000L;
+    private static final int FIRST_APPLICATION_UID = 10000;
 
     private final long reloadIntervalMs;
+    private final boolean appUidProcess;
     private volatile long lastLoadMs = 0;
+    private volatile long xspRetryAfterMs = 0L;
 
     private final AtomicReference<ConfigSnapshot> cached =
             new AtomicReference<>(new ConfigSnapshot());
@@ -38,6 +42,7 @@ public final class ConfigLoader {
 
     public ConfigLoader(long reloadIntervalMs) {
         this.reloadIntervalMs = Math.max(250, reloadIntervalMs);
+        this.appUidProcess = android.os.Process.myUid() >= FIRST_APPLICATION_UID;
     }
 
     public ConfigSnapshot getSnapshot() {
@@ -63,12 +68,12 @@ public final class ConfigLoader {
     private ConfigSnapshot loadOnce(ConfigSnapshot previous) {
         ConfigSnapshot snap = ConfigSnapshot.copyOf(previous);
         boolean sourceModeExplicit = false;
-        sourceModeExplicit = loadFromSharedPrefs(snap);
-
         JsonOverlay overlay = loadJsonOverlayWithPriority();
         if (overlay != null) {
             applyOverlay(snap, overlay);
             sourceModeExplicit = sourceModeExplicit || overlay.sourceModeExplicit;
+        } else {
+            sourceModeExplicit = loadFromSharedPrefs(snap);
         }
 
         if (!sourceModeExplicit) {
@@ -85,6 +90,10 @@ public final class ConfigLoader {
 
     private boolean loadFromSharedPrefs(ConfigSnapshot snap) {
         boolean sourceModeExplicit = false;
+        long now = SystemClock.uptimeMillis();
+        if (now < xspRetryAfterMs) {
+            return false;
+        }
         try {
             XSharedPreferences prefs = new XSharedPreferences(MODULE_PACKAGE, PREFS_FILE);
             prefs.reload();
@@ -133,19 +142,16 @@ public final class ConfigLoader {
                 }
             }
             snap.fps = prefs.getInt("fps", snap.fps);
+            xspRetryAfterMs = 0L;
         } catch (Throwable t) {
+            xspRetryAfterMs = now + XSP_FAILURE_COOLDOWN_MS;
             logRateLimitedError("xsharedprefs_load_failed", t);
         }
         return sourceModeExplicit;
     }
 
     private JsonOverlay loadJsonOverlayWithPriority() {
-        final String[] candidates = new String[]{
-                PRIMARY_FALLBACK_JSON_PATH,
-                PRIMARY_FALLBACK_JSON_PATH_LEGACY,
-                IPC_FALLBACK_JSON_PATH,
-                LEGACY_FALLBACK_JSON_PATH
-        };
+        final String[] candidates = buildJsonCandidates();
 
         for (String candidate : candidates) {
             try {
@@ -188,6 +194,22 @@ public final class ConfigLoader {
             }
         }
         return null;
+    }
+
+    private String[] buildJsonCandidates() {
+        if (appUidProcess) {
+            // App UIDs should avoid /data/adb probing to prevent repeated SELinux denials.
+            return new String[]{
+                    IPC_FALLBACK_JSON_PATH,
+                    LEGACY_FALLBACK_JSON_PATH
+            };
+        }
+        return new String[]{
+                IPC_FALLBACK_JSON_PATH,
+                LEGACY_FALLBACK_JSON_PATH,
+                PRIMARY_FALLBACK_JSON_PATH,
+                PRIMARY_FALLBACK_JSON_PATH_LEGACY
+        };
     }
 
     private static boolean isAllowedFallbackPath(String canonicalPath) {

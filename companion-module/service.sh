@@ -25,6 +25,11 @@ PERSISTENT_STATE_DIR="$PERSISTENT_ROOT/state"
 PERSISTENT_JSON="$PERSISTENT_CFG_DIR/virtucam_config.json"
 PERSISTENT_JSON_LEGACY="$PERSISTENT_ROOT/virtucam_config.json"
 PERSISTENT_RUNTIME_JSON="$PERSISTENT_STATE_DIR/runtime_state.json"
+RUNTIME_STALE_MS=180000
+DEFAULT_CAMERA_PKG="com.android.camera"
+
+SCOPE_SYNC_OK="false"
+SCOPE_SYNC_METHOD="none"
 
 log() {
     local msg
@@ -155,39 +160,233 @@ find_lspd_config() {
     return 1
 }
 
+config_json_source() {
+    if [ -r "$PERSISTENT_JSON" ]; then
+        echo "$PERSISTENT_JSON"
+        return
+    fi
+    if [ -r "$CFG_JSON" ]; then
+        echo "$CFG_JSON"
+        return
+    fi
+    echo ""
+}
+
+read_json_string_from_config() {
+    local key="$1"
+    local src
+    src="$(config_json_source)"
+    if [ -z "$src" ]; then
+        echo ""
+        return
+    fi
+    tr -d '\n' < "$src" 2>/dev/null | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+}
+
+append_unique_pkg() {
+    local pkg="$1"
+    if [ -z "$pkg" ]; then
+        return
+    fi
+    case "$pkg" in
+        *[!a-zA-Z0-9._]*)
+            return
+            ;;
+    esac
+    case " $DESIRED_SCOPE_PACKAGES " in
+        *" $pkg "*)
+            ;;
+        *)
+            DESIRED_SCOPE_PACKAGES="${DESIRED_SCOPE_PACKAGES:+$DESIRED_SCOPE_PACKAGES }$pkg"
+            ;;
+    esac
+}
+
+resolve_stock_camera_package() {
+    local resolved
+    resolved="$(cmd package resolve-activity --brief "$DEFAULT_CAMERA_PKG" 2>/dev/null | tail -n 1 | tr -d '\r')"
+    case "$resolved" in
+        */*)
+            resolved="${resolved%%/*}"
+            ;;
+    esac
+    case "$resolved" in
+        *[!a-zA-Z0-9._]*|"")
+            resolved="$DEFAULT_CAMERA_PKG"
+            ;;
+    esac
+    echo "$resolved"
+}
+
+build_desired_scope_packages() {
+    local target_mode target_csv pkg stock_pkg
+    DESIRED_SCOPE_PACKAGES=""
+    target_mode="$(read_json_string_from_config targetMode | tr '[:upper:]' '[:lower:]')"
+    target_csv="$(read_json_string_from_config targetPackages)"
+    stock_pkg="$(resolve_stock_camera_package)"
+
+    append_unique_pkg "$VIRTUCAM_PKG"
+    append_unique_pkg "$stock_pkg"
+
+    for pkg in $(printf '%s' "$target_csv" | tr ',' ' '); do
+        append_unique_pkg "$pkg"
+    done
+
+    if [ "$target_mode" = "whitelist" ] && [ -z "$target_csv" ]; then
+        log "Whitelist mode has no local targets; scope will include module + stock camera only"
+    fi
+
+    echo "$DESIRED_SCOPE_PACKAGES"
+}
+
+get_module_dump_line() {
+    local db="$1"
+    sqlite3 "$db" ".dump modules" 2>/dev/null | grep "INSERT INTO modules VALUES(.*'$VIRTUCAM_PKG'" | tail -n 1
+}
+
+get_module_mid() {
+    local db="$1"
+    local line
+    line="$(get_module_dump_line "$db")"
+    if [ -z "$line" ]; then
+        echo ""
+        return
+    fi
+    printf '%s\n' "$line" | sed -n 's/INSERT INTO modules VALUES(\([0-9][0-9]*\).*/\1/p'
+}
+
+ensure_module_list_entry() {
+    local lspd_config="$1"
+    local modules_list="$lspd_config/modules.list"
+    if [ -f "$modules_list" ] && ! grep -qF "$VIRTUCAM_PKG" "$modules_list" 2>/dev/null; then
+        printf '%s\n' "$VIRTUCAM_PKG" >> "$modules_list"
+        log "Added $VIRTUCAM_PKG to modules.list"
+    fi
+}
+
+sync_scope_db() {
+    local lspd_config="$1"
+    local desired="$2"
+    local db="$lspd_config/modules_config.db"
+    local mid dump_modules dump_scope tmp_sql verified_count pkg escaped_pkg
+
+    if [ ! -f "$db" ] || ! command -v sqlite3 >/dev/null 2>&1; then
+        return 1
+    fi
+
+    mid="$(get_module_mid "$db")"
+    if [ -z "$mid" ]; then
+        log "WARNING: VirtuCam module row missing in LSPosed DB"
+        return 1
+    fi
+
+    dump_modules="$(sqlite3 "$db" ".dump modules" 2>/dev/null)"
+    if printf '%s\n' "$dump_modules" | grep -q "INSERT INTO modules VALUES($mid,'$VIRTUCAM_PKG'.*,1,"; then
+        log "Module is enabled in LSPosed DB (mid=$mid)"
+    else
+        log "WARNING: Module appears disabled in LSPosed DB (mid=$mid)"
+    fi
+
+    tmp_sql="$IPC_DIR/state/.scope_sync_$$.sql"
+    {
+        echo "BEGIN;"
+        echo "DELETE FROM scope WHERE mid=$mid AND user_id=0;"
+        for pkg in $desired; do
+            escaped_pkg="$(printf '%s' "$pkg" | sed "s/'/''/g")"
+            echo "INSERT OR REPLACE INTO scope(mid,app_pkg_name,user_id) VALUES($mid,'$escaped_pkg',0);"
+        done
+        echo "COMMIT;"
+    } > "$tmp_sql"
+
+    if ! sqlite3 "$db" < "$tmp_sql" >/dev/null 2>&1; then
+        rm -f "$tmp_sql" 2>/dev/null
+        return 1
+    fi
+    rm -f "$tmp_sql" 2>/dev/null
+
+    dump_scope="$(sqlite3 "$db" ".dump scope" 2>/dev/null)"
+    verified_count=0
+    for pkg in $desired; do
+        if printf '%s\n' "$dump_scope" | grep -q "INSERT INTO scope VALUES($mid,'$pkg',0);"; then
+            verified_count=$((verified_count + 1))
+        else
+            log "WARNING: Scope verify missing package '$pkg' for mid=$mid"
+            return 1
+        fi
+    done
+    log "Scope DB sync complete (mid=$mid, packages=$verified_count)"
+    return 0
+}
+
+sync_scope_dirs() {
+    local lspd_config="$1"
+    local desired="$2"
+    local scope_root="$lspd_config/scope/$VIRTUCAM_PKG"
+    local entry existing pkg
+
+    mkdir -p "$scope_root" 2>/dev/null || return 1
+
+    for entry in "$scope_root"/*; do
+        [ -e "$entry" ] || continue
+        existing="$(basename "$entry")"
+        case " $desired " in
+            *" $existing "*)
+                ;;
+            *)
+                rm -rf "$entry" 2>/dev/null
+                ;;
+        esac
+    done
+
+    for pkg in $desired; do
+        mkdir -p "$scope_root/$pkg" 2>/dev/null || return 1
+    done
+
+    for pkg in $desired; do
+        [ -d "$scope_root/$pkg" ] || return 1
+    done
+    log "Scope dir sync complete (packages=$(printf '%s\n' "$desired" | wc -w | tr -d ' '))"
+    return 0
+}
+
 ensure_lsposed_scope() {
-    local lspd_config
+    local lspd_config desired
     lspd_config="$(find_lspd_config)"
     if [ -z "$lspd_config" ]; then
         log "LSPosed config not found - skipping scope setup"
+        SCOPE_SYNC_OK="false"
+        SCOPE_SYNC_METHOD="none"
         return 1
     fi
     log "LSPosed config found at: $lspd_config"
 
-    local db="$lspd_config/modules_config.db"
-    if [ -f "$db" ] && command -v sqlite3 >/dev/null 2>&1; then
-        if sqlite3 "$db" ".dump modules" 2>/dev/null | grep -q "INSERT INTO modules VALUES(.*'$VIRTUCAM_PKG'.*,1,"; then
-            log "Module is enabled in LSPosed DB"
-        else
-            log "WARNING: Module not enabled in LSPosed DB (enable manually in LSPosed)"
-        fi
+    ensure_module_list_entry "$lspd_config"
+
+    desired="$(build_desired_scope_packages)"
+    if [ -z "$desired" ]; then
+        log "WARNING: Desired scope set is empty"
+        SCOPE_SYNC_OK="false"
+        SCOPE_SYNC_METHOD="none"
+        return 1
+    fi
+    log "Desired scope packages: $desired"
+
+    if sync_scope_db "$lspd_config" "$desired"; then
+        SCOPE_SYNC_OK="true"
+        SCOPE_SYNC_METHOD="db"
+        return 0
     fi
 
-    local scope_dir="$lspd_config/scope/$VIRTUCAM_PKG"
-    if [ -d "$lspd_config/scope" ] && [ ! -d "$scope_dir" ]; then
-        mkdir -p "$scope_dir"
-        log "Created scope directory: $scope_dir"
+    if sync_scope_dirs "$lspd_config" "$desired"; then
+        SCOPE_SYNC_OK="true"
+        SCOPE_SYNC_METHOD="dir"
+        return 0
     fi
 
-    local modules_list="$lspd_config/modules.list"
-    if [ -f "$modules_list" ]; then
-        if ! grep -qF "$VIRTUCAM_PKG" "$modules_list" 2>/dev/null; then
-            printf '%s\n' "$VIRTUCAM_PKG" >> "$modules_list"
-            log "Added to modules.list"
-        fi
-    fi
-
-    return 0
+    SCOPE_SYNC_OK="false"
+    SCOPE_SYNC_METHOD="failed"
+    log "WARNING: LSPosed scope reconciliation failed"
+    return 1
 }
 
 allow_broad_scope_enabled() {
@@ -233,29 +432,44 @@ auto_prune_broad_scope() {
 }
 
 is_scope_enabled() {
+    if [ "$SCOPE_SYNC_OK" = "true" ]; then
+        return 0
+    fi
+
     local lspd_config
     lspd_config="$(find_lspd_config)"
     if [ -z "$lspd_config" ]; then
         return 1
     fi
 
+    local desired
+    desired="$(build_desired_scope_packages)"
+    if [ -z "$desired" ]; then
+        return 1
+    fi
+
     local db="$lspd_config/modules_config.db"
     if [ -f "$db" ] && command -v sqlite3 >/dev/null 2>&1; then
-        if sqlite3 "$db" ".dump modules" 2>/dev/null | grep -q "INSERT INTO modules VALUES(.*'$VIRTUCAM_PKG'.*,1,"; then
+        local mid scope_dump pkg
+        mid="$(get_module_mid "$db")"
+        if [ -n "$mid" ]; then
+            scope_dump="$(sqlite3 "$db" ".dump scope" 2>/dev/null)"
+            for pkg in $desired; do
+                if ! printf '%s\n' "$scope_dump" | grep -q "INSERT INTO scope VALUES($mid,'$pkg',0);"; then
+                    return 1
+                fi
+            done
             return 0
         fi
     fi
 
-    if [ -d "$lspd_config/scope/$VIRTUCAM_PKG" ]; then
-        return 0
+    local pkg
+    for pkg in $desired; do
+        if [ ! -d "$lspd_config/scope/$VIRTUCAM_PKG/$pkg" ]; then
+            return 1
+        fi
     fi
-
-    local modules_list="$lspd_config/modules.list"
-    if [ -f "$modules_list" ] && grep -qF "$VIRTUCAM_PKG" "$modules_list" 2>/dev/null; then
-        return 0
-    fi
-
-    return 1
+    return 0
 }
 
 normalize_ipc_permissions() {
@@ -325,23 +539,122 @@ grant_permissions() {
     pm grant "$VIRTUCAM_PKG" android.permission.FOREGROUND_SERVICE 2>/dev/null
 }
 
-has_runtime_observation() {
-    local active_line
-    local mapping_line
+extract_line_timestamp_key() {
+    printf '%s\n' "$1" | sed -n 's/^\[[[:space:]]*\([0-9][0-9-]*T[0-9:.]*\).*/\1/p' | head -n 1
+}
 
-    active_line="$(grep -h 'VirtuCam/XposedEntry: module active in process:' \
-        /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1)"
-    if [ -n "$active_line" ]; then
-        return 0
+get_latest_lspd_line() {
+    local pattern="$1"
+    local lines keyed
+    lines="$(grep -h "$pattern" /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null)"
+    if [ -z "$lines" ]; then
+        echo ""
+        return
+    fi
+    keyed="$(printf '%s\n' "$lines" | sed -n 's/^\[[[:space:]]*\([0-9][0-9-]*T[0-9:.]*\).*$/\1|&/p')"
+    if [ -z "$keyed" ]; then
+        printf '%s\n' "$lines" | tail -n 1
+        return
+    fi
+    printf '%s\n' "$keyed" | sort | tail -n 1 | cut -d'|' -f2-
+}
+
+parse_line_epoch_ms() {
+    local line="$1"
+    local iso iso_base sec busybox_bin
+    iso="$(extract_line_timestamp_key "$line")"
+    if [ -z "$iso" ]; then
+        echo "0"
+        return
+    fi
+    iso_base="$(printf '%s' "$iso" | cut -d'.' -f1)"
+    busybox_bin="$(command -v busybox 2>/dev/null)"
+    if [ -n "$busybox_bin" ] && [ -x "$busybox_bin" ]; then
+        sec="$("$busybox_bin" date -D '%Y-%m-%dT%H:%M:%S' -d "$iso_base" +%s 2>/dev/null)"
+        if [ -z "$sec" ]; then
+            sec="$("$busybox_bin" date -d "$iso_base" +%s 2>/dev/null)"
+        fi
+    fi
+    if [ -z "$sec" ]; then
+        sec="$(date -d "$iso_base" +%s 2>/dev/null)"
+    fi
+    if [ -z "$sec" ]; then
+        echo "0"
+        return
+    fi
+    echo "$sec"
+}
+
+collect_runtime_observation() {
+    local active_line mapping_line active_key mapping_key selected_line selected_key selected_source
+    local now_s epoch_s age_s process_name stale_s
+
+    RUNTIME_OBSERVED="false"
+    RUNTIME_OBSERVED_PROCESS=""
+    RUNTIME_OBSERVED_EPOCH_MS="0"
+    RUNTIME_OBSERVED_AGE_MS="0"
+    RUNTIME_OBSERVED_FRESH="false"
+    RUNTIME_EVIDENCE_SOURCE="none"
+
+    active_line="$(get_latest_lspd_line 'VirtuCam/XposedEntry: module active in process:')"
+    mapping_line="$(get_latest_lspd_line 'VirtuCam/XposedEntry: createCaptureSession')"
+    active_key="$(extract_line_timestamp_key "$active_line")"
+    mapping_key="$(extract_line_timestamp_key "$mapping_line")"
+
+    selected_line=""
+    selected_key=""
+    selected_source="none"
+    if [ -n "$active_line" ] && [ -n "$mapping_line" ]; then
+        if [ "$active_key" \> "$mapping_key" ]; then
+            selected_line="$active_line"
+            selected_key="$active_key"
+            selected_source="module_active"
+        else
+            selected_line="$mapping_line"
+            selected_key="$mapping_key"
+            selected_source="mapping"
+        fi
+    elif [ -n "$active_line" ]; then
+        selected_line="$active_line"
+        selected_key="$active_key"
+        selected_source="module_active"
+    elif [ -n "$mapping_line" ]; then
+        selected_line="$mapping_line"
+        selected_key="$mapping_key"
+        selected_source="mapping"
     fi
 
-    mapping_line="$(grep -h 'VirtuCam/XposedEntry: createCaptureSession' \
-        /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1)"
-    if [ -n "$mapping_line" ]; then
-        return 0
+    if [ -z "$selected_line" ] || [ -z "$selected_key" ]; then
+        return 1
     fi
 
-    return 1
+    now_s="$(date '+%s')"
+    epoch_s="$(parse_line_epoch_ms "$selected_line")"
+    if [ "$epoch_s" -le 0 ] 2>/dev/null; then
+        return 1
+    fi
+
+    age_s=$((now_s - epoch_s))
+    if [ "$age_s" -lt 0 ] 2>/dev/null; then
+        age_s=0
+    fi
+
+    process_name=""
+    if [ "$selected_source" = "module_active" ]; then
+        process_name="$(printf '%s\n' "$selected_line" | sed -n 's/.*module active in process:[[:space:]]*\([^[:space:]]\+\).*/\1/p' | head -n 1)"
+    fi
+
+    RUNTIME_OBSERVED="true"
+    RUNTIME_OBSERVED_PROCESS="$process_name"
+    RUNTIME_OBSERVED_EPOCH_MS="${epoch_s}000"
+    RUNTIME_OBSERVED_AGE_MS="$((age_s * 1000))"
+    RUNTIME_EVIDENCE_SOURCE="$selected_source"
+    stale_s=$((RUNTIME_STALE_MS / 1000))
+
+    if [ "$age_s" -le "$stale_s" ] 2>/dev/null; then
+        RUNTIME_OBSERVED_FRESH="true"
+    fi
+    return 0
 }
 
 hook_can_read_primary() {
@@ -392,18 +705,26 @@ write_runtime_state_json() {
     local last_error_code="$7"
     local last_error_message="$8"
     local last_ok_epoch_ms="$9"
+    local runtime_observed_process="${10}"
+    local runtime_observed_epoch_ms="${11}"
+    local runtime_observed_age_ms="${12}"
+    local runtime_observed_fresh="${13}"
+    local runtime_evidence_source="${14}"
     local now_ms
     now_ms="$(date '+%s000')"
 
     local escaped_error_code escaped_error_message escaped_active_mode escaped_effective_mode
+    local escaped_observed_process escaped_evidence_source
     escaped_error_code="$(json_escape "$last_error_code")"
     escaped_error_message="$(json_escape "$last_error_message")"
     escaped_active_mode="$(json_escape "$active_source_mode")"
     escaped_effective_mode="$(json_escape "$source_mode_effective")"
+    escaped_observed_process="$(json_escape "$runtime_observed_process")"
+    escaped_evidence_source="$(json_escape "$runtime_evidence_source")"
 
     local payload
     payload="$(cat <<EOF
-{"runtime_ready":$runtime_ready,"config_primary_readable":$config_primary_readable,"config_ipc_readable":$config_ipc_readable,"hook_last_read_ok":$hook_last_read_ok,"active_source_mode":"$escaped_active_mode","source_mode_effective":"$escaped_effective_mode","last_error_code":"$escaped_error_code","last_error_message":"$escaped_error_message","last_ok_epoch_ms":$last_ok_epoch_ms,"updated_epoch_ms":$now_ms}
+{"runtime_ready":$runtime_ready,"config_primary_readable":$config_primary_readable,"config_ipc_readable":$config_ipc_readable,"hook_last_read_ok":$hook_last_read_ok,"active_source_mode":"$escaped_active_mode","source_mode_effective":"$escaped_effective_mode","last_error_code":"$escaped_error_code","last_error_message":"$escaped_error_message","last_ok_epoch_ms":$last_ok_epoch_ms,"updated_epoch_ms":$now_ms,"runtime_observed_process":"$escaped_observed_process","runtime_observed_epoch_ms":$runtime_observed_epoch_ms,"runtime_observed_age_ms":$runtime_observed_age_ms,"runtime_observed_fresh":$runtime_observed_fresh,"runtime_evidence_source":"$escaped_evidence_source"}
 EOF
 )"
 
@@ -426,6 +747,11 @@ update_companion_state() {
     local companion_state="pending"
     local last_error_code=""
     local last_error_message=""
+    local runtime_observed_process=""
+    local runtime_observed_epoch_ms="0"
+    local runtime_observed_age_ms="0"
+    local runtime_observed_fresh="false"
+    local runtime_evidence_source="none"
 
     if [ -r "$PERSISTENT_JSON" ]; then
         config_primary_readable="true"
@@ -461,11 +787,29 @@ update_companion_state() {
         last_error_message="scope not ready"
     fi
 
-    if has_runtime_observation; then
-        runtime_state="runtime_observed"
+    if collect_runtime_observation; then
+        runtime_observed_process="$RUNTIME_OBSERVED_PROCESS"
+        runtime_observed_epoch_ms="$RUNTIME_OBSERVED_EPOCH_MS"
+        runtime_observed_age_ms="$RUNTIME_OBSERVED_AGE_MS"
+        runtime_observed_fresh="$RUNTIME_OBSERVED_FRESH"
+        runtime_evidence_source="$RUNTIME_EVIDENCE_SOURCE"
+        if [ "$runtime_observed_fresh" = "true" ]; then
+            runtime_state="runtime_observed"
+        else
+            runtime_state="runtime_stale"
+            if [ -z "$last_error_code" ]; then
+                last_error_code="runtime_stale"
+                last_error_message="latest runtime evidence is stale"
+            fi
+        fi
+    else
+        if [ -z "$last_error_code" ]; then
+            last_error_code="runtime_missing"
+            last_error_message="no runtime evidence observed"
+        fi
     fi
 
-    if [ "$scope_state" = "scope_ok" ] && [ "$config_primary_readable" = "true" ] && [ "$hook_last_read_ok" = "true" ]; then
+    if [ "$scope_state" = "scope_ok" ] && [ "$config_primary_readable" = "true" ] && [ "$hook_last_read_ok" = "true" ] && [ "$runtime_observed_fresh" = "true" ]; then
         runtime_ready="true"
     fi
 
@@ -475,7 +819,7 @@ update_companion_state() {
         companion_state="config_missing"
     elif [ "$hook_last_read_ok" != "true" ]; then
         companion_state="config_unreadable"
-    elif [ "$marker_state" = "marker_present" ] || [ "$runtime_state" = "runtime_observed" ]; then
+    elif [ "$runtime_ready" = "true" ]; then
         companion_state="ready"
     else
         companion_state="waiting_runtime"
@@ -518,7 +862,12 @@ update_companion_state() {
         "$source_mode_effective" \
         "$last_error_code" \
         "$last_error_message" \
-        "$last_ok_epoch_ms"
+        "$last_ok_epoch_ms" \
+        "$runtime_observed_process" \
+        "$runtime_observed_epoch_ms" \
+        "$runtime_observed_age_ms" \
+        "$runtime_observed_fresh" \
+        "$runtime_evidence_source"
 
     if [ -n "$VIRTUCAM_UID" ]; then
         chown "$VIRTUCAM_UID:$VIRTUCAM_UID" \
@@ -527,7 +876,7 @@ update_companion_state() {
             "$RUNTIME_STATE_JSON" 2>/dev/null
     fi
 
-    log "Companion status: $companion_state (primary=$config_primary_readable ipc=$config_ipc_readable hookRead=$hook_last_read_ok scope=$scope_state runtime=$runtime_state)"
+    log "Companion status: $companion_state (primary=$config_primary_readable ipc=$config_ipc_readable hookRead=$hook_last_read_ok scope=$scope_state runtime=$runtime_state fresh=$runtime_observed_fresh process=$runtime_observed_process source=$runtime_evidence_source)"
 }
 
 log_ipc_snapshot() {

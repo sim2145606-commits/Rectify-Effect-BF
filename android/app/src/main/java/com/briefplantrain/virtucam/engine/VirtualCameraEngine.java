@@ -28,6 +28,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class VirtualCameraEngine {
 
     private static final String TAG = "VirtuCam/Engine";
+    private static final long IDLE_DELAY_INACTIVE_MS = 2000L;
+    private static final long IDLE_DELAY_NO_MAPPINGS_MS = 900L;
 
     private static volatile VirtualCameraEngine INSTANCE;
 
@@ -74,14 +76,26 @@ public final class VirtualCameraEngine {
     }
 
     public void start() {
+        ensureStarted();
+    }
+
+    public void ensureStarted() {
         if (started) return;
-        started = true;
-
-        engineThread.start();
-        handler = new Handler(engineThread.getLooper());
-
-        handler.post(() -> LogUtil.d(TAG, "Engine started for pkg=" + packageName + " proc=" + processName));
-        handler.post(renderLoop);
+        synchronized (this) {
+            if (started) return;
+            if (handler == null) {
+                if (engineThread.getState() == Thread.State.NEW) {
+                    engineThread.start();
+                } else if (!engineThread.isAlive()) {
+                    LogUtil.w(TAG, "Engine thread unavailable; skip start");
+                    return;
+                }
+                handler = new Handler(engineThread.getLooper());
+            }
+            started = true;
+            handler.post(() -> LogUtil.d(TAG, "Engine started for pkg=" + packageName + " proc=" + processName));
+            handler.post(renderLoop);
+        }
     }
 
     public void stop() {
@@ -89,6 +103,7 @@ public final class VirtualCameraEngine {
         try {
             if (handler != null) handler.removeCallbacksAndMessages(null);
         } catch (Throwable ignored) {}
+        handler = null;
         try {
             synchronized (routeLock) {
                 clearVcamCompatibilityAliasesLocked();
@@ -139,17 +154,16 @@ public final class VirtualCameraEngine {
     }
 
     public Surface mapOutputSurface(Surface original, SurfaceInfo info) {
-        synchronized (routeLock) {
-            ConfigSnapshot cfg = configLoader.getSnapshot();
-            if (!cfg.enabled) {
+        ConfigSnapshot cfg = configLoader.getSnapshot();
+        if (!cfg.enabled || !cfg.isTargeted(packageName)) {
+            synchronized (routeLock) {
                 clearVcamCompatibilityAliasesLocked();
-                return original;
             }
-            if (!cfg.isTargeted(packageName)) {
-                clearVcamCompatibilityAliasesLocked();
-                return original;
-            }
+            return original;
+        }
+        ensureStarted();
 
+        synchronized (routeLock) {
             SurfaceInfo i = (info != null) ? info : inferSurfaceInfo(original);
             boolean hasKnownSize = i.width > 0 && i.height > 0;
 
@@ -208,6 +222,15 @@ public final class VirtualCameraEngine {
     }
 
     public Surface mapRequestTargetSurface(Surface surface) {
+        ConfigSnapshot cfg = configLoader.getSnapshot();
+        if (!cfg.enabled || !cfg.isTargeted(packageName)) {
+            synchronized (routeLock) {
+                clearVcamCompatibilityAliasesLocked();
+            }
+            return surface;
+        }
+        ensureStarted();
+
         synchronized (routeLock) {
             if (compatibilityTakeoverSurface != null) {
                 Surface aliased = compatibilityAliases.get(surface);
@@ -293,9 +316,9 @@ public final class VirtualCameraEngine {
             }
             long delayMs;
             if (!activeRoute) {
-                delayMs = 750;
+                delayMs = IDLE_DELAY_INACTIVE_MS;
             } else if (!hasMappings) {
-                delayMs = 220;
+                delayMs = IDLE_DELAY_NO_MAPPINGS_MS;
             } else {
                 delayMs = Math.max(5, 1000 / fps);
             }

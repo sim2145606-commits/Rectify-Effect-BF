@@ -698,8 +698,8 @@ export default function SettingsScreen() {
             <View style={styles.lsposedNoticeText}>
               <Text style={[styles.lsposedNoticeTitle, { color: colors.textPrimary }]}>App Targeting via LSPosed</Text>
               <Text style={[styles.lsposedNoticeDesc, { color: colors.textSecondary }]}>
-                Per-app hook scope is managed in LSPosed Manager → Modules → VirtuCam → Scope.
-                Enable only the apps you want the virtual camera feed injected into.
+                Companion auto-syncs LSPosed scope from local VirtuCam target config.
+                Manual LSPosed edits may be pruned on refresh when they are not in config.
               </Text>
             </View>
           </View>
@@ -714,7 +714,7 @@ export default function SettingsScreen() {
         </View>
         <Card>
           <Text style={[styles.targetSectionDesc, { color: colors.textSecondary }]}>
-            Optional local app filter for VirtuCam config. LSPosed scope remains the final authority.
+            Local target app list drives companion-managed LSPosed scope sync.
           </Text>
 
           <View style={[styles.targetModePills, { backgroundColor: colors.surfaceLighter, borderColor: colors.border }]}>

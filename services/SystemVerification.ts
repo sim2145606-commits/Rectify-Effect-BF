@@ -77,6 +77,10 @@ type XposedStatusResult = {
   configIpcReadable?: boolean;
   hookLastReadOk?: boolean;
   runtimeReady?: boolean;
+  runtimeObservedFresh?: boolean;
+  runtimeObservedProcess?: string;
+  runtimeObservedAgeMs?: number;
+  runtimeEvidenceSource?: string;
   activeSourceMode?: string;
   sourceModeEffective?: string;
   lastErrorCode?: string;
@@ -112,6 +116,16 @@ type IpcStatusResult = {
   hook_last_read_ok?: boolean;
   runtimeReady?: boolean;
   runtime_ready?: boolean;
+  runtimeObservedFresh?: boolean;
+  runtime_observed_fresh?: boolean;
+  runtimeObservedProcess?: string;
+  runtime_observed_process?: string;
+  runtimeObservedAgeMs?: number;
+  runtime_observed_age_ms?: number;
+  runtimeObservedEpochMs?: number;
+  runtime_observed_epoch_ms?: number;
+  runtimeEvidenceSource?: string;
+  runtime_evidence_source?: string;
   activeSourceMode?: string;
   active_source_mode?: string;
   sourceModeEffective?: string;
@@ -236,7 +250,7 @@ function getScopeDetail(scopeReason: string, hasTargets: boolean): string {
     return 'Configured targets found in LSPosed scope';
   }
   if (scopeReason === 'non_whitelist_mode') {
-    return 'Scope accepted in non-whitelist mode';
+    return 'Companion-managed scope sync active in non-whitelist mode';
   }
   if (!hasTargets) {
     return 'No local target app constraints configured';
@@ -253,7 +267,7 @@ function getMappingQuickFix(reason: string | null): string {
     return 'Enable Hook Enabled and run sync from dashboard';
   }
   if (normalized.includes('targeted=false')) {
-    return 'Scope this package in LSPosed or relax local target mode';
+    return 'Add this package to local targets and run companion refresh';
   }
   if (normalized.includes('hasmedia=false') || normalized.includes('sourcemode=black')) {
     return 'Select media in Studio and keep source mode set to file or test';
@@ -434,10 +448,27 @@ export async function runFullSystemCheck(options?: {
         const hookLastReadOk = ipcStatus
           ? ipcStatus.hookLastReadOk === true || ipcStatus.hook_last_read_ok === true
           : xposedResult.hookLastReadOk === true;
-        const runtimeReady = ipcStatus
-          ? ipcStatus.runtimeReady === true || ipcStatus.runtime_ready === true
-          : xposedResult.runtimeReady === true;
-        const runtimeStateFresh = ipcStatus ? ipcStatus.runtimeStateFresh !== false : true;
+        const runtimeObservedFresh = ipcStatus
+          ? ipcStatus.runtimeObservedFresh === true || ipcStatus.runtime_observed_fresh === true
+          : xposedResult.runtimeObservedFresh === true;
+        const runtimeObservedProcess = String(
+          ipcStatus?.runtimeObservedProcess ??
+            ipcStatus?.runtime_observed_process ??
+            xposedResult.runtimeObservedProcess ??
+            ''
+        ).trim();
+        const runtimeObservedAgeMs = Number(
+          ipcStatus?.runtimeObservedAgeMs ??
+            ipcStatus?.runtime_observed_age_ms ??
+            xposedResult.runtimeObservedAgeMs ??
+            0
+        );
+        const runtimeReady =
+          (ipcStatus
+            ? ipcStatus.runtimeReady === true || ipcStatus.runtime_ready === true
+            : xposedResult.runtimeReady === true) && runtimeObservedFresh;
+        const runtimeStateFresh =
+          runtimeObservedFresh && (ipcStatus ? ipcStatus.runtimeStateFresh !== false : true);
         const activeSourceMode = String(
           ipcStatus?.activeSourceMode ??
             ipcStatus?.active_source_mode ??
@@ -473,7 +504,7 @@ export async function runFullSystemCheck(options?: {
         const hookConfigured = xposedResult.hookConfigured === true;
         const ipcConfigReadyFlag = xposedResult.ipcConfigReady === true || configPrimaryReady;
         const stagedMediaReadyFlag = xposedResult.stagedMediaReady === true;
-        const runtimeHookObserved = xposedResult.runtimeHookObserved === true;
+        const runtimeHookObserved = xposedResult.runtimeHookObserved === true || runtimeObservedFresh;
         const mappingFailureReason = String(xposedResult.mappingFailureReason ?? '').trim();
         const markerSource = String(
           xposedResult.markerSource ?? ipcStatus?.moduleMarkerSource ?? 'unknown'
@@ -572,12 +603,19 @@ export async function runFullSystemCheck(options?: {
           } else if (companionWaitingRuntime) {
             hookConfigStatus = 'warning';
             hookConfigNotes.push(
-              runtimeState === 'runtime_observed'
-                ? `Companion waiting state is stale; runtime already observed${readSourceHint}`
-                : `Companion waiting for first runtime hook observation${readSourceHint}`
+              runtimeObservedFresh
+                ? `Companion waiting state is stale; runtime evidence is fresh${readSourceHint}`
+                : runtimeState === 'runtime_stale'
+                  ? `Companion runtime evidence is stale${
+                      runtimeObservedAgeMs > 0 ? ` (${Math.trunc(runtimeObservedAgeMs)}ms)` : ''
+                    }${readSourceHint}`
+                  : `Companion waiting for fresh runtime hook observation${readSourceHint}`
             );
           } else if (companionReady && companionVersion.length > 0) {
             hookConfigNotes.push(`Companion version ${companionVersion}`);
+          }
+          if (runtimeObservedProcess.length > 0) {
+            hookConfigNotes.push(`Runtime process=${runtimeObservedProcess}`);
           }
           if (stagedMediaReadable === false) {
             hookConfigStatus = 'error';
@@ -689,12 +727,19 @@ export async function runFullSystemCheck(options?: {
             notes.push(`Companion state: ${companionState}${readSourceHint}`);
           } else if (companionWaitingRuntime) {
             notes.push(
-              runtimeState === 'runtime_observed'
-                ? `Companion waiting state is stale; runtime already observed${readSourceHint}`
-                : `Companion waiting for first runtime hook observation${readSourceHint}`
+              runtimeObservedFresh
+                ? `Companion waiting state is stale; runtime evidence is fresh${readSourceHint}`
+                : runtimeState === 'runtime_stale'
+                  ? `Companion runtime evidence is stale${
+                      runtimeObservedAgeMs > 0 ? ` (${Math.trunc(runtimeObservedAgeMs)}ms)` : ''
+                    }${readSourceHint}`
+                  : `Companion waiting for fresh runtime hook observation${readSourceHint}`
             );
           } else if (companionReady && companionVersion.length > 0) {
             notes.push(`Companion version ${companionVersion}`);
+          }
+          if (runtimeObservedProcess.length > 0) {
+            notes.push(`Runtime process=${runtimeObservedProcess}`);
           }
           if (stagedMediaReadable === false) {
             notes.push('Staged media missing/unreadable');

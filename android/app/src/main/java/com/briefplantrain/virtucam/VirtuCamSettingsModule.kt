@@ -462,18 +462,54 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("runtimeStateJsonExists", runtimeStateJson.exists())
 
             val runtimeState = readRuntimeState()
+            val runtimeObservation = getRuntimeHookObservation()
             val configPrimaryReadable =
                 runtimeState.configPrimaryReadable || isPathReadable(primaryConfig) || isPathReadable(primaryConfigLegacy)
             val configIpcReadable =
                 runtimeState.configIpcReadable || (configJson.exists() && configJson.canRead())
-            val hookLastReadOk = runtimeState.hookLastReadOk || configPrimaryReadable
-            val runtimeReady = runtimeState.runtimeReady && hookLastReadOk
+            val hookLastReadOk = runtimeState.hookLastReadOk
+            val runtimeObservedProcess = when {
+                runtimeObservation.process.isNotBlank() -> runtimeObservation.process
+                runtimeState.runtimeObservedProcess.isNotBlank() -> runtimeState.runtimeObservedProcess
+                else -> ""
+            }
+            val runtimeObservedEpochMs = when {
+                runtimeObservation.epochMillis > 0L -> runtimeObservation.epochMillis
+                runtimeState.runtimeObservedEpochMs > 0L -> runtimeState.runtimeObservedEpochMs
+                else -> 0L
+            }
+            val runtimeObservedAgeMs = when {
+                runtimeObservation.epochMillis > 0L -> runtimeObservation.ageMs
+                runtimeState.runtimeObservedAgeMs > 0L -> runtimeState.runtimeObservedAgeMs
+                else -> 0L
+            }
+            val runtimeObservedFresh = when {
+                runtimeObservation.observed -> runtimeObservation.fresh
+                runtimeState.runtimeObservedEpochMs > 0L -> runtimeState.runtimeObservedFresh
+                else -> false
+            }
+            val runtimeEvidenceSource = when {
+                runtimeObservation.source != "none" -> runtimeObservation.source
+                runtimeState.runtimeEvidenceSource.isNotBlank() -> runtimeState.runtimeEvidenceSource
+                else -> "none"
+            }
+            val runtimeReady = runtimeState.runtimeReady && hookLastReadOk && runtimeObservedFresh
             val updatedEpochMs = runtimeState.updatedEpochMs
             val runtimeFresh =
                 updatedEpochMs > 0L && (System.currentTimeMillis() - updatedEpochMs) <= RUNTIME_STATE_STALE_MS
 
             result.putBoolean("runtime_ready", runtimeReady)
             result.putBoolean("runtimeReady", runtimeReady)
+            result.putBoolean("runtimeObservedFresh", runtimeObservedFresh)
+            result.putBoolean("runtime_observed_fresh", runtimeObservedFresh)
+            result.putString("runtimeObservedProcess", runtimeObservedProcess)
+            result.putString("runtime_observed_process", runtimeObservedProcess)
+            result.putDouble("runtimeObservedAgeMs", runtimeObservedAgeMs.toDouble())
+            result.putDouble("runtime_observed_age_ms", runtimeObservedAgeMs.toDouble())
+            result.putDouble("runtimeObservedEpochMs", runtimeObservedEpochMs.toDouble())
+            result.putDouble("runtime_observed_epoch_ms", runtimeObservedEpochMs.toDouble())
+            result.putString("runtimeEvidenceSource", runtimeEvidenceSource)
+            result.putString("runtime_evidence_source", runtimeEvidenceSource)
             result.putBoolean("config_primary_readable", configPrimaryReadable)
             result.putBoolean("configPrimaryReadable", configPrimaryReadable)
             result.putBoolean("config_ipc_readable", configIpcReadable)
@@ -809,6 +845,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             val runtimeObservation = getRuntimeHookObservation()
             val runtimeHookObserved = runtimeObservation.observed
             val runtimeObservedAt = runtimeObservation.epochMillis
+            val runtimeObservedFresh = runtimeObservation.fresh
+            val runtimeObservedProcess = runtimeObservation.process
+            val runtimeObservedAgeMs = runtimeObservation.ageMs
+            val runtimeEvidenceSource = runtimeObservation.source
             if (runtimeHookObserved && detectionMethod == "none") {
                 detectionMethod = "runtime_log"
             }
@@ -868,8 +908,8 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 false
             }
             val runtimeState = readRuntimeState()
-            val hookLastReadOk = runtimeState.hookLastReadOk || configPrimaryReadable
-            val runtimeReady = runtimeState.runtimeReady && hookLastReadOk
+            val hookLastReadOk = runtimeState.hookLastReadOk
+            val runtimeReady = runtimeState.runtimeReady && hookLastReadOk && runtimeObservedFresh
             val effectiveSourceMode = if (sourceNeedsFile && !stagedMediaReady) {
                 "black"
             } else {
@@ -884,7 +924,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 configPrimaryReadable &&
                 hookLastReadOk &&
                 stagedMediaReady &&
-                runtimeHookObserved
+                runtimeObservedFresh
             
             // Backward-compatible fields
             result.putBoolean("xposedActive", moduleLoaded)
@@ -903,6 +943,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("runtimeHookObserved", runtimeHookObserved)
             result.putBoolean("markerRequired", false)
             result.putDouble("runtimeObservedAt", runtimeObservedAt.toDouble())
+            result.putBoolean("runtimeObservedFresh", runtimeObservedFresh)
+            result.putString("runtimeObservedProcess", runtimeObservedProcess)
+            result.putDouble("runtimeObservedAgeMs", runtimeObservedAgeMs.toDouble())
+            result.putString("runtimeEvidenceSource", runtimeEvidenceSource)
             result.putString("mappingFailureReason", mappingFailureReason ?: "")
             result.putString("activeSourceMode", runtimeState.activeSourceMode)
             result.putString("sourceModeEffective", runtimeState.sourceModeEffective.ifBlank { effectiveSourceMode })
@@ -926,6 +970,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +
                 "hookConfigured=$hookConfigured, hookReady=$hookReady, lsposedInstalled=$lsposedExists, " +
                 "configPrimaryReadable=$configPrimaryReadable, hookLastReadOk=$hookLastReadOk, stagedMediaReady=$stagedMediaReady, runtimeHookObserved=$runtimeHookObserved, " +
+                "runtimeObservedFresh=$runtimeObservedFresh, runtimeObservedProcess=$runtimeObservedProcess, runtimeObservedAgeMs=$runtimeObservedAgeMs, " +
                 "method=$detectionMethod, markerSource=$markerSource, path=$detectedPath, configuredTargets=$configuredTargets, scopedTargets=$scopedTargets, " +
                 "broadScope=$broadScopePackages, runtimeObservedAt=$runtimeObservedAt, mappingFailureReason=${mappingFailureReason ?: "none"}")
             
@@ -949,6 +994,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putBoolean("runtimeHookObserved", false)
             result.putBoolean("markerRequired", false)
             result.putDouble("runtimeObservedAt", 0.0)
+            result.putBoolean("runtimeObservedFresh", false)
+            result.putString("runtimeObservedProcess", "")
+            result.putDouble("runtimeObservedAgeMs", 0.0)
+            result.putString("runtimeEvidenceSource", "none")
             result.putString("mappingFailureReason", "")
             result.putString("activeSourceMode", "black")
             result.putString("sourceModeEffective", "black")
@@ -1350,9 +1399,9 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         try {
             val result = Arguments.createMap()
 
-            val modulesLogs = executeRootCommand(
-                "grep -h 'VirtuCam/XposedEntry:' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 800"
-            )
+            val modulesLogs = sortLsposedLinesByTimestamp(
+                readLsposedLogLines("VirtuCam/XposedEntry:")
+            ).takeLast(800).joinToString("\n")
             val source: String
             val logs: String
             if (modulesLogs.isNotBlank()) {
@@ -1900,7 +1949,12 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         val lastErrorCode: String = "",
         val lastErrorMessage: String = "",
         val lastOkEpochMs: Long = 0L,
-        val updatedEpochMs: Long = 0L
+        val updatedEpochMs: Long = 0L,
+        val runtimeObservedProcess: String = "",
+        val runtimeObservedEpochMs: Long = 0L,
+        val runtimeObservedAgeMs: Long = 0L,
+        val runtimeObservedFresh: Boolean = false,
+        val runtimeEvidenceSource: String = "none"
     )
 
     private fun safeReadStateFile(file: File): StateFileRead {
@@ -2009,6 +2063,31 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     listOf("updated_epoch_ms", "updatedEpochMs"),
                     0L
                 )
+                val runtimeObservedProcess = jsonString(
+                    obj,
+                    listOf("runtime_observed_process", "runtimeObservedProcess"),
+                    ""
+                )
+                val runtimeObservedEpochMs = jsonLong(
+                    obj,
+                    listOf("runtime_observed_epoch_ms", "runtimeObservedEpochMs"),
+                    0L
+                )
+                val runtimeObservedAgeMs = jsonLong(
+                    obj,
+                    listOf("runtime_observed_age_ms", "runtimeObservedAgeMs"),
+                    0L
+                )
+                val runtimeObservedFresh = jsonBoolean(
+                    obj,
+                    listOf("runtime_observed_fresh", "runtimeObservedFresh"),
+                    false
+                )
+                val runtimeEvidenceSource = jsonString(
+                    obj,
+                    listOf("runtime_evidence_source", "runtimeEvidenceSource"),
+                    "none"
+                )
                 return RuntimeState(
                     runtimeReady = runtimeReady,
                     configPrimaryReadable = configPrimaryReadable,
@@ -2019,7 +2098,12 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     lastErrorCode = lastErrorCode,
                     lastErrorMessage = lastErrorMessage,
                     lastOkEpochMs = lastOkEpochMs,
-                    updatedEpochMs = updatedEpochMs
+                    updatedEpochMs = updatedEpochMs,
+                    runtimeObservedProcess = runtimeObservedProcess,
+                    runtimeObservedEpochMs = runtimeObservedEpochMs,
+                    runtimeObservedAgeMs = runtimeObservedAgeMs,
+                    runtimeObservedFresh = runtimeObservedFresh,
+                    runtimeEvidenceSource = runtimeEvidenceSource
                 )
             } catch (e: Exception) {
                 android.util.Log.w("VirtuCamSettings", "Runtime state parse error: ${e.message}")
@@ -2225,22 +2309,123 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     private data class RuntimeObservation(
-        val observed: Boolean,
-        val epochMillis: Long,
-        val line: String
+        val observed: Boolean = false,
+        val fresh: Boolean = false,
+        val epochMillis: Long = 0L,
+        val ageMs: Long = 0L,
+        val process: String = "",
+        val source: String = "none",
+        val line: String = ""
     )
 
-    private fun getRuntimeHookObservation(): RuntimeObservation {
-        val line = executeRootCommand(
-            "grep -h 'VirtuCam/XposedEntry: module active in process:' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1"
-        ).trim()
-        if (line.isBlank()) {
-            return RuntimeObservation(false, 0L, "")
+    private fun readLsposedLogLines(pattern: String, regex: Boolean = false): List<String> {
+        val grepFlag = if (regex) "-E " else ""
+        val output = executeRootCommand(
+            "grep -h $grepFlag${escapeShellArg(pattern)} /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null"
+        )
+        if (output.isBlank()) return emptyList()
+        return output
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toList()
+    }
+
+    private fun sortLsposedLinesByTimestamp(lines: List<String>): List<String> {
+        if (lines.size <= 1) return lines
+        val parsed = lines.mapIndexed { index, line ->
+            Triple(index, parseLsposedTimestampEpoch(line), line)
         }
+        if (parsed.none { it.second > 0L }) return lines
+        return parsed
+            .sortedWith(
+                compareBy<Triple<Int, Long, String>>(
+                    { if (it.second > 0L) 0 else 1 },
+                    { it.second },
+                    { it.first }
+                )
+            )
+            .map { it.third }
+    }
+
+    private fun selectLatestLsposedLine(lines: List<String>): String {
+        if (lines.isEmpty()) return ""
+        var selected = lines.last()
+        var selectedEpoch = parseLsposedTimestampEpoch(selected)
+        for (line in lines) {
+            val epoch = parseLsposedTimestampEpoch(line)
+            if (epoch > selectedEpoch || (epoch == selectedEpoch && epoch > 0L)) {
+                selected = line
+                selectedEpoch = epoch
+            }
+        }
+        return if (selectedEpoch > 0L) selected else lines.last()
+    }
+
+    private fun getLatestLsposedLogLine(pattern: String, regex: Boolean = false): String {
+        val lines = readLsposedLogLines(pattern, regex)
+        return selectLatestLsposedLine(lines)
+    }
+
+    private fun getRuntimeHookObservation(): RuntimeObservation {
+        val activeLine = getLatestLsposedLogLine("VirtuCam/XposedEntry: module active in process:")
+        val mappingLine = getLatestLsposedLogLine("VirtuCam/XposedEntry: createCaptureSession")
+        val activeEpoch = parseLsposedTimestampEpoch(activeLine)
+        val mappingEpoch = parseLsposedTimestampEpoch(mappingLine)
+
+        val selectedLine: String
+        val selectedSource: String
+        when {
+            activeLine.isNotBlank() && mappingLine.isNotBlank() -> {
+                if (activeEpoch >= mappingEpoch) {
+                    selectedLine = activeLine
+                    selectedSource = "module_active"
+                } else {
+                    selectedLine = mappingLine
+                    selectedSource = "mapping"
+                }
+            }
+            activeLine.isNotBlank() -> {
+                selectedLine = activeLine
+                selectedSource = "module_active"
+            }
+            mappingLine.isNotBlank() -> {
+                selectedLine = mappingLine
+                selectedSource = "mapping"
+            }
+            else -> return RuntimeObservation()
+        }
+
+        val epochMillis = parseLsposedTimestampEpoch(selectedLine)
+        val ageMs = if (epochMillis > 0L) {
+            (System.currentTimeMillis() - epochMillis).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val fresh = epochMillis > 0L && ageMs <= RUNTIME_STATE_STALE_MS
+        val process = when {
+            selectedSource == "module_active" ->
+                Regex("module active in process:\\s*([^\\s]+)")
+                    .find(selectedLine)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    .orEmpty()
+            else ->
+                Regex("(?:proc|process|pkg|package)=([^,\\s]+)")
+                    .find(selectedLine)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    .orEmpty()
+        }
+
         return RuntimeObservation(
             observed = true,
-            epochMillis = parseLsposedTimestampEpoch(line),
-            line = line
+            fresh = fresh,
+            epochMillis = epochMillis,
+            ageMs = ageMs,
+            process = process,
+            source = selectedSource,
+            line = selectedLine
         )
     }
 
@@ -2259,9 +2444,10 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     private fun getLatestMappingFailureReason(): String? {
-        val line = executeRootCommand(
-            "grep -h -E 'failed to set mapped surface; rolled back|NoSuchMethodError: android.hardware.camera2.params.OutputConfiguration#setSurface' /data/adb/lspd/log/modules_*.log /data/adb/lspd/log.old/modules_*.log 2>/dev/null | tail -n 1"
-        ).trim()
+        val line = getLatestLsposedLogLine(
+            "failed to set mapped surface; rolled back|NoSuchMethodError: android.hardware.camera2.params.OutputConfiguration#setSurface",
+            regex = true
+        )
         if (line.isBlank()) return null
         return when {
             line.contains("NoSuchMethodError: android.hardware.camera2.params.OutputConfiguration#setSurface") ->

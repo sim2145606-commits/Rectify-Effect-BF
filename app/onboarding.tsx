@@ -92,12 +92,13 @@ function evaluateDemoResult(
   const companionCheck = findCheck('Companion Status');
   const ipcReady = findCheck('IPC Config')?.status === 'pass' && rawInfo.ipcConfigReady;
   const runtimeObserved = rawInfo.runtimeHookObserved;
+  const runtimeObservedFresh = rawInfo.runtimeObservedFresh;
   const companionReady =
-    companionCheck?.status === 'pass' || (companionCheck?.status === 'warn' && runtimeObserved);
+    companionCheck?.status === 'pass' || (companionCheck?.status === 'warn' && runtimeObservedFresh);
   const mappedPositive = (rawInfo.latestMappedCount ?? 0) > 0;
   const hookReadyPath =
     rawInfo.hookReady ||
-    (rawInfo.runtimeHookObserved &&
+    (runtimeObservedFresh &&
       rawInfo.ipcConfigReady &&
       (rawInfo.stagedMediaReady || mappedPositive));
 
@@ -105,8 +106,8 @@ function evaluateDemoResult(
     return {
       pass: false,
       detail:
-        companionCheck?.status === 'warn' && !runtimeObserved
-          ? 'Companion is waiting for first runtime observation. Open stock camera and retry verify.'
+        companionCheck?.status === 'warn' && !runtimeObservedFresh
+          ? 'Companion is waiting for fresh runtime observation. Open stock camera and retry verify.'
           : 'Companion/config not ready. Fix IPC config staging in Settings > Diagnostics.',
     };
   }
@@ -120,6 +121,12 @@ function evaluateDemoResult(
     return {
       pass: false,
       detail: 'Runtime hook not observed. Open stock camera for 2-3 seconds, then verify again.',
+    };
+  }
+  if (!runtimeObservedFresh) {
+    return {
+      pass: false,
+      detail: 'Runtime evidence is stale. Open stock camera again to refresh observation before verify.',
     };
   }
   if (!mappedPositive) {
