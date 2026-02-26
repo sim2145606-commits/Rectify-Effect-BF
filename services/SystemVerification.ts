@@ -89,6 +89,7 @@ type XposedStatusResult = {
   runtimeUpdatedEpochMs?: number;
   allowBroadScope?: boolean;
   vcamCompatibilityMode?: boolean;
+  vcamCompatibilityForced?: boolean;
 };
 
 type IpcStatusResult = {

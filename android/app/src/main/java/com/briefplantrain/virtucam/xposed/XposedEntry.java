@@ -194,6 +194,14 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                     "createCaptureSession(List<Surface>)")) {
                                 return;
                             }
+                            if (engine.isVcamCompatibilityModeEnabled()) {
+                                LogUtil.iRateLimited(
+                                        "vcam_takeover_fallback:createCaptureSession(List<Surface>)",
+                                        2000L,
+                                        TAG,
+                                        "createCaptureSession(List<Surface>) vcam_takeover_fallback: takeover returned false, using remap"
+                                );
+                            }
                             engine.clearVcamCompatibilityAliases();
                             Object arg0 = param.args[0];
                             if (!(arg0 instanceof List)) return;
@@ -222,6 +230,14 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                     0,
                                     "createConstrainedHighSpeedCaptureSession")) {
                                 return;
+                            }
+                            if (engine.isVcamCompatibilityModeEnabled()) {
+                                LogUtil.iRateLimited(
+                                        "vcam_takeover_fallback:createConstrainedHighSpeedCaptureSession",
+                                        2000L,
+                                        TAG,
+                                        "createConstrainedHighSpeedCaptureSession vcam_takeover_fallback: takeover returned false, using remap"
+                                );
                             }
                             engine.clearVcamCompatibilityAliases();
                             Object arg0 = param.args[0];
@@ -254,6 +270,14 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                         "createReprocessableCaptureSession")) {
                                     return;
                                 }
+                                if (engine.isVcamCompatibilityModeEnabled()) {
+                                    LogUtil.iRateLimited(
+                                            "vcam_takeover_fallback:createReprocessableCaptureSession",
+                                            2000L,
+                                            TAG,
+                                            "createReprocessableCaptureSession vcam_takeover_fallback: takeover returned false, using remap"
+                                    );
+                                }
                                 engine.clearVcamCompatibilityAliases();
                                 Object arg1 = param.args[1];
                                 if (!(arg1 instanceof List)) return;
@@ -285,6 +309,14 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                         1,
                                         "createReprocessableCaptureSessionByConfigurations")) {
                                     return;
+                                }
+                                if (engine.isVcamCompatibilityModeEnabled()) {
+                                    LogUtil.iRateLimited(
+                                            "vcam_takeover_fallback:createReprocessableCaptureSessionByConfigurations",
+                                            2000L,
+                                            TAG,
+                                            "createReprocessableCaptureSessionByConfigurations vcam_takeover_fallback: takeover returned false, using remap"
+                                    );
                                 }
                                 engine.clearVcamCompatibilityAliases();
                                 Object arg1 = param.args[1];
@@ -344,6 +376,14 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                     "createCaptureSessionByOutputConfigurations")) {
                                 return;
                             }
+                            if (engine.isVcamCompatibilityModeEnabled()) {
+                                LogUtil.iRateLimited(
+                                        "vcam_takeover_fallback:createCaptureSessionByOutputConfigurations",
+                                        2000L,
+                                        TAG,
+                                        "createCaptureSessionByOutputConfigurations vcam_takeover_fallback: takeover returned false, using remap"
+                                );
+                            }
                             engine.clearVcamCompatibilityAliases();
                             Object arg0 = param.args[0];
                             if (!(arg0 instanceof List)) return;
@@ -402,6 +442,14 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                         0,
                                         "createCaptureSession(SessionConfiguration)")) {
                                     return;
+                                }
+                                if (engine.isVcamCompatibilityModeEnabled()) {
+                                    LogUtil.iRateLimited(
+                                            "vcam_takeover_fallback:createCaptureSession(SessionConfiguration)",
+                                            2000L,
+                                            TAG,
+                                            "createCaptureSession(SessionConfiguration) vcam_takeover_fallback: takeover returned false, using remap"
+                                    );
                                 }
                                 engine.clearVcamCompatibilityAliases();
                                 Object arg0 = param.args[0];
@@ -688,6 +736,12 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         engine.enableVcamCompatibilityAliases(originals, takeoverSurface);
         param.args[argIndex] = takeoverOnly;
         LogUtil.iRateLimited(
+                "vcam_takeover_applied:" + hookName,
+                2000L,
+                TAG,
+                hookName + " vcam_takeover_applied originals=" + originals.size() + " outputs=1"
+        );
+        LogUtil.iRateLimited(
                 "vcam-compat-surface-list:" + hookName,
                 2000L,
                 TAG,
@@ -735,6 +789,12 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         takeoverOnly.add(mapped.outputConfig);
         engine.enableVcamCompatibilityAliases(originals, takeoverSurface);
         param.args[argIndex] = takeoverOnly;
+        LogUtil.iRateLimited(
+                "vcam_takeover_applied:" + hookName,
+                2000L,
+                TAG,
+                hookName + " vcam_takeover_applied originals=" + originals.size() + " outputs=1"
+        );
         LogUtil.iRateLimited(
                 "vcam-compat-output-config-list:" + hookName,
                 2000L,
@@ -785,6 +845,12 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         }
         engine.enableVcamCompatibilityAliases(originals, takeoverSurface);
         param.args[argIndex] = rebuilt;
+        LogUtil.iRateLimited(
+                "vcam_takeover_applied:" + hookName,
+                2000L,
+                TAG,
+                hookName + " vcam_takeover_applied originals=" + originals.size() + " outputs=1"
+        );
         LogUtil.iRateLimited(
                 "vcam-compat-session-config:" + hookName,
                 2000L,

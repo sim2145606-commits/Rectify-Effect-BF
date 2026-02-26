@@ -255,9 +255,13 @@ public final class VirtualCameraEngine {
         }
     }
 
+    /**
+     * VCAM compatibility mode is now forced ON whenever the hook is active for a targeted package.
+     * The stored vcamCompatibilityMode config field is ignored; this returns true when enabled + targeted.
+     */
     public boolean isVcamCompatibilityModeEnabled() {
         ConfigSnapshot cfg = configLoader.getSnapshot();
-        return cfg.enabled && cfg.vcamCompatibilityMode && cfg.isTargeted(packageName);
+        return cfg.isEffectiveVcamCompatibilityMode(packageName);
     }
 
     public void enableVcamCompatibilityAliases(List<Surface> originals, Surface takeoverSurface) {
@@ -294,7 +298,8 @@ public final class VirtualCameraEngine {
                 ",targetPackages=" + targetCount +
                 ",sourceModeDesired=" + cfg.sourceMode +
                 ",sourceModeEffective=" + lastEffectiveSourceMode +
-                ",vcamCompat=" + cfg.vcamCompatibilityMode +
+                ",vcamCompat=" + cfg.isEffectiveVcamCompatibilityMode(packageName) +
+                ",vcamCompatForced=true" +
                 ",hasMedia=" + (cfg.mediaSourcePath != null && !cfg.mediaSourcePath.trim().isEmpty());
     }
 

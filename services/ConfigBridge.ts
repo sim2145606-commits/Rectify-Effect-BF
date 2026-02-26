@@ -592,7 +592,7 @@ export async function readBridgeConfig(): Promise<BridgeConfig> {
     targetMode: 'all',
     sourceMode: 'black',
     allowBroadScope: false,
-    vcamCompatibilityMode: false,
+    vcamCompatibilityMode: true,
     targetPackages: [],
   };
 
@@ -697,7 +697,7 @@ export async function syncAllSettings(force = false): Promise<void> {
     const offsetXValue = parseStoredNumber(offsetX, 0.0);
     const offsetYValue = parseStoredNumber(offsetY, 0.0);
     const allowBroadScopeValue = parseStoredBoolean(allowBroadScopeRaw, false);
-    const vcamCompatibilityModeValue = parseStoredBoolean(vcamCompatibilityModeRaw, false);
+    const vcamCompatibilityModeValue = true; // Forced ON: runtime always uses VCAM takeover
 
     let cameraTarget: CameraTarget = 'none';
     if (front && back) {

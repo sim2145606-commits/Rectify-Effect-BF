@@ -965,6 +965,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putString("broadScopePackages", broadScopePackages.joinToString(","))
             result.putBoolean("allowBroadScope", allowBroadScope)
             result.putBoolean("vcamCompatibilityMode", vcamCompatibilityMode)
+            result.putBoolean("vcamCompatibilityForced", true)
             
             android.util.Log.d("VirtuCamSettings",
                 "Detection results: moduleLoaded=$moduleLoaded, moduleScoped=$moduleScoped, " +

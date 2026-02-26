@@ -594,7 +594,7 @@ export default function OnboardingScreen() {
 
               {tutorialStepIndex === 4 && (
                 <>
-                  <Text style={[styles.stepBodyText, { color: colors.textSecondary }]}>Run guided demo: arm config, open stock camera, verify hook evidence.</Text>
+                  <Text style={[styles.stepBodyText, { color: colors.textSecondary }]}>Run guided demo: arm config, open stock camera, verify hook evidence. VCAM compatibility takeover is always active for targeted apps. If no media is selected, output will be intentionally black.</Text>
                   <View style={styles.actionsRow}>
                     <MiniActionButton icon="construct" label="Arm Demo" onPress={handleArmDemo} />
                     <MiniActionButton icon="camera" label="Open Camera" onPress={handleOpenStockCamera} />
@@ -650,8 +650,8 @@ export default function OnboardingScreen() {
                 <>
                   <Text style={[styles.stepBodyText, { color: colors.textSecondary }]}> 
                     {demoState === 'pass'
-                      ? 'Demo passed. You are ready to use hook pipeline.'
-                      : 'If demo failed, open diagnostics and resolve reported blockers.'}
+                      ? 'Demo passed. You are ready to use hook pipeline. VCAM compatibility is forced ON.'
+                      : 'If demo failed, open diagnostics and resolve reported blockers. If hook is active but output is black, stage media in Studio.'}
                   </Text>
                   <View style={styles.actionsRow}>
                     <MiniActionButton icon="settings" label="Open Settings" onPress={() => router.push('/(tabs)/settings')} />

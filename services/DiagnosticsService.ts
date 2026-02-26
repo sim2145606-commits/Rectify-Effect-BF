@@ -41,6 +41,7 @@ type XposedStatusResult = {
   runtimeUpdatedEpochMs?: number;
   allowBroadScope?: boolean;
   vcamCompatibilityMode?: boolean;
+  vcamCompatibilityForced?: boolean;
 };
 
 type IpcStatusResult = {
@@ -160,6 +161,7 @@ export type RawXposedDebugInfo = {
   lastErrorCode: string;
   lastErrorMessage: string;
   vcamCompatibilityMode: boolean;
+  vcamCompatibilityForced: boolean;
   mappingHint: string;
   quickFixHint: string;
 };
@@ -814,6 +816,32 @@ export async function runDiagnostics(
     });
   }
 
+  // 13. VCAM Compatibility Forced Status
+  {
+    const vcamForced = xposedStatus?.vcamCompatibilityForced === true;
+    const effectiveSource = String(
+      ipcStatus?.sourceModeEffective ??
+        ipcStatus?.source_mode_effective ??
+        xposedStatus?.sourceModeEffective ??
+        'unknown'
+    ).trim().toLowerCase();
+    const isBlackOutput = effectiveSource === 'black';
+    const hookActive = xposedStatus?.hookReady === true || xposedStatus?.runtimeHookObserved === true;
+
+    let vcamDetail = vcamForced
+      ? 'VCAM compatibility mode is forced ON for all targeted apps.'
+      : 'VCAM compatibility mode is not forced (legacy config).';
+    if (hookActive && isBlackOutput) {
+      vcamDetail += ' Hook active, output intentionally black (no media selected or sourceMode=black).';
+    }
+    pushCheck({
+      name: 'VCAM Compat',
+      description: 'Forced VCAM compatibility takeover mode',
+      status: vcamForced ? 'pass' : 'warn',
+      detail: vcamDetail,
+    });
+  }
+
   const passCount = checks.filter(c => c.status === 'pass').length;
   const failCount = checks.filter(c => c.status === 'fail').length;
   const warnCount = checks.filter(c => c.status === 'warn').length;
@@ -884,6 +912,7 @@ export async function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo | null
       lastErrorCode: String(xposedStatus.lastErrorCode ?? ''),
       lastErrorMessage: String(xposedStatus.lastErrorMessage ?? ''),
       vcamCompatibilityMode: xposedStatus.vcamCompatibilityMode === true,
+      vcamCompatibilityForced: xposedStatus.vcamCompatibilityForced === true,
       mappingHint,
       quickFixHint,
     };

@@ -164,7 +164,7 @@ export default function SettingsScreen() {
   );
   const [vcamCompatibilityMode, setVcamCompatibilityMode] = useStorage<boolean>(
     STORAGE_KEYS.VCAM_COMPATIBILITY_MODE,
-    false
+    true
   );
   const [isPickerVisible, setIsPickerVisible] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -220,10 +220,10 @@ export default function SettingsScreen() {
     writeBridgeConfig({
       targetMode: mode,
       allowBroadScope,
-      vcamCompatibilityMode,
+      vcamCompatibilityMode: true,
       targetPackages: enabledPackages,
     }).catch(() => {});
-  }, [allowBroadScope, vcamCompatibilityMode]);
+  }, [allowBroadScope]);
 
   const loadInstalledApps = useCallback(async () => {
     if (!VirtuCamSettings?.getAllInstalledApps) {
@@ -817,23 +817,19 @@ export default function SettingsScreen() {
               { borderColor: colors.border, backgroundColor: colors.surfaceLight },
             ]}
           >
-            <View style={styles.scopeOverrideInfo}>
+            <View style={[styles.scopeOverrideInfo]}>
               <Text style={[styles.scopeOverrideTitle, { color: colors.textPrimary }]}>
                 VCAM Compatibility Mode
               </Text>
               <Text style={[styles.scopeOverrideDesc, { color: colors.textTertiary }]}>
-                Strict single-surface takeover for compatibility with unstable camera apps (Messenger/OEM camera).
+                VCAM compatibility is always enabled for stability. Strict single-surface takeover is forced ON for all targeted apps.
               </Text>
             </View>
-            <Switch
-              value={vcamCompatibilityMode}
-              onValueChange={value => {
-                lightImpact();
-                setVcamCompatibilityMode(value);
-              }}
-              trackColor={{ false: colors.inactive, true: colors.electricBlue + '60' }}
-              thumbColor={vcamCompatibilityMode ? colors.electricBlue : colors.textTertiary}
-            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ color: colors.electricBlue, fontWeight: '700', fontSize: FontSize.sm }}>
+                Forced ON
+              </Text>
+            </View>
           </View>
 
           {scopeMismatchDetail.length > 0 && (
