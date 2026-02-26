@@ -24,27 +24,7 @@ module.exports = {
         android: {},
       },
     },
-    'react-native-svg': {
-      platforms: {
-        android: {},
-      },
-    },
-    'react-native-webview': {
-      platforms: {
-        android: {},
-      },
-    },
     '@react-native-async-storage/async-storage': {
-      platforms: {
-        android: {},
-      },
-    },
-    '@react-native-community/datetimepicker': {
-      platforms: {
-        android: {},
-      },
-    },
-    'react-native-worklets-core': {
       platforms: {
         android: {},
       },
