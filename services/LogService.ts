@@ -5,7 +5,17 @@ import { getSystemInfo } from './SystemVerification';
 
 // Diagnostics stubs (DiagnosticsService removed)
 type DiagnosticsReport = { checks: unknown[]; passCount: number; failCount: number; warnCount: number; timestamp: number };
-type RawXposedDebugInfo = { hookStatus?: string; error?: string };
+type RawXposedDebugInfo = {
+  hookStatus?: string;
+  error?: string;
+  hookReady?: boolean;
+  runtimeHookObserved?: boolean;
+  mappingLogSource?: string;
+  latestMappedCount?: number | null;
+  latestZeroReason?: string | null;
+  mappingFailureReason?: string | null;
+  quickFixHint?: string;
+};
 function runDiagnostics(): Promise<DiagnosticsReport> {
   return Promise.resolve({ checks: [], passCount: 0, failCount: 0, warnCount: 0, timestamp: Date.now() });
 }

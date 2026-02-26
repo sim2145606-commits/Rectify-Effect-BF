@@ -6,6 +6,8 @@ import { normalizeState, ipcBoolean, ipcString, ipcNumber } from './IpcNormalize
 
 const { VirtuCamSettings } = NativeModules;
 
+type PermissionStatus = 'granted' | 'denied' | 'pending';
+
 type IpcFields = Record<string, unknown>;
 
 export type PermissionCheckResult = {

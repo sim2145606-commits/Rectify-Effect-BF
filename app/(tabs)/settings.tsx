@@ -40,14 +40,43 @@ import { syncAllSettings } from '@/services/ConfigBridge';
 // Diagnostics stubs (removed full DiagnosticsService)
 type DiagnosticCheckResult = { name: string; status: 'pass' | 'fail' | 'warn' | 'skip'; description: string; detail?: string };
 type DiagnosticsReport = { checks: DiagnosticCheckResult[]; passCount: number; failCount: number; warnCount: number; timestamp: number };
-type RawXposedDebugInfo = { hookStatus?: string; mappingLog?: string; configSnapshot?: string; error?: string };
+type RawXposedDebugInfo = {
+  hookStatus?: string;
+  mappingLog?: string;
+  configSnapshot?: string;
+  error?: string;
+  broadScopePackages?: string;
+  broadScopeDetected?: boolean;
+  scopedTargetsCount?: number;
+  configuredTargetsCount?: number;
+  detectionMethod?: string;
+  markerSource?: string;
+  scopeEvaluationReason?: string;
+  lsposedPath?: string;
+  configuredTargets?: string;
+  scopedTargets?: string;
+  moduleLoaded?: boolean;
+  moduleScoped?: boolean;
+  hookConfigured?: boolean;
+  hookReady?: boolean;
+  configPrimaryReadable?: boolean;
+  hookLastReadOk?: boolean;
+  runtimeReady?: boolean;
+  sourceModeEffective?: string;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
+  vcamCompatibilityMode?: boolean;
+  mappingHint?: string;
+  quickFixHint?: string;
+  latestZeroReason?: string;
+};
 const runDiagnostics = async (_onProgress?: (c: DiagnosticCheckResult, i: number) => void): Promise<DiagnosticsReport> =>
   ({ checks: [], passCount: 0, failCount: 0, warnCount: 0, timestamp: Date.now() });
 const getRawXposedDebugInfo = async (): Promise<RawXposedDebugInfo> =>
   ({ hookStatus: 'stub', error: 'Diagnostics removed \u2014 use adb logcat' });
 
 // Reset stub (removed full ResetService)
-const resetToDefaults = async (): Promise<{ success: boolean; error?: string }> => {
+const resetToDefaults = async (): Promise<{ success: boolean; error?: string; verification?: { valuesVerified: boolean } }> => {
   const AsyncStorageMod = (await import('@react-native-async-storage/async-storage')).default;
   try {
     await AsyncStorageMod.clear();

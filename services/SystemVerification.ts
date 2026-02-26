@@ -2,7 +2,8 @@ import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type Ionicons from '@expo/vector-icons/Ionicons';
 import type { ComponentProps } from 'react';
-import { DarkColors, STORAGE_KEYS } from '@/constants/theme';\nimport { normalizeState, ipcBoolean, ipcString, ipcNumber } from './IpcNormalize';
+import { DarkColors, STORAGE_KEYS } from '@/constants/theme';
+import { normalizeState, ipcBoolean, ipcString, ipcNumber } from './IpcNormalize';
 
 function getLogger() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports

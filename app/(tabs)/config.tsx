@@ -813,7 +813,7 @@ export default function StudioScreen() {
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Preview</Text>
         </View>
         {selectedMedia ? (
-          <View style={[styles.previewContainer, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+          <View style={[styles.previewContainer, { backgroundColor: colors.surfaceCard, borderColor: colors.border }]}>
             <Image
               source={{ uri: selectedMedia }}
               style={{ width: '100%', height: PREVIEW_HEIGHT, borderRadius: BorderRadius.lg }}
@@ -821,7 +821,7 @@ export default function StudioScreen() {
             />
           </View>
         ) : (
-          <View style={[styles.previewContainer, { backgroundColor: colors.cardBg, borderColor: colors.border, height: PREVIEW_HEIGHT, alignItems: 'center', justifyContent: 'center' }]}>
+          <View style={[styles.previewContainer, { backgroundColor: colors.surfaceCard, borderColor: colors.border, height: PREVIEW_HEIGHT, alignItems: 'center', justifyContent: 'center' }]}>
             <Text style={{ color: colors.textTertiary }}>No media selected</Text>
           </View>
         )}
