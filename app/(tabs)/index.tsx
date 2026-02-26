@@ -270,7 +270,8 @@ export default function Dashboard() {
 
   const handleSetup = useCallback(() => {
     mediumImpact();
-    router.push('/onboarding');
+    // Onboarding removed — navigate to settings for initial setup
+    router.push('/(tabs)/settings');
   }, [mediumImpact, router]);
 
   const activeTargets = [frontCamera && 'Front', backCamera && 'Back'].filter(Boolean);

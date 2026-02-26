@@ -30,15 +30,6 @@ public final class ConfigSnapshot {
     public boolean vcamCompatibilityMode = false;
     public int fps = 30;
 
-    /**
-     * Effective VCAM compatibility mode: always true when hook is enabled and package is targeted.
-     * The stored {@link #vcamCompatibilityMode} field is retained for backward compatibility
-     * but is ignored at runtime — this method is the single source of truth.
-     */
-    public boolean isEffectiveVcamCompatibilityMode(String packageName) {
-        return enabled && isTargeted(packageName);
-    }
-
     public static ConfigSnapshot copyOf(ConfigSnapshot other) {
         ConfigSnapshot out = new ConfigSnapshot();
         if (other == null) return out;

@@ -1,7 +1,0 @@
-id=virtucam_companion
-name=VirtuCam Companion
-version=v1.0.0
-versionCode=100
-author=Rectify
-description=System companion for VirtuCam. Manages IPC channel, SELinux contexts, SharedPreferences access, and LSPosed scope for reliable camera hook activation.
-updateJson=https://raw.githubusercontent.com/ggsetRanges/Rectify-Effect/main/companion-module/update.json

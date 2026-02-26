@@ -4,60 +4,29 @@ import android.util.Log
 import java.io.File
 
 /**
- * Single source of truth for all IPC path constants and helper functions.
- * Used by:
- * - VirtuCamSettingsModule.kt (writes config)
- * - XposedEntry.java (reads/writes hook state)
+ * Single source of truth for config path constants.
+ * Simplified: XSharedPreferences (primary) + persistent JSON (fallback).
+ * No companion module / IPC tmpfs dependency.
  */
 object VirtuCamIPC {
     private const val TAG = "VirtuCamIPC"
     private val markerSkipLogOnce = mutableSetOf<String>()
 
-    // IPC directory tree managed by companion module
-    const val IPC_ROOT = "/dev/virtucam_ipc"
-    const val CONFIG_DIR = "$IPC_ROOT/config"
-    const val STATE_DIR = "$IPC_ROOT/state"
-    const val MEDIA_DIR = "$IPC_ROOT/media"
-    const val LOGS_DIR = "$IPC_ROOT/logs"
-
-    // Config files
-    const val CONFIG_XML = "$CONFIG_DIR/virtucam_config.xml"
-    const val CONFIG_JSON = "$CONFIG_DIR/virtucam_config.json"
-
-    // State files
-    const val MODULE_ACTIVE = "$STATE_DIR/module_active"
-    const val COMPANION_STATUS = "$STATE_DIR/companion_status"
-    const val CONFIG_STATUS = "$STATE_DIR/config_status"
-    const val MARKER_STATUS = "$STATE_DIR/marker_status"
-    const val MARKER_SOURCE = "$STATE_DIR/marker_source"
-    const val SCOPE_STATUS = "$STATE_DIR/scope_status"
-    const val RUNTIME_STATUS = "$STATE_DIR/runtime_status"
-    const val RUNTIME_STATE_JSON = "$STATE_DIR/runtime_state.json"
-    const val SERVICE_COMPLETE_TIME = "$STATE_DIR/service_complete_time"
-    const val BOOT_TIME = "$STATE_DIR/boot_time"
-
-    // Persistent root-only fallback store
+    // Persistent config store (root-writable, readable by hooked processes)
     const val PERSISTENT_ROOT = "/data/adb/virtucam"
     const val PERSISTENT_CONFIG_DIR = "$PERSISTENT_ROOT/config"
-    const val PERSISTENT_STATE_DIR = "$PERSISTENT_ROOT/state"
     const val PERSISTENT_JSON = "$PERSISTENT_CONFIG_DIR/virtucam_config.json"
-    const val PERSISTENT_XML = "$PERSISTENT_CONFIG_DIR/virtucam_config.xml"
     const val PERSISTENT_JSON_LEGACY = "$PERSISTENT_ROOT/virtucam_config.json"
-    const val PERSISTENT_XML_LEGACY = "$PERSISTENT_ROOT/virtucam_config.xml"
-    const val PERSISTENT_RUNTIME_STATE_JSON = "$PERSISTENT_STATE_DIR/runtime_state.json"
+
+    // Media staging directory
+    const val MEDIA_DIR = "$PERSISTENT_ROOT/media"
 
     // Legacy paths (read-only compatibility)
     const val LEGACY_TMP_JSON = "/data/local/tmp/virtucam_config.json"
     const val LEGACY_TMP_ACTIVE = "/data/local/tmp/virtucam_module_active"
 
-    fun isIpcReady(): Boolean {
-        val statusFile = File(COMPANION_STATUS)
-        return try {
-            statusFile.exists() && statusFile.readText().trim() == "ready"
-        } catch (_: Throwable) {
-            false
-        }
-    }
+    // Module active marker
+    const val MODULE_ACTIVE = "$PERSISTENT_ROOT/state/module_active"
 
     fun isModuleActive(): Boolean {
         return File(MODULE_ACTIVE).exists() || File(LEGACY_TMP_ACTIVE).exists()

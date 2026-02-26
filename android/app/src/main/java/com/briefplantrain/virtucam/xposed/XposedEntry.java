@@ -14,8 +14,6 @@ import android.os.Handler;
 import android.view.Surface;
 
 import com.briefplantrain.virtucam.engine.VirtualCameraEngine;
-import com.briefplantrain.virtucam.hooks.HookStrategyRegistry;
-import com.briefplantrain.virtucam.hooks.IHookStrategy;
 import com.briefplantrain.virtucam.util.LogUtil;
 import com.briefplantrain.virtucam.util.VirtuCamIPC;
 
@@ -93,18 +91,6 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
         installImageReaderHook(engine);
         installCaptureRequestHooks(engine);
         installCamera1Hooks(engine);
-
-        // Per-app strategy dispatch
-        try {
-            HookStrategyRegistry registry = HookStrategyRegistry.getInstance();
-            IHookStrategy strategy = registry.getStrategy(lpparam.packageName);
-            if (strategy != null) {
-                LogUtil.d(TAG, "Applying strategy: " + strategy.getStrategyName());
-                strategy.install(lpparam, engine);
-            }
-        } catch (Throwable t) {
-            LogUtil.w(TAG, "Strategy dispatch failed: " + t.getMessage());
-        }
 
         LogUtil.always(TAG, "module active in process: " + key);
         try { VirtuCamIPC.writeModuleActiveMarker(); } catch (Throwable ignored) {}

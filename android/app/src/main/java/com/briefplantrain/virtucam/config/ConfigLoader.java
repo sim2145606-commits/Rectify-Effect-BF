@@ -20,7 +20,6 @@ public final class ConfigLoader {
     public static final String PREFS_FILE = "virtucam_config";
     public static final String PRIMARY_FALLBACK_JSON_PATH = VirtuCamIPC.PERSISTENT_JSON;
     public static final String PRIMARY_FALLBACK_JSON_PATH_LEGACY = VirtuCamIPC.PERSISTENT_JSON_LEGACY;
-    public static final String IPC_FALLBACK_JSON_PATH = VirtuCamIPC.CONFIG_JSON;
     public static final String LEGACY_FALLBACK_JSON_PATH = VirtuCamIPC.LEGACY_TMP_JSON;
     private static final long MAX_CONFIG_SIZE_BYTES = 512 * 1024;
     private static final long LOG_RATE_LIMIT_MS = 30_000L;
@@ -200,22 +199,19 @@ public final class ConfigLoader {
         if (appUidProcess) {
             // App UIDs should avoid /data/adb probing to prevent repeated SELinux denials.
             return new String[]{
-                    IPC_FALLBACK_JSON_PATH,
                     LEGACY_FALLBACK_JSON_PATH
             };
         }
         return new String[]{
-                IPC_FALLBACK_JSON_PATH,
-                LEGACY_FALLBACK_JSON_PATH,
                 PRIMARY_FALLBACK_JSON_PATH,
-                PRIMARY_FALLBACK_JSON_PATH_LEGACY
+                PRIMARY_FALLBACK_JSON_PATH_LEGACY,
+                LEGACY_FALLBACK_JSON_PATH
         };
     }
 
     private static boolean isAllowedFallbackPath(String canonicalPath) {
         return VirtuCamIPC.PERSISTENT_JSON.equals(canonicalPath)
                 || VirtuCamIPC.PERSISTENT_JSON_LEGACY.equals(canonicalPath)
-                || VirtuCamIPC.CONFIG_JSON.equals(canonicalPath)
                 || VirtuCamIPC.LEGACY_TMP_JSON.equals(canonicalPath);
     }
 

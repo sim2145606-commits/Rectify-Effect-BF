@@ -130,8 +130,6 @@ function AppShell() {
       <StatusBar style={isDark ? 'light' : 'dark'} backgroundColor={colors.background} />
       <Stack screenOptions={screenOptions}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="onboarding" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="logs" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="+not-found" />
       </Stack>

@@ -115,6 +115,7 @@ public final class VirtualCameraEngine {
     // Static image / fallback rendering thread
     private HandlerThread renderThread;
     private Handler renderHandler;
+    private volatile int renderGeneration = 0; // prevents stale timer callbacks
 
     private VirtualCameraEngine(String packageName, String processName) {
         this.packageName = packageName;
@@ -763,7 +764,9 @@ public final class VirtualCameraEngine {
 
     private void schedulePeriodicRender(String mediaPath) {
         if (renderHandler == null) return;
+        final int gen = ++renderGeneration; // new generation cancels stale callbacks
         renderHandler.postDelayed(() -> {
+            if (gen != renderGeneration) return; // stale callback — skip
             if (!playbackStarted) return;
             ConfigSnapshot cfg = configLoader.getSnapshot();
             if (!cfg.enabled || !cfg.isTargeted(packageName)) return;
@@ -784,7 +787,7 @@ public final class VirtualCameraEngine {
             }
 
             schedulePeriodicRender(mediaPath);
-        }, 200); // 5fps for static images
+        }, 33); // ~30fps for smooth static image delivery
     }
 
     /** Generate a static NV21 frame from an image file for Camera1 byte-buffer mode. */
@@ -964,6 +967,7 @@ public final class VirtualCameraEngine {
 
     private void stopAllPlayback() {
         playbackStarted = false;
+        renderGeneration++; // cancel any pending schedulePeriodicRender callbacks
 
         synchronized (playerLock) {
             stopPlayer(previewPlayer);

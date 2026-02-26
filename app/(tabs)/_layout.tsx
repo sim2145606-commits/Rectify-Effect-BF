@@ -121,15 +121,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="presets"
-        options={{
-          title: 'Presets',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="layers" library="ionicons" color={color} focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',

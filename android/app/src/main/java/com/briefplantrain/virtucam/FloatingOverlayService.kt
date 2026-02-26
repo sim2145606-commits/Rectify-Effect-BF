@@ -409,11 +409,12 @@ class FloatingOverlayService : Service() {
      */
     private fun flushToIpcJson() {
         try {
-            val configDir = java.io.File(com.briefplantrain.virtucam.util.VirtuCamIPC.CONFIG_DIR)
+            val configDir = java.io.File(com.briefplantrain.virtucam.util.VirtuCamIPC.PERSISTENT_CONFIG_DIR)
+            if (!configDir.exists()) configDir.mkdirs()
             if (!configDir.exists() || !configDir.canWrite()) return
 
             // Read existing config JSON if present, overlay our values
-            val configFile = java.io.File(com.briefplantrain.virtucam.util.VirtuCamIPC.CONFIG_JSON)
+            val configFile = java.io.File(com.briefplantrain.virtucam.util.VirtuCamIPC.PERSISTENT_JSON)
             val json = if (configFile.exists() && configFile.canRead()) {
                 try { org.json.JSONObject(configFile.readText()) } catch (_: Throwable) { org.json.JSONObject() }
             } else {
@@ -425,11 +426,11 @@ class FloatingOverlayService : Service() {
             json.put("offsetX", currentOffsetX.toDouble())
             json.put("offsetY", currentOffsetY.toDouble())
 
-            // Derive scaleX/scaleY from scaleMode
+            // Derive scaleX/scaleY from scaleMode — must match setScaleMode() values
             when (currentScaleMode) {
                 "fit" -> { json.put("scaleX", 1.0); json.put("scaleY", 1.0) }
-                "fill" -> { json.put("scaleX", 1.0); json.put("scaleY", 1.0) }
-                "stretch" -> { json.put("scaleX", 1.0); json.put("scaleY", 1.0) }
+                "fill" -> { json.put("scaleX", 1.5); json.put("scaleY", 1.5) }
+                "stretch" -> { json.put("scaleX", 1.0); json.put("scaleY", 1.5) }
             }
 
             // Atomic write: write to .tmp then rename

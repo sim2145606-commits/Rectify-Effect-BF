@@ -1305,18 +1305,7 @@ export default function SettingsScreen() {
             </View>
           )}
 
-          <Pressable
-            onPress={() => router.push('/logs' as Href)}
-            style={styles.logsLink}
-          >
-            <View style={styles.logsButtonContent}>
-              <Ionicons name="document-text" size={16} color={colors.electricBlue} />
-              <Text style={[styles.logsLinkText, { color: colors.electricBlue }]}>
-                View Diagnostic Logs
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.electricBlue} />
-          </Pressable>
+          {/* Logs viewer removed — use adb logcat for diagnostics */}
         </Card>
       </Animated.View>
 

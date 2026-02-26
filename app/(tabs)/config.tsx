@@ -33,9 +33,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { resolveMediaPath, type ResolvedPath } from '@/services/PathResolver';
 import { writeBridgeConfig, type BridgeConfig } from '@/services/ConfigBridge';
 import { logger } from '@/services/LogService';
-import HUDViewfinder from '@/components/media-studio/HUDViewfinder';
 import SpanScalePanel from '@/components/media-studio/SpanScalePanel';
-import PositionControl from '@/components/media-studio/PositionControl';
 
 const { VirtuCamSettings } = NativeModules;
 
@@ -808,25 +806,25 @@ export default function StudioScreen() {
         )}
       </Animated.View>
 
-      {/* Live Viewfinder */}
+      {/* Media Preview */}
       <Animated.View entering={isPerformance ? undefined : FadeInDown.delay(200).duration(500)}>
         <View style={styles.sectionHeader}>
           <MaterialCommunityIcons name="monitor-eye" size={16} color={colors.electricBlue} />
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Live Viewfinder</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Preview</Text>
         </View>
-        <HUDViewfinder
-          mediaUri={selectedMedia}
-          rotation={rotation}
-          mirrored={mirrored}
-          flippedVertical={flippedVertical}
-          scaleMode={scaleMode}
-          offsetX={offsetX}
-          offsetY={offsetY}
-          aiOptimize={false}
-          aiSubjectLock={false}
-          aiLoading={false}
-          engineActive={false}
-        />
+        {selectedMedia ? (
+          <View style={[styles.previewContainer, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+            <Image
+              source={{ uri: selectedMedia }}
+              style={{ width: '100%', height: PREVIEW_HEIGHT, borderRadius: BorderRadius.lg }}
+              contentFit="contain"
+            />
+          </View>
+        ) : (
+          <View style={[styles.previewContainer, { backgroundColor: colors.cardBg, borderColor: colors.border, height: PREVIEW_HEIGHT, alignItems: 'center', justifyContent: 'center' }]}>
+            <Text style={{ color: colors.textTertiary }}>No media selected</Text>
+          </View>
+        )}
       </Animated.View>
 
       {/* Span & Scale */}
@@ -837,14 +835,6 @@ export default function StudioScreen() {
         onScaleModeChange={handleScaleModeChange}
         onMirrorToggle={handleMirrorToggle}
         onFlipToggle={handleFlipToggle}
-      />
-
-      {/* Position Control */}
-      <PositionControl
-        offsetX={offsetX}
-        offsetY={offsetY}
-        onOffsetChange={handleOffsetChange}
-        onOffsetCommit={handleOffsetCommit}
       />
 
       {/* Footer spacer */}

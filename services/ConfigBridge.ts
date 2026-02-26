@@ -301,43 +301,8 @@ async function bumpBridgeVersion(): Promise<number> {
   return next;
 }
 
-async function verifyIpcReadinessAfterWrite(): Promise<void> {
-  if (!VirtuCamSettings?.getIpcStatus) return;
-
-  let ipcStatus: Record<string, unknown> | null = null;
-  try {
-    ipcStatus = (await VirtuCamSettings.getIpcStatus()) as Record<string, unknown>;
-  } catch (err: unknown) {
-    throw new Error(`IPC status check failed: ${getErrorMessage(err)}`);
-  }
-
-  if (!ipcStatus) return;
-
-  const ipcRootExists = ipcStatus.ipcRootExists === true;
-  const companionState = String(ipcStatus.companionStatus ?? '').trim().toLowerCase();
-  const configState = String(ipcStatus.configStatus ?? '').trim().toLowerCase();
-  const configPrimaryReadable =
-    ipcStatus.configPrimaryReadable === true || ipcStatus.config_primary_readable === true;
-  const configJsonReady =
-    (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true) ||
-    configState === 'config_ready';
-
-  if (!ipcRootExists) {
-    throw new Error('IPC root missing after bridge write');
-  }
-
-  if (!configPrimaryReadable) {
-    throw new Error('Primary config is missing/unreadable after bridge write');
-  }
-
-  if (!configJsonReady) {
-    logger.warn('IPC mirror config is missing/unreadable after bridge write', 'ConfigBridge');
-  }
-
-  if (companionState === 'scope_mismatch') {
-    throw new Error('IPC companion reports scope mismatch');
-  }
-}
+// IPC readiness check removed — no companion module dependency.
+// Config is written directly to SharedPreferences + persistent JSON.
 
 export type BridgeConfig = {
   enabled: boolean;
@@ -668,6 +633,7 @@ export async function syncAllSettings(force = false): Promise<void> {
       targetAppsRaw,
       allowBroadScopeRaw,
       vcamCompatibilityModeRaw,
+      scaleModeRaw,
     ] = await Promise.all([
       AsyncStorage.getItem(STORAGE_KEYS.HOOK_ENABLED),
       AsyncStorage.getItem(STORAGE_KEYS.HOOK_MEDIA_PATH),
@@ -683,6 +649,7 @@ export async function syncAllSettings(force = false): Promise<void> {
       AsyncStorage.getItem(STORAGE_KEYS.TARGET_APPS),
       AsyncStorage.getItem(STORAGE_KEYS.ALLOW_BROAD_SCOPE),
       AsyncStorage.getItem(STORAGE_KEYS.VCAM_COMPATIBILITY_MODE),
+      AsyncStorage.getItem(STORAGE_KEYS.SCALE_MODE),
     ]);
 
     const enabledValue = parseStoredBoolean(enabled, false);
@@ -697,7 +664,8 @@ export async function syncAllSettings(force = false): Promise<void> {
     const offsetXValue = parseStoredNumber(offsetX, 0.0);
     const offsetYValue = parseStoredNumber(offsetY, 0.0);
     const allowBroadScopeValue = parseStoredBoolean(allowBroadScopeRaw, false);
-    const vcamCompatibilityModeValue = true; // Forced ON: runtime always uses VCAM takeover
+    const scaleModeValue = parseStoredString(scaleModeRaw, 'fit') ?? 'fit';
+    const vcamCompatibilityModeValue = parseStoredBoolean(vcamCompatibilityModeRaw, true);
 
     let cameraTarget: CameraTarget = 'none';
     if (front && back) {
@@ -745,6 +713,7 @@ export async function syncAllSettings(force = false): Promise<void> {
       scaleY: scaleYValue,
       offsetX: offsetXValue,
       offsetY: offsetYValue,
+      scaleMode: scaleModeValue,
       targetMode: effectiveTargetMode,
       sourceMode,
       allowBroadScope: allowBroadScopeValue,
@@ -752,51 +721,28 @@ export async function syncAllSettings(force = false): Promise<void> {
       targetPackages: enabledPackages,
     };
 
-    const maxAttempts = 3;
-    let lastError: unknown = null;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        await writeBridgeConfig(config);
-        await verifyIpcReadinessAfterWrite();
-        publishBridgeSyncState({
-          ok: true,
-          code: null,
-          message: `Bridge sync successful (attempt ${attempt})`,
-          timestamp: Date.now(),
-          attempts: attempt,
-          warningCode: getLatestBridgeSyncState().warningCode ?? null,
-        });
-        return;
-      } catch (err: unknown) {
-        lastError = err;
-        const normalized = normalizeBridgeError(err);
-        const retryable = normalized.code === 'ipc_unready';
-        if (retryable && attempt < maxAttempts) {
-          logger.warn(
-            `Bridge sync attempt ${attempt} failed (${normalized.code}), retrying`,
-            'ConfigBridge',
-            err
-          );
-          await sleep(attempt * 300);
-          continue;
-        }
-
-        publishBridgeSyncState({
-          ok: false,
-          code: normalized.code,
-          message: normalized.message,
-          timestamp: Date.now(),
-          attempts: attempt,
-          warningCode: null,
-        });
-        logger.error(`Failed to sync settings (${normalized.code})`, 'ConfigBridge', err);
-        throw createBridgeError(normalized.message, normalized.code);
-      }
-    }
-
-    if (lastError) {
-      throw lastError;
+    try {
+      await writeBridgeConfig(config);
+      publishBridgeSyncState({
+        ok: true,
+        code: null,
+        message: 'Bridge sync successful',
+        timestamp: Date.now(),
+        attempts: 1,
+        warningCode: getLatestBridgeSyncState().warningCode ?? null,
+      });
+    } catch (err: unknown) {
+      const normalized = normalizeBridgeError(err);
+      publishBridgeSyncState({
+        ok: false,
+        code: normalized.code,
+        message: normalized.message,
+        timestamp: Date.now(),
+        attempts: 1,
+        warningCode: null,
+      });
+      logger.error(`Failed to sync settings (${normalized.code})`, 'ConfigBridge', err);
+      throw createBridgeError(normalized.message, normalized.code);
     }
   } catch (err: unknown) {
     logger.error('Failed to sync settings', 'ConfigBridge', err);
