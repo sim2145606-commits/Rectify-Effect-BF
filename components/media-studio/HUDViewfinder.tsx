@@ -47,13 +47,20 @@ export default function HUDViewfinder({
   aiLoading,
   engineActive,
 }: Props) {
-  const { colors } = useTheme();
+  const { colors, isPerformance } = useTheme();
 
   const scanLineY = useSharedValue(0);
   const scanPulse = useSharedValue(0.3);
   const cornerPulse = useSharedValue(1);
 
   useEffect(() => {
+    if (isPerformance) {
+      // Skip all decorative animations in performance mode
+      scanLineY.value = 0;
+      scanPulse.value = 0;
+      cornerPulse.value = 1;
+      return;
+    }
     scanLineY.value = withRepeat(
       withTiming(1, { duration: 3000, easing: Easing.linear }),
       -1,
@@ -69,7 +76,7 @@ export default function HUDViewfinder({
       -1,
       true
     );
-  }, [scanLineY, scanPulse, cornerPulse]);
+  }, [scanLineY, scanPulse, cornerPulse, isPerformance]);
 
   const scanLineStyle = useAnimatedStyle(() => ({
     top: `${scanLineY.value * 100}%` as `${number}%`,

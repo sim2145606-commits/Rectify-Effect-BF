@@ -9,6 +9,7 @@ public final class LogUtil {
 
     private static volatile boolean verboseLogging = false;
     private static final Map<String, Long> rateLimitedKeys = new ConcurrentHashMap<>();
+    private static final int MAX_RATE_LIMITED_KEYS = 256;
 
     private LogUtil() {}
 
@@ -32,6 +33,7 @@ public final class LogUtil {
         if (last != null && (now - last) < Math.max(0L, minIntervalMs)) {
             return;
         }
+        evictIfNeeded();
         rateLimitedKeys.put(key, now);
         emitXposedOrAndroid(tag, msg, null, Log.DEBUG);
     }
@@ -46,6 +48,7 @@ public final class LogUtil {
         if (last != null && (now - last) < Math.max(0L, minIntervalMs)) {
             return;
         }
+        evictIfNeeded();
         rateLimitedKeys.put(key, now);
         emitXposedOrAndroid(tag, msg, null, Log.INFO);
     }
@@ -91,5 +94,18 @@ public final class LogUtil {
 
     public static void e(String tag, String msg, Throwable tr) {
         emitXposedOrAndroid(tag, msg, tr, Log.ERROR);
+    }
+
+    /** Evict oldest entries when the rate-limit map grows too large. */
+    private static void evictIfNeeded() {
+        if (rateLimitedKeys.size() <= MAX_RATE_LIMITED_KEYS) return;
+        // Remove the oldest half of entries
+        long now = System.currentTimeMillis();
+        long cutoff = now - 60_000L; // entries older than 60s
+        rateLimitedKeys.entrySet().removeIf(e -> e.getValue() < cutoff);
+        // If still too large, just clear
+        if (rateLimitedKeys.size() > MAX_RATE_LIMITED_KEYS) {
+            rateLimitedKeys.clear();
+        }
     }
 }

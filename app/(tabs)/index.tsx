@@ -148,7 +148,12 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    void syncBridgeState();
+    // Debounce: when multiple useStorage values update on initial load,
+    // only trigger one sync after they've all settled.
+    const timer = setTimeout(() => {
+      void syncBridgeState();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [hookEnabled, frontCamera, backCamera, selectedMedia, syncBridgeState]);
 
   useFocusEffect(

@@ -24,7 +24,7 @@ public final class ConfigLoader {
     public static final String LEGACY_FALLBACK_JSON_PATH = VirtuCamIPC.LEGACY_TMP_JSON;
     private static final long MAX_CONFIG_SIZE_BYTES = 512 * 1024;
     private static final long LOG_RATE_LIMIT_MS = 30_000L;
-    private static final long XSP_FAILURE_COOLDOWN_MS = 30_000L;
+    private static final long XSP_FAILURE_COOLDOWN_MS = 5_000L;
     private static final int FIRST_APPLICATION_UID = 10000;
 
     private final long reloadIntervalMs;

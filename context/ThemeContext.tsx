@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getColors, type AppColors, STORAGE_KEYS } from '@/constants/theme';
@@ -64,6 +64,19 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const colors = getColors(isDark, performanceMode);
 
+  const providerValue = useMemo<ThemeContextValue>(
+    () => ({
+      colorMode,
+      setColorMode,
+      performanceMode,
+      setPerformanceMode,
+      colors,
+      isDark,
+      isPerformance: performanceMode,
+    }),
+    [colorMode, setColorMode, performanceMode, setPerformanceMode, colors, isDark]
+  );
+
   if (!ready) {
     const defaultColors = getColors(systemScheme === 'dark', false);
     return (
@@ -84,17 +97,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ThemeContext.Provider
-      value={{
-        colorMode,
-        setColorMode,
-        performanceMode,
-        setPerformanceMode,
-        colors,
-        isDark,
-        isPerformance: performanceMode,
-      }}
-    >
+    <ThemeContext.Provider value={providerValue}>
       {children}
     </ThemeContext.Provider>
   );

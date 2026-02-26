@@ -1,9 +1,5 @@
 package com.briefplantrain.virtucam.engine;
 
-import android.media.Image;
-import android.media.ImageReader;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.view.Surface;
 
 import com.briefplantrain.virtucam.util.LogUtil;
@@ -13,135 +9,131 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Surface mapping tracker — simplified VCAM-style.
+ *
+ * Tracks which surfaces belong to which category without creating
+ * any ImageReader drains or EGL contexts. The actual frame delivery
+ * is handled by VirtualCameraEngine.
+ */
 public final class MappingManager {
 
-    private static final String TAG = "VirtuCam/MappingManager";
+    private static final String TAG = "VirtuCam/Mapping";
 
-    private final Map<Surface, SurfaceMapping> byOriginal = new ConcurrentHashMap<>();
-    private final Object drainLock = new Object();
-    private HandlerThread drainThread;
-    private Handler drainHandler;
-
-    public Surface getDrainForOriginalOrNull(Surface original) {
-        SurfaceMapping m = byOriginal.get(original);
-        return m != null ? m.drainSurface : null;
+    // Surface classification
+    public enum SurfaceType {
+        PREVIEW,         // SurfaceTexture-backed (camera preview)
+        IMAGE_READER,    // ImageReader-backed (photo capture / analysis)
+        SURFACE_HOLDER,  // SurfaceView/SurfaceHolder (Camera1)
+        UNKNOWN
     }
 
-    public Surface mapRequestTargetSurface(Surface surface) {
-        SurfaceMapping m = byOriginal.get(surface);
-        return m != null ? m.drainSurface : surface;
+    // surfaceId -> type mapping
+    private final ConcurrentHashMap<Integer, SurfaceType> surfaceTypes = new ConcurrentHashMap<>();
+    // surfaceId -> Surface reference (weak tracking)
+    private final ConcurrentHashMap<Integer, Surface> surfaceRefs = new ConcurrentHashMap<>();
+
+    // Throwaway surface tracking
+    private volatile Surface throwawaySurface;
+
+    public MappingManager() { }
+
+    /** Register a surface with its classified type. */
+    public void registerSurface(Surface surface, SurfaceType type) {
+        if (surface == null) return;
+        int id = System.identityHashCode(surface);
+        surfaceTypes.put(id, type);
+        surfaceRefs.put(id, surface);
+        LogUtil.d(TAG, "Registered surface id=" + id + " type=" + type);
     }
 
-    public Surface getOrCreateDrainSurface(Surface original, SurfaceInfo info) {
-        if (original == null) return null;
-
-        SurfaceMapping existing = byOriginal.get(original);
-        if (existing != null) return existing.drainSurface;
-
-        ImageReader reader = null;
-        Surface drain = null;
-
-        try {
-            int width = info != null && info.width > 0 ? info.width : 1;
-            int height = info != null && info.height > 0 ? info.height : 1;
-            reader = ImageReader.newInstance(width, height, android.graphics.ImageFormat.PRIVATE, 4);
-            reader.setOnImageAvailableListener(this::drainImageReader, getOrCreateDrainHandler());
-            drain = reader.getSurface();
-
-            SurfaceMapping mapping = new SurfaceMapping(original, drain, reader, info);
-            SurfaceMapping raced = byOriginal.putIfAbsent(original, mapping);
-            if (raced != null) {
-                try { drain.release(); } catch (Throwable t) { LogUtil.w(TAG, "drain release failed", t); }
-                try { reader.close(); } catch (Throwable t) { LogUtil.w(TAG, "reader close failed", t); }
-                return raced.drainSurface;
-            }
-
-            LogUtil.d(TAG, "Mapped surface: original=" + original + " -> drain=" + drain +
-                    " kind=" + (info != null ? info.kind : SurfaceInfo.Kind.UNKNOWN) +
-                    " size=" + (info != null ? (info.width + "x" + info.height) : "0x0"));
-
-            return drain;
-        } catch (Throwable t) {
-            LogUtil.e(TAG, "Failed to create drain surface; leaving original", t);
-            try { if (drain != null) drain.release(); } catch (Throwable ignored) {}
-            try { if (reader != null) reader.close(); } catch (Throwable ignored) {}
-            return original;
-        }
+    /** Unregister a surface being tracked. */
+    public void unregisterSurface(Surface surface) {
+        if (surface == null) return;
+        int id = System.identityHashCode(surface);
+        surfaceTypes.remove(id);
+        surfaceRefs.remove(id);
     }
 
-    private Handler getOrCreateDrainHandler() {
-        synchronized (drainLock) {
-            if (drainThread == null) {
-                drainThread = new HandlerThread("VirtuCam-DrainReader");
-                drainThread.start();
-                drainHandler = new Handler(drainThread.getLooper());
-            }
-            return drainHandler;
-        }
+    /** Get the type of a tracked surface. */
+    public SurfaceType getType(Surface surface) {
+        if (surface == null) return SurfaceType.UNKNOWN;
+        int id = System.identityHashCode(surface);
+        SurfaceType type = surfaceTypes.get(id);
+        return type != null ? type : SurfaceType.UNKNOWN;
     }
 
-    private void drainImageReader(ImageReader reader) {
-        if (reader == null) return;
-        Image image = null;
-        try {
-            image = reader.acquireLatestImage();
-        } catch (RuntimeException e) {
-            LogUtil.w(TAG, "acquireLatestImage failed", e);
-        } finally {
-            if (image != null) {
-                try { image.close(); } catch (Throwable ignored) {}
+    /** Get all tracked surfaces of a specific type. */
+    public List<Surface> getSurfacesByType(SurfaceType type) {
+        List<Surface> result = new ArrayList<>();
+        for (Map.Entry<Integer, SurfaceType> entry : surfaceTypes.entrySet()) {
+            if (entry.getValue() == type) {
+                Surface s = surfaceRefs.get(entry.getKey());
+                if (s != null && s.isValid()) {
+                    result.add(s);
+                }
             }
         }
+        return result;
     }
 
-    public List<Surface> listOriginalSurfaces() {
-        return new ArrayList<>(byOriginal.keySet());
-    }
-
-    public boolean hasMappings() {
-        return !byOriginal.isEmpty();
-    }
-
-    public void removeMapping(Surface original) {
-        SurfaceMapping m = byOriginal.remove(original);
-        if (m == null) return;
-        try { m.releaseDrain(); } catch (Throwable ignored) {}
-    }
-
-    public void releaseAll() {
-        for (Surface s : listOriginalSurfaces()) {
-            removeMapping(s);
+    /** Classify a surface based on its toString() output. */
+    public static SurfaceType classifySurface(Surface surface) {
+        if (surface == null) return SurfaceType.UNKNOWN;
+        String str = surface.toString();
+        if (str.contains("Surface(name=null)")) {
+            return SurfaceType.IMAGE_READER;
         }
-        byOriginal.clear();
+        return SurfaceType.PREVIEW;
+    }
 
-        synchronized (drainLock) {
-            if (drainThread != null) {
-                try { drainThread.quitSafely(); } catch (Throwable ignored) {}
-                drainThread = null;
-                drainHandler = null;
+    /** Set the throwaway surface (camera writes here, frames discarded). */
+    public void setThrowawaySurface(Surface surface) {
+        throwawaySurface = surface;
+    }
+
+    /** Check if a surface is our throwaway. */
+    public boolean isThrowawaySurface(Surface surface) {
+        return surface != null && surface == throwawaySurface;
+    }
+
+    /** Clear all surface mappings (on new camera session). */
+    public void clear() {
+        surfaceTypes.clear();
+        surfaceRefs.clear();
+        LogUtil.d(TAG, "All surface mappings cleared");
+    }
+
+    /** Prune invalid (released) surfaces from tracking. */
+    public void pruneInvalid() {
+        List<Integer> toRemove = new ArrayList<>();
+        for (Map.Entry<Integer, Surface> entry : surfaceRefs.entrySet()) {
+            if (!entry.getValue().isValid()) {
+                toRemove.add(entry.getKey());
             }
         }
+        for (int id : toRemove) {
+            surfaceTypes.remove(id);
+            surfaceRefs.remove(id);
+        }
+        if (!toRemove.isEmpty()) {
+            LogUtil.d(TAG, "Pruned " + toRemove.size() + " invalid surfaces");
+        }
     }
 
-    private static final class SurfaceMapping {
-        final Surface originalSurface;
-        final Surface drainSurface;
-        final ImageReader drainImageReader;
-        final SurfaceInfo info;
-
-        SurfaceMapping(Surface originalSurface,
-                       Surface drainSurface,
-                       ImageReader drainImageReader,
-                       SurfaceInfo info) {
-            this.originalSurface = originalSurface;
-            this.drainSurface = drainSurface;
-            this.drainImageReader = drainImageReader;
-            this.info = info;
+    /** Get a debug summary string. */
+    public String debugSummary() {
+        int preview = 0, reader = 0, holder = 0, unknown = 0;
+        for (SurfaceType t : surfaceTypes.values()) {
+            switch (t) {
+                case PREVIEW: preview++; break;
+                case IMAGE_READER: reader++; break;
+                case SURFACE_HOLDER: holder++; break;
+                default: unknown++; break;
+            }
         }
-
-        void releaseDrain() {
-            try { if (drainSurface != null) drainSurface.release(); } catch (Throwable ignored) {}
-            try { if (drainImageReader != null) drainImageReader.close(); } catch (Throwable ignored) {}
-        }
+        return "preview=" + preview + ",reader=" + reader +
+                ",holder=" + holder + ",unknown=" + unknown +
+                ",throwaway=" + (throwawaySurface != null);
     }
 }

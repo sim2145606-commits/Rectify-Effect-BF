@@ -727,7 +727,52 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             promise.reject("NOT_INITIALIZED", "Module not ready")
             return
         }
-        try {
+        // Run all heavy I/O + root commands off the RN bridge thread
+        Thread {
+            try {
+                checkXposedStatusInternal(promise)
+            } catch (e: Exception) {
+                android.util.Log.e("VirtuCamSettings", "checkXposedStatus error: ${e.message}")
+                try {
+                    val result = Arguments.createMap()
+                    result.putBoolean("xposedActive", false)
+                    result.putBoolean("lsposedInstalled", false)
+                    result.putBoolean("moduleActive", false)
+                    result.putBoolean("moduleLoaded", false)
+                    result.putBoolean("moduleScoped", false)
+                    result.putBoolean("hookConfigured", false)
+                    result.putBoolean("hookReady", false)
+                    result.putBoolean("ipcConfigReady", false)
+                    result.putBoolean("configPrimaryReadable", false)
+                    result.putBoolean("configIpcReadable", false)
+                    result.putBoolean("hookLastReadOk", false)
+                    result.putBoolean("runtimeReady", false)
+                    result.putBoolean("stagedMediaReady", false)
+                    result.putBoolean("runtimeHookObserved", false)
+                    result.putBoolean("markerRequired", false)
+                    result.putDouble("runtimeObservedAt", 0.0)
+                    result.putBoolean("runtimeObservedFresh", false)
+                    result.putString("runtimeObservedProcess", "")
+                    result.putDouble("runtimeObservedAgeMs", 0.0)
+                    result.putString("runtimeEvidenceSource", "none")
+                    result.putString("mappingFailureReason", "")
+                    result.putString("activeSourceMode", "black")
+                    result.putString("sourceModeEffective", "black")
+                    result.putString("lastErrorCode", "")
+                    result.putString("lastErrorMessage", "")
+                    result.putDouble("lastOkEpochMs", 0.0)
+                    result.putDouble("runtimeUpdatedEpochMs", 0.0)
+                    result.putString("detectionMethod", "error")
+                    result.putString("markerSource", "none")
+                    promise.resolve(result)
+                } catch (_: Throwable) {
+                    promise.reject("STATUS_ERROR", e.message)
+                }
+            }
+        }.start()
+    }
+
+    private fun checkXposedStatusInternal(promise: Promise) {
             val result = Arguments.createMap()
             val modulePackageName = reactApplicationContext.packageName
             
@@ -976,49 +1021,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 "broadScope=$broadScopePackages, runtimeObservedAt=$runtimeObservedAt, mappingFailureReason=${mappingFailureReason ?: "none"}")
             
             promise.resolve(result)
-        } catch (e: Exception) {
-            android.util.Log.e("VirtuCamSettings", "checkXposedStatus error: ${e.message}")
-            val result = Arguments.createMap()
-            result.putBoolean("xposedActive", false)
-            result.putBoolean("lsposedInstalled", false)
-            result.putBoolean("moduleActive", false)
-            result.putBoolean("moduleLoaded", false)
-            result.putBoolean("moduleScoped", false)
-            result.putBoolean("hookConfigured", false)
-            result.putBoolean("hookReady", false)
-            result.putBoolean("ipcConfigReady", false)
-            result.putBoolean("configPrimaryReadable", false)
-            result.putBoolean("configIpcReadable", false)
-            result.putBoolean("hookLastReadOk", false)
-            result.putBoolean("runtimeReady", false)
-            result.putBoolean("stagedMediaReady", false)
-            result.putBoolean("runtimeHookObserved", false)
-            result.putBoolean("markerRequired", false)
-            result.putDouble("runtimeObservedAt", 0.0)
-            result.putBoolean("runtimeObservedFresh", false)
-            result.putString("runtimeObservedProcess", "")
-            result.putDouble("runtimeObservedAgeMs", 0.0)
-            result.putString("runtimeEvidenceSource", "none")
-            result.putString("mappingFailureReason", "")
-            result.putString("activeSourceMode", "black")
-            result.putString("sourceModeEffective", "black")
-            result.putString("lastErrorCode", "")
-            result.putString("lastErrorMessage", "")
-            result.putDouble("lastOkEpochMs", 0.0)
-            result.putDouble("runtimeUpdatedEpochMs", 0.0)
-            result.putString("detectionMethod", "error")
-            result.putString("markerSource", "none")
-            result.putInt("configuredTargetsCount", 0)
-            result.putInt("scopedTargetsCount", 0)
-            result.putString("configuredTargets", "")
-            result.putString("scopedTargets", "")
-            result.putString("scopeEvaluationReason", "error")
-            result.putBoolean("broadScopeDetected", false)
-            result.putString("broadScopePackages", "")
-            result.putBoolean("allowBroadScope", false)
-            result.putBoolean("vcamCompatibilityMode", false)
-            promise.resolve(result)
-        }
     }
 
     @ReactMethod
