@@ -2,7 +2,7 @@ import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type Ionicons from '@expo/vector-icons/Ionicons';
 import type { ComponentProps } from 'react';
-import { DarkColors, STORAGE_KEYS } from '@/constants/theme';
+import { DarkColors, STORAGE_KEYS } from '@/constants/theme';\nimport { normalizeState, ipcBoolean, ipcString, ipcNumber } from './IpcNormalize';
 
 function getLogger() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -96,11 +96,9 @@ type IpcStatusResult = {
   configJsonExists?: boolean;
   configJsonReadable?: boolean;
   configStatus?: string;
-  companionStatus?: string;
   markerStatus?: string;
   runtimeStatus?: string;
   stateReadSource?: string;
-  companionVersion?: string;
   prefsPathResolved?: string;
   moduleMarkerSource?: string;
   moduleMarkerExistsIpc?: boolean;
@@ -425,75 +423,47 @@ export async function runFullSystemCheck(options?: {
         const broadScopeDetected = xposedResult.broadScopeDetected === true;
         const broadScopePackages = String(xposedResult.broadScopePackages ?? '').trim();
 
-        const companionState = ipcStatus
-          ? String(ipcStatus.companionStatus ?? '').trim().toLowerCase()
-          : '';
-        const stateReadSource = ipcStatus
-          ? String(ipcStatus.stateReadSource ?? '').trim().toLowerCase()
-          : '';
-        const companionVersion = ipcStatus ? String(ipcStatus.companionVersion ?? '').trim() : '';
+        const ipc = ipcStatus as Record<string, unknown> | null;
+        const xp = xposedResult as unknown as Record<string, unknown>;
+        const stateReadSource = normalizeState(ipcStatus?.stateReadSource);
         const readSourceHint = stateReadSource === 'root_read' ? ' (root state-read)' : '';
-        const companionReady = companionState === 'ready';
-        const companionWaitingRuntime = companionState === 'waiting_runtime';
-        const runtimeState = ipcStatus
-          ? String(ipcStatus.runtimeStatus ?? '').trim().toLowerCase()
-          : '';
-        const configPrimaryReady = ipcStatus
-          ? ipcStatus.configPrimaryReadable === true || ipcStatus.config_primary_readable === true
-          : xposedResult.configPrimaryReadable === true;
-        const configIpcReady = ipcStatus
-          ? ipcStatus.configIpcReadable === true ||
-            ipcStatus.config_ipc_readable === true ||
-            (ipcStatus.configJsonExists === true && ipcStatus.configJsonReadable === true)
-          : xposedResult.configIpcReadable === true;
-        const hookLastReadOk = ipcStatus
-          ? ipcStatus.hookLastReadOk === true || ipcStatus.hook_last_read_ok === true
-          : xposedResult.hookLastReadOk === true;
-        const runtimeObservedFresh = ipcStatus
-          ? ipcStatus.runtimeObservedFresh === true || ipcStatus.runtime_observed_fresh === true
-          : xposedResult.runtimeObservedFresh === true;
-        const runtimeObservedProcess = String(
-          ipcStatus?.runtimeObservedProcess ??
-            ipcStatus?.runtime_observed_process ??
-            xposedResult.runtimeObservedProcess ??
-            ''
-        ).trim();
-        const runtimeObservedAgeMs = Number(
-          ipcStatus?.runtimeObservedAgeMs ??
-            ipcStatus?.runtime_observed_age_ms ??
-            xposedResult.runtimeObservedAgeMs ??
-            0
-        );
+        const runtimeState = normalizeState(ipcStatus?.runtimeStatus);
+        const configPrimaryReady =
+          ipcBoolean(ipc, 'configPrimaryReadable', 'config_primary_readable') ||
+          xposedResult.configPrimaryReadable === true;
+        const configIpcReady =
+          ipcBoolean(ipc, 'configIpcReadable', 'config_ipc_readable') ||
+          (ipcStatus?.configJsonExists === true && ipcStatus?.configJsonReadable === true) ||
+          xposedResult.configIpcReadable === true;
+        const hookLastReadOk =
+          ipcBoolean(ipc, 'hookLastReadOk', 'hook_last_read_ok') ||
+          xposedResult.hookLastReadOk === true;
+        const runtimeObservedFresh =
+          ipcBoolean(ipc, 'runtimeObservedFresh', 'runtime_observed_fresh') ||
+          xposedResult.runtimeObservedFresh === true;
+        const runtimeObservedProcess =
+          ipcString(ipc, 'runtimeObservedProcess', 'runtime_observed_process') ||
+          String(xposedResult.runtimeObservedProcess ?? '').trim();
+        const runtimeObservedAgeMs =
+          ipcNumber(ipc, 'runtimeObservedAgeMs', 'runtime_observed_age_ms') ||
+          Number(xposedResult.runtimeObservedAgeMs ?? 0);
         const runtimeReady =
-          (ipcStatus
-            ? ipcStatus.runtimeReady === true || ipcStatus.runtime_ready === true
-            : xposedResult.runtimeReady === true) && runtimeObservedFresh;
+          (ipcBoolean(ipc, 'runtimeReady', 'runtime_ready') ||
+           xposedResult.runtimeReady === true) && runtimeObservedFresh;
         const runtimeStateFresh =
           runtimeObservedFresh && (ipcStatus ? ipcStatus.runtimeStateFresh !== false : true);
-        const activeSourceMode = String(
-          ipcStatus?.activeSourceMode ??
-            ipcStatus?.active_source_mode ??
-            xposedResult.activeSourceMode ??
-            'black'
-        ).trim();
-        const sourceModeEffective = String(
-          ipcStatus?.sourceModeEffective ??
-            ipcStatus?.source_mode_effective ??
-            xposedResult.sourceModeEffective ??
-            activeSourceMode
-        ).trim();
-        const runtimeErrorCode = String(
-          ipcStatus?.lastErrorCode ??
-            ipcStatus?.last_error_code ??
-            xposedResult.lastErrorCode ??
-            ''
-        ).trim();
-        const runtimeErrorMessage = String(
-          ipcStatus?.lastErrorMessage ??
-            ipcStatus?.last_error_message ??
-            xposedResult.lastErrorMessage ??
-            ''
-        ).trim();
+        const activeSourceMode =
+          ipcString(ipc, 'activeSourceMode', 'active_source_mode') ||
+          String(xposedResult.activeSourceMode ?? 'black').trim();
+        const sourceModeEffective =
+          ipcString(ipc, 'sourceModeEffective', 'source_mode_effective') ||
+          String(xposedResult.sourceModeEffective ?? activeSourceMode).trim();
+        const runtimeErrorCode =
+          ipcString(ipc, 'lastErrorCode', 'last_error_code') ||
+          String(xposedResult.lastErrorCode ?? '').trim();
+        const runtimeErrorMessage =
+          ipcString(ipc, 'lastErrorMessage', 'last_error_message') ||
+          String(xposedResult.lastErrorMessage ?? '').trim();
         const stagedMediaPath = String(ipcStatus?.stagedMediaPath ?? '').trim();
         const stagedMediaReadable =
           stagedMediaPath.length === 0
@@ -597,23 +567,6 @@ export async function runFullSystemCheck(options?: {
           if (!runtimeStateFresh) {
             hookConfigStatus = hookConfigStatus === 'error' ? 'error' : 'warning';
             hookConfigNotes.push('Runtime state is stale');
-          }
-          if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
-            hookConfigStatus = 'error';
-            hookConfigNotes.push(`Companion state: ${companionState}${readSourceHint}`);
-          } else if (companionWaitingRuntime) {
-            hookConfigStatus = 'warning';
-            hookConfigNotes.push(
-              runtimeObservedFresh
-                ? `Companion waiting state is stale; runtime evidence is fresh${readSourceHint}`
-                : runtimeState === 'runtime_stale'
-                  ? `Companion runtime evidence is stale${
-                      runtimeObservedAgeMs > 0 ? ` (${Math.trunc(runtimeObservedAgeMs)}ms)` : ''
-                    }${readSourceHint}`
-                  : `Companion waiting for fresh runtime hook observation${readSourceHint}`
-            );
-          } else if (companionReady && companionVersion.length > 0) {
-            hookConfigNotes.push(`Companion version ${companionVersion}`);
           }
           if (runtimeObservedProcess.length > 0) {
             hookConfigNotes.push(`Runtime process=${runtimeObservedProcess}`);
@@ -723,21 +676,6 @@ export async function runFullSystemCheck(options?: {
           }
           if (!runtimeStateFresh) {
             notes.push('Runtime state is stale');
-          }
-          if (companionState === 'scope_mismatch' || companionState === 'config_missing') {
-            notes.push(`Companion state: ${companionState}${readSourceHint}`);
-          } else if (companionWaitingRuntime) {
-            notes.push(
-              runtimeObservedFresh
-                ? `Companion waiting state is stale; runtime evidence is fresh${readSourceHint}`
-                : runtimeState === 'runtime_stale'
-                  ? `Companion runtime evidence is stale${
-                      runtimeObservedAgeMs > 0 ? ` (${Math.trunc(runtimeObservedAgeMs)}ms)` : ''
-                    }${readSourceHint}`
-                  : `Companion waiting for fresh runtime hook observation${readSourceHint}`
-            );
-          } else if (companionReady && companionVersion.length > 0) {
-            notes.push(`Companion version ${companionVersion}`);
           }
           if (runtimeObservedProcess.length > 0) {
             notes.push(`Runtime process=${runtimeObservedProcess}`);

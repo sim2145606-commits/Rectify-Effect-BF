@@ -29,20 +29,34 @@ import { useSystemStatus } from '@/hooks/useSystemStatus';
 import { useTheme } from '@/context/ThemeContext';
 import type { ColorMode } from '@/context/ThemeContext';
 import {
-  runDiagnostics,
-  getRawXposedDebugInfo,
-  type DiagnosticsReport,
-  type DiagnosticCheckResult,
-  type RawXposedDebugInfo,
-} from '@/services/DiagnosticsService';
-import {
   requestCameraPermission,
   requestAllFilesAccess,
   requestOverlayPermission,
 } from '@/services/PermissionManager';
 import { getStatusColor } from '@/services/SystemVerification';
-import { resetToDefaults } from '@/services/ResetService';
 import { writeBridgeConfig } from '@/services/ConfigBridge';
+import { syncAllSettings } from '@/services/ConfigBridge';
+
+// Diagnostics stubs (removed full DiagnosticsService)
+type DiagnosticCheckResult = { name: string; status: 'pass' | 'fail' | 'warn' | 'skip'; description: string; detail?: string };
+type DiagnosticsReport = { checks: DiagnosticCheckResult[]; passCount: number; failCount: number; warnCount: number; timestamp: number };
+type RawXposedDebugInfo = { hookStatus?: string; mappingLog?: string; configSnapshot?: string; error?: string };
+const runDiagnostics = async (_onProgress?: (c: DiagnosticCheckResult, i: number) => void): Promise<DiagnosticsReport> =>
+  ({ checks: [], passCount: 0, failCount: 0, warnCount: 0, timestamp: Date.now() });
+const getRawXposedDebugInfo = async (): Promise<RawXposedDebugInfo> =>
+  ({ hookStatus: 'stub', error: 'Diagnostics removed \u2014 use adb logcat' });
+
+// Reset stub (removed full ResetService)
+const resetToDefaults = async (): Promise<{ success: boolean; error?: string }> => {
+  const AsyncStorageMod = (await import('@react-native-async-storage/async-storage')).default;
+  try {
+    await AsyncStorageMod.clear();
+    await syncAllSettings(true);
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
 import Card from '@/components/Card';
 import GlowButton from '@/components/GlowButton';
 

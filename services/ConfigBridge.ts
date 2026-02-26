@@ -16,7 +16,6 @@ export type BridgeSyncFailureCode =
 
 export type BridgeWriteWarningCode =
   | 'prefs_epoch_mismatch'
-  | 'companion_refresh_deferred'
   | 'ipc_mirror_write_failed';
 export type BridgeSyncState = {
   ok: boolean;
@@ -41,7 +40,6 @@ type NativeWriteConfigResult = {
   prefsEpochMatched?: boolean;
   ipcJsonWritten?: boolean;
   persistentFallbackWritten?: boolean;
-  companionRefreshScheduled?: boolean;
   prefsPathResolved?: string;
   warningCode?: string | null;
   errorCode?: string | null;
@@ -196,7 +194,6 @@ function normalizeBridgeError(err: unknown): { code: BridgeSyncFailureCode; mess
   }
   if (
     nativeCode === 'CONFIG_SYNC_FAILED' ||
-    nativeCode === 'COMPANION_REFRESH_ERROR' ||
     nativeCode === 'IPC_STATUS_ERROR' ||
     nativeCode.startsWith('IPC_')
   ) {
@@ -210,7 +207,7 @@ function normalizeBridgeError(err: unknown): { code: BridgeSyncFailureCode; mess
     return { code: 'write_failed', message };
   }
   const lowerMessage = message.toLowerCase();
-  if (lowerMessage.includes('ipc') || lowerMessage.includes('companion')) {
+  if (lowerMessage.includes('ipc')) {
     return { code: 'ipc_unready', message };
   }
 
@@ -227,12 +224,6 @@ function normalizeWarningCode(raw: unknown): BridgeWriteWarningCode | null {
     normalized === 'prefs_commit_unconfirmed'
   ) {
     return 'prefs_epoch_mismatch';
-  }
-  if (
-    normalized === 'companion_refresh_deferred' ||
-    normalized === 'companion_refresh_not_scheduled'
-  ) {
-    return 'companion_refresh_deferred';
   }
   if (normalized === 'ipc_mirror_write_failed') {
     return 'ipc_mirror_write_failed';
@@ -391,10 +382,6 @@ async function performNativeWrite(payload: Record<string, unknown>): Promise<Bri
       return normalizeWarningCode(nativeResult.warningCode) ?? 'prefs_epoch_mismatch';
     }
 
-    if (nativeResult.companionRefreshScheduled === false) {
-      return normalizeWarningCode(nativeResult.warningCode) ?? 'companion_refresh_deferred';
-    }
-
     return normalizeWarningCode(nativeResult.warningCode);
   }
 
@@ -456,10 +443,8 @@ async function runWriteQueue(): Promise<void> {
           message:
             warningCode === 'prefs_epoch_mismatch'
               ? 'Bridge write successful (prefs verification deferred)'
-              : warningCode === 'companion_refresh_deferred'
-                ? 'Bridge write successful (companion refresh deferred)'
-                : warningCode === 'ipc_mirror_write_failed'
-                  ? 'Bridge write successful (IPC mirror write failed)'
+              : warningCode === 'ipc_mirror_write_failed'
+                ? 'Bridge write successful (IPC mirror write failed)'
                 : 'Bridge write successful',
           timestamp: Date.now(),
           attempts: 1,

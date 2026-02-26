@@ -31,9 +31,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         reactContext.getSharedPreferences("virtucam_config", Context.MODE_PRIVATE)
     }
     private val writeConfigLock = Any()
-    private val companionRefreshLock = Any()
-    @Volatile private var companionRefreshInFlight = false
-    @Volatile private var companionRefreshLastScheduledAt = 0L
     private val rootReadCache = ConcurrentHashMap<String, RootReadCacheEntry>()
     private val stateFileReadCache = ConcurrentHashMap<String, StateFileRead>()
     
@@ -63,9 +60,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         }
         try {
             var prefsCommitted = false
-            var prefsEpochMatched = false
             var primaryConfigWritten = false
-            var ipcJsonWritten = false
             var legacyPersistentWritten = false
             var persistentFallbackWritten = false
             var errorCode: String? = null
@@ -74,8 +69,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
             synchronized(writeConfigLock) {
                 val editor = prefs.edit()
-                val writeEpoch = System.currentTimeMillis()
-                editor.putLong("_bridge_write_epoch", writeEpoch)
 
                 if (config.hasKey("enabled")) {
                     editor.putBoolean("enabled", config.getBoolean("enabled"))
@@ -134,8 +127,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
 
                 prefsCommitted = editor.commit()
-                val readbackEpoch = prefs.getLong("_bridge_write_epoch", -1L)
-                prefsEpochMatched = prefsCommitted && readbackEpoch == writeEpoch
                 resolvedPrefsPath = resolveSharedPrefsXmlPath()
 
                 if (!prefsCommitted) {
@@ -176,23 +167,12 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                     }
                 }
 
-                try {
-                    ipcJsonWritten = writeConfigJsonToIpc(serializedConfig)
-                } catch (e: Exception) {
-                    android.util.Log.w("VirtuCamSettings", "IPC mirror write failed: ${e.message}")
-                    if (warningCode == null) warningCode = "ipc_mirror_write_failed"
-                }
-
                 if (!primaryConfigWritten && errorCode == null) {
                     errorCode = "PERSISTENT_PRIMARY_FAILED"
                 }
 
                 if (primaryConfigWritten && !prefsCommitted) {
                     warningCode = "prefs_commit_unconfirmed"
-                } else if (primaryConfigWritten && prefsCommitted && !prefsEpochMatched) {
-                    warningCode = "prefs_epoch_mismatch"
-                } else if (!ipcJsonWritten) {
-                    warningCode = warningCode ?: "ipc_mirror_write_failed"
                 }
             }
 
@@ -205,20 +185,13 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             }
 
             invalidateReadCaches()
-            val companionRefreshScheduled = scheduleCompanionRefresh()
-            if (!companionRefreshScheduled && warningCode == null) {
-                warningCode = "companion_refresh_deferred"
-            }
 
             val result = Arguments.createMap()
-            result.putBoolean("prefsWritten", prefsCommitted && prefsEpochMatched)
+            result.putBoolean("prefsWritten", prefsCommitted)
             result.putBoolean("prefsCommitted", prefsCommitted)
-            result.putBoolean("prefsEpochMatched", prefsEpochMatched)
-            result.putBoolean("ipcJsonWritten", ipcJsonWritten)
             result.putBoolean("primaryConfigWritten", primaryConfigWritten)
             result.putBoolean("legacyPersistentWritten", legacyPersistentWritten)
             result.putBoolean("persistentFallbackWritten", persistentFallbackWritten)
-            result.putBoolean("companionRefreshScheduled", companionRefreshScheduled)
             result.putString("prefsPathResolved", resolvedPrefsPath ?: "")
             result.putString("warningCode", warningCode ?: "")
             result.putString("errorCode", errorCode ?: "")
@@ -357,7 +330,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
                 }
 
                 cleanupStagedMediaFiles(mediaDir)
-                scheduleCompanionRefresh()
 
                 if (reactApplicationContext.hasActiveCatalystInstance()) {
                     promise.resolve(stagedFile.absolutePath)
@@ -449,7 +421,7 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             result.putString("markerStatus", markerRead.value)
             result.putString("runtimeStatus", runtimeRead.value)
             result.putString("stateReadSource", stateReadSource)
-            result.putString("companionVersion", readCompanionVersion())
+            result.putString("companionVersion", "")
             result.putString("stagedMediaPath", stagedPath ?: "")
             result.putBoolean("stagedMediaExists", stagedFile?.exists() == true)
             result.putBoolean("stagedMediaReadable", stagedFile?.canRead() == true)
@@ -1742,18 +1714,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
         return obj
     }
 
-    private fun writeConfigJsonToIpc(serializedConfig: String): Boolean {
-        return writeJsonAtomicallyWithRoot(
-            serializedConfig = serializedConfig,
-            destinationPath = VirtuCamIPC.CONFIG_JSON,
-            destinationDirPath = VirtuCamIPC.CONFIG_DIR,
-            destinationDirMode = "0777",
-            destinationFileMode = "0644",
-            destinationDirContext = "u:object_r:tmpfs:s0",
-            destinationFileContext = "u:object_r:tmpfs:s0"
-        ) && File(VirtuCamIPC.CONFIG_JSON).exists() && File(VirtuCamIPC.CONFIG_JSON).canRead()
-    }
-
     private fun writePersistentFallbackJson(serializedConfig: String): Boolean {
         return writeJsonAtomicallyWithRoot(
             serializedConfig = serializedConfig,
@@ -1824,88 +1784,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
             return true
         } finally {
             runCatching { tmpFile.delete() }
-        }
-    }
-
-    private fun scheduleCompanionRefresh(): Boolean {
-        synchronized(companionRefreshLock) {
-            val now = System.currentTimeMillis()
-            if (companionRefreshInFlight) {
-                return false
-            }
-            if (now - companionRefreshLastScheduledAt < 600L) {
-                return false
-            }
-            companionRefreshInFlight = true
-            companionRefreshLastScheduledAt = now
-        }
-
-        Thread {
-            try {
-                refreshCompanionInternal()
-            } catch (e: Exception) {
-                android.util.Log.w("VirtuCamSettings", "Async companion refresh failed: ${e.message}")
-            } finally {
-                synchronized(companionRefreshLock) {
-                    companionRefreshInFlight = false
-                    companionRefreshLastScheduledAt = System.currentTimeMillis()
-                }
-            }
-        }.start()
-
-        return true
-    }
-
-    private fun refreshCompanionInternal(): Boolean {
-        val actionScript = "/data/adb/modules/virtucam_companion/action.sh"
-        val escapedAction = escapeShellArg(actionScript)
-        val scriptExists = executeRootCommand("ls $escapedAction 2>/dev/null")
-        if (!scriptExists.contains("action.sh")) {
-            return false
-        }
-        val exitCode = executeRootScript(actionScript, timeoutSeconds = 20)
-        if (exitCode != 0) {
-            android.util.Log.w("VirtuCamSettings", "Companion action script exited with code $exitCode")
-            return false
-        }
-        invalidateReadCaches()
-        val statusOutput = safeReadStateFile(File(VirtuCamIPC.COMPANION_STATUS))
-        if (statusOutput.value.isBlank()) {
-            android.util.Log.w(
-                "VirtuCamSettings",
-                "Companion action executed but status file is unreadable in app context"
-            )
-            return false
-        }
-        val runtimeState = readRuntimeState()
-        if (!runtimeState.configPrimaryReadable) {
-            android.util.Log.w(
-                "VirtuCamSettings",
-                "Companion action completed but primary config is not readable for hooks"
-            )
-            return false
-        }
-        return true
-    }
-
-    private fun executeRootScript(scriptPath: String, timeoutSeconds: Long = 15L): Int {
-        return try {
-            val escapedScript = escapeShellArg(scriptPath)
-            val process = ProcessBuilder("su", "-c", "sh $escapedScript")
-                .redirectErrorStream(true)
-                .start()
-            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-                return -1
-            }
-            process.exitValue()
-        } catch (e: IOException) {
-            android.util.Log.w("VirtuCamSettings", "Root script I/O error: ${e.message}", e)
-            -1
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            android.util.Log.w("VirtuCamSettings", "Root script interrupted", e)
-            -1
         }
     }
 
@@ -1997,16 +1875,6 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
 
     private fun safeReadSmallFile(file: File): String {
         return safeReadStateFile(file).value
-    }
-
-    private fun readCompanionVersion(): String {
-        val versionLine = executeRootCommand(
-            "grep '^version=' /data/adb/modules/virtucam_companion/module.prop 2>/dev/null | head -n 1"
-        ).trim()
-        if (versionLine.startsWith("version=")) {
-            return versionLine.substringAfter("version=").trim()
-        }
-        return ""
     }
 
     private fun readRuntimeState(): RuntimeState {

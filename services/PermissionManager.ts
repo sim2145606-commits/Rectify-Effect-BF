@@ -2,9 +2,11 @@ import { Platform, Linking, NativeModules } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
 
+import { normalizeState, ipcBoolean, ipcString, ipcNumber } from './IpcNormalize';
+
 const { VirtuCamSettings } = NativeModules;
 
-export type PermissionStatus = 'granted' | 'denied' | 'pending' | 'checking';
+type IpcFields = Record<string, unknown>;
 
 export type PermissionCheckResult = {
   status: PermissionStatus;
@@ -41,7 +43,6 @@ type XposedStatusResult = {
 };
 
 type IpcStatusResult = {
-  companionStatus?: string;
   configStatus?: string;
   runtimeStatus?: string;
   configJsonExists?: boolean;
@@ -63,10 +64,6 @@ type IpcStatusResult = {
   lastErrorCode?: string;
   last_error_code?: string;
 };
-
-function normalizeState(raw: unknown): string {
-  return String(raw ?? '').trim().toLowerCase();
-}
 
 /**
  * Check root access by actually executing su command
@@ -114,40 +111,30 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     const runtimeHookObserved = result.runtimeHookObserved === true;
     const scopeReason = normalizeState(result.scopeEvaluationReason);
     const mappingFailureReason = normalizeState(result.mappingFailureReason);
-    const companionState = normalizeState(ipcResult?.companionStatus);
     const runtimeState = normalizeState(ipcResult?.runtimeStatus);
+    const ipc = ipcResult as IpcFields | null;
+    const xp = result as unknown as IpcFields;
     const configReady =
-      ipcResult?.configPrimaryReadable === true ||
-      ipcResult?.config_primary_readable === true ||
+      ipcBoolean(ipc, 'configPrimaryReadable', 'config_primary_readable') ||
       result.configPrimaryReadable === true;
     const hookLastReadOk =
-      ipcResult?.hookLastReadOk === true ||
-      ipcResult?.hook_last_read_ok === true ||
+      ipcBoolean(ipc, 'hookLastReadOk', 'hook_last_read_ok') ||
       result.hookLastReadOk === true;
     const runtimeReady =
-      (ipcResult?.runtimeReady === true ||
-        ipcResult?.runtime_ready === true ||
-        result.runtimeReady === true) &&
-      (ipcResult?.runtimeObservedFresh === true ||
-        ipcResult?.runtime_observed_fresh === true ||
-        result.runtimeObservedFresh === true);
+      (ipcBoolean(ipc, 'runtimeReady', 'runtime_ready') || result.runtimeReady === true) &&
+      (ipcBoolean(ipc, 'runtimeObservedFresh', 'runtime_observed_fresh') || result.runtimeObservedFresh === true);
     const runtimeObservedFresh =
-      ipcResult?.runtimeObservedFresh === true ||
-      ipcResult?.runtime_observed_fresh === true ||
+      ipcBoolean(ipc, 'runtimeObservedFresh', 'runtime_observed_fresh') ||
       result.runtimeObservedFresh === true;
     const runtimeObservedProcess = normalizeState(
-      ipcResult?.runtimeObservedProcess ??
-        ipcResult?.runtime_observed_process ??
+      ipcString(ipc, 'runtimeObservedProcess', 'runtime_observed_process') ||
         result.runtimeObservedProcess
     );
-    const runtimeObservedAgeMs = Number(
-      ipcResult?.runtimeObservedAgeMs ??
-        ipcResult?.runtime_observed_age_ms ??
-        result.runtimeObservedAgeMs ??
-        0
-    );
+    const runtimeObservedAgeMs =
+      ipcNumber(ipc, 'runtimeObservedAgeMs', 'runtime_observed_age_ms') ||
+      Number(result.runtimeObservedAgeMs ?? 0);
     const runtimeErrorCode = normalizeState(
-      ipcResult?.lastErrorCode ?? ipcResult?.last_error_code ?? result.lastErrorCode
+      ipcString(ipc, 'lastErrorCode', 'last_error_code') || result.lastErrorCode
     );
 
     if (!result.lsposedInstalled) {
@@ -173,15 +160,15 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       };
     }
 
-    if (scopeReason === 'whitelist_targets_not_in_scope' || companionState === 'scope_mismatch') {
+    if (scopeReason === 'whitelist_targets_not_in_scope') {
       return {
         status: 'denied',
-        detail: 'Scoped target app(s) are not synced in LSPosed scope. Run companion refresh and reopen camera app.',
+        detail: 'Scoped target app(s) are not synced in LSPosed scope. Reopen camera app.',
         canRequest: true,
       };
     }
 
-    if (!configReady && companionState === 'config_missing' && hookConfigured) {
+    if (!configReady && !hookLastReadOk && hookConfigured) {
       return {
         status: 'denied',
         detail: 'Hook config exists but primary hook config is missing/unreadable.',
@@ -209,31 +196,6 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       return { status: 'granted', detail: 'Module active in LSPosed', canRequest: false };
     }
 
-    if (companionState === 'waiting_runtime') {
-      const staleDetail =
-        runtimeObservedAgeMs > 0
-          ? ` Runtime evidence age=${Math.trunc(runtimeObservedAgeMs)}ms.`
-          : '';
-      return {
-        status: 'granted',
-        detail:
-          runtimeObservedFresh || runtimeReady
-            ? 'Companion waiting state is stale; runtime hook already observed fresh.'
-            : runtimeState === 'runtime_stale'
-              ? `Companion runtime evidence is stale.${staleDetail}`
-              : 'Module configured; waiting for fresh runtime observation in a scoped app.',
-        canRequest: false,
-      };
-    }
-
-    if (companionState === 'marker_missing' && runtimeHookObserved) {
-      return {
-        status: 'granted',
-        detail: 'Runtime hook observed despite missing marker; module communication is active.',
-        canRequest: false,
-      };
-    }
-
     if (moduleLoaded && moduleScoped) {
       return {
         status: 'granted',
@@ -252,13 +214,13 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
       if (scopeReason === 'whitelist_no_targets_configured') {
         return {
           status: 'granted',
-          detail: 'Module loaded. No local targets configured; companion sync keeps base scope active.',
+          detail: 'Module loaded. No local targets configured; LSPosed scope drives targeting.',
           canRequest: false,
         };
       }
       return {
         status: 'denied',
-        detail: 'Module loaded, but scope missing for configured target app(s). Refresh companion scope sync and retry.',
+        detail: 'Module loaded, but scope missing for configured target app(s). Update LSPosed scope and retry.',
         canRequest: true,
       };
     }
@@ -274,7 +236,7 @@ export async function checkLSPosedModule(): Promise<PermissionCheckResult> {
     if (scopeReason === 'whitelist_no_targets_configured') {
       return {
         status: 'granted',
-        detail: 'LSPosed detected. No local targets configured; companion sync keeps base scope active.',
+        detail: 'LSPosed detected. No local targets configured; LSPosed scope drives targeting.',
         canRequest: false,
       };
     }

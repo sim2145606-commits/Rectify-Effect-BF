@@ -53,7 +53,6 @@ export default function Dashboard() {
   const [frontCamera, setFrontCamera] = useStorage(STORAGE_KEYS.FRONT_CAMERA, true);
   const [backCamera, setBackCamera] = useStorage(STORAGE_KEYS.BACK_CAMERA, false);
   const [selectedMedia] = useStorage<string | null>(STORAGE_KEYS.SELECTED_MEDIA, null);
-  const [aiEnhancement] = useStorage<string | null>(STORAGE_KEYS.AI_ENHANCEMENT, null);
 
   const { status: systemStatus, isChecking, refresh: refreshSystemStatus } = useSystemStatus(60000);
   const [bridgeVersion, setBridgeVersion] = useState(0);
@@ -395,8 +394,7 @@ export default function Dashboard() {
                 </View>
                 <View style={styles.liveFeedInfo}>
                   <Text style={[styles.liveFeedInfoText, { color: colors.textSecondary }]}>
-                    {activeTargets.join(' + ')} CAM •{' '}
-                    {aiEnhancement ? `AI: ${aiEnhancement}` : 'RAW'}
+                    {activeTargets.join(' + ')} CAM • RAW
                   </Text>
                 </View>
               </View>

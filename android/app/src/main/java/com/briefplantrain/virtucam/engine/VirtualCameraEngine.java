@@ -129,7 +129,10 @@ public final class VirtualCameraEngine {
     /** Check if the hook is active for this package. */
     public boolean isActive() {
         ConfigSnapshot cfg = configLoader.getSnapshot();
-        return cfg.enabled && cfg.isTargeted(packageName);
+        if (!cfg.enabled) return false;
+        // vcamCompatibilityMode bypasses per-package targeting for strict takeover
+        if (cfg.vcamCompatibilityMode) return true;
+        return cfg.isTargeted(packageName);
     }
 
     /** Get or create the throwaway surface (camera writes here, frames discarded). */

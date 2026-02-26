@@ -25,8 +25,24 @@ object VirtuCamIPC {
     const val LEGACY_TMP_JSON = "/data/local/tmp/virtucam_config.json"
     const val LEGACY_TMP_ACTIVE = "/data/local/tmp/virtucam_module_active"
 
+    // State directory
+    const val STATE_DIR = "$PERSISTENT_ROOT/state"
+
     // Module active marker
-    const val MODULE_ACTIVE = "$PERSISTENT_ROOT/state/module_active"
+    const val MODULE_ACTIVE = "$STATE_DIR/module_active"
+
+    // State files (read by getIpcStatus for runtime diagnostics)
+    const val COMPANION_STATUS = "$STATE_DIR/companion_status"
+    const val CONFIG_STATUS = "$STATE_DIR/config_status"
+    const val MARKER_STATUS = "$STATE_DIR/marker_status"
+    const val RUNTIME_STATUS = "$STATE_DIR/runtime_status"
+    const val RUNTIME_STATE_JSON = \"$STATE_DIR/runtime_state.json\"\n    const val PERSISTENT_RUNTIME_STATE_JSON = \"$PERSISTENT_CONFIG_DIR/runtime_state.json\"
+
+    // Legacy IPC paths (deprecated — no tmpfs/companion dependency)
+    const val IPC_ROOT = "/dev/virtucam_ipc"
+    const val CONFIG_DIR = "$IPC_ROOT/config"
+    const val CONFIG_JSON = "$CONFIG_DIR/virtucam_config.json"
+    const val CONFIG_XML = "$IPC_ROOT/config/virtucam_config.xml"
 
     fun isModuleActive(): Boolean {
         return File(MODULE_ACTIVE).exists() || File(LEGACY_TMP_ACTIVE).exists()
@@ -106,8 +122,8 @@ object VirtuCamIPC {
             if (persistentLegacy.exists() && persistentLegacy.canRead()) {
                 return persistentLegacy.readText()
             }
-            val ipc = File(CONFIG_JSON)
-            if (ipc.exists() && ipc.canRead()) ipc.readText() else null
+            val legacy = File(LEGACY_TMP_JSON)
+            if (legacy.exists() && legacy.canRead()) legacy.readText() else null
         } catch (_: Throwable) {
             null
         }

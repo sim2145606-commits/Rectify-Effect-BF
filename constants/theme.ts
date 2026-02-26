@@ -198,7 +198,6 @@ export const STORAGE_KEYS = {
   TARGET_MODE: 'virtucam_target_mode',
   ALLOW_BROAD_SCOPE: 'virtucam_allow_broad_scope',
   VCAM_COMPATIBILITY_MODE: 'virtucam_vcam_compatibility_mode',
-  AI_ENHANCEMENT: 'virtucam_ai_enhancement',
   // System
   SYSTEM_STATUS: 'virtucam_system_status',
   COLOR_MODE: 'virtucam_color_mode',

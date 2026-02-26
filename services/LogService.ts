@@ -2,7 +2,16 @@ import { NativeModules, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getSystemInfo } from './SystemVerification';
-import { getRawXposedDebugInfo, runDiagnostics } from './DiagnosticsService';
+
+// Diagnostics stubs (DiagnosticsService removed)
+type DiagnosticsReport = { checks: unknown[]; passCount: number; failCount: number; warnCount: number; timestamp: number };
+type RawXposedDebugInfo = { hookStatus?: string; error?: string };
+function runDiagnostics(): Promise<DiagnosticsReport> {
+  return Promise.resolve({ checks: [], passCount: 0, failCount: 0, warnCount: 0, timestamp: Date.now() });
+}
+function getRawXposedDebugInfo(): Promise<RawXposedDebugInfo> {
+  return Promise.resolve({ hookStatus: 'stub', error: 'Full diagnostics removed — use adb logcat' });
+}
 
 const { VirtuCamSettings } = NativeModules;
 
