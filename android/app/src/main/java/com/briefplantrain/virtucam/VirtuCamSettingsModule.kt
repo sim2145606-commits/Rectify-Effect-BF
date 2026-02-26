@@ -527,6 +527,21 @@ class VirtuCamSettingsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Ensures IPC state directories exist and writes the module-active marker.
+     * Previously delegated to a companion process; now handled inline since
+     * the architecture no longer depends on a companion module.
+     */
+    private fun refreshCompanionInternal(): Boolean {
+        return try {
+            VirtuCamIPC.writeModuleActiveMarker()
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("VirtuCam", "refreshCompanionInternal failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
      * Check if root access is available
      * PERFORMANCE FIX: Runs on background thread to avoid ANR
      */

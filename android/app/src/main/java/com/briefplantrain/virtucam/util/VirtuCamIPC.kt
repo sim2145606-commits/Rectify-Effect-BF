@@ -36,7 +36,8 @@ object VirtuCamIPC {
     const val CONFIG_STATUS = "$STATE_DIR/config_status"
     const val MARKER_STATUS = "$STATE_DIR/marker_status"
     const val RUNTIME_STATUS = "$STATE_DIR/runtime_status"
-    const val RUNTIME_STATE_JSON = \"$STATE_DIR/runtime_state.json\"\n    const val PERSISTENT_RUNTIME_STATE_JSON = \"$PERSISTENT_CONFIG_DIR/runtime_state.json\"
+    const val RUNTIME_STATE_JSON = "$STATE_DIR/runtime_state.json"
+    const val PERSISTENT_RUNTIME_STATE_JSON = "$PERSISTENT_CONFIG_DIR/runtime_state.json"
 
     // Legacy IPC paths (deprecated — no tmpfs/companion dependency)
     const val IPC_ROOT = "/dev/virtucam_ipc"
