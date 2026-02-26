@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.ImageFormat;
 import android.graphics.Paint;
 import android.graphics.SurfaceTexture;
+import android.hardware.camera2.params.OutputConfiguration;
 import android.media.Image;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
@@ -202,6 +203,40 @@ public final class VirtualCameraEngine {
         if (surface == null) return;
         previewSurfaces.remove(surface);
         readerSurfaces.remove(surface);
+    }
+
+    /**
+     * VCAM-style takeover for List&lt;Surface&gt;: tracks originals, replaces with single throwaway.
+     * Returns true if takeover was applied; false if list is null or empty.
+     */
+    public boolean applyVcamCompatTakeoverSurfaceList(List<Surface> surfaces) {
+        if (surfaces == null || surfaces.isEmpty()) return false;
+        trackOriginalSurfaces(surfaces);
+        Surface throwaway = getOrCreateThrowawaySurface();
+        surfaces.clear();
+        surfaces.add(throwaway);
+        return true;
+    }
+
+    /**
+     * VCAM-style takeover for List&lt;OutputConfiguration&gt;: tracks original surfaces, replaces
+     * list with single throwaway output configuration.
+     * Returns true if takeover was applied; false if list is null or empty.
+     */
+    public boolean applyVcamCompatTakeoverOutputConfigList(List<OutputConfiguration> configs) {
+        if (configs == null || configs.isEmpty()) return false;
+        List<Surface> originals = new ArrayList<>(configs.size());
+        for (OutputConfiguration oc : configs) {
+            try {
+                Surface s = oc.getSurface();
+                if (s != null) originals.add(s);
+            } catch (Throwable ignored) {}
+        }
+        trackOriginalSurfaces(originals);
+        Surface throwaway = getOrCreateThrowawaySurface();
+        configs.clear();
+        configs.add(new OutputConfiguration(throwaway));
+        return true;
     }
 
     /**

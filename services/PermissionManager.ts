@@ -38,6 +38,8 @@ type XposedStatusResult = {
   runtimeEvidenceSource?: string;
   lastErrorCode?: string;
   lastErrorMessage?: string;
+  vcamCompatibilityForced?: boolean;
+  sourceModeEffective?: string;
 };
 
 type IpcStatusResult = {

@@ -307,8 +307,17 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
                                 SessionConfiguration rebuilt = rebuildSessionConfiguration(sc, replaced);
                                 if (rebuilt != null) {
                                     param.args[0] = rebuilt;
-                                    LogUtil.i(TAG, "createCaptureSession(SessionConfig) replaced " +
-                                            originals.size() + " surfaces with throwaway");
+                                    LogUtil.iRateLimited(
+                                            "vcam_takeover_applied:createCaptureSession(SessionConfig)",
+                                            5_000L, TAG,
+                                            "vcam_takeover_applied createCaptureSession(SessionConfig)"
+                                                    + " replaced=" + originals.size() + " mapped=1");
+                                } else {
+                                    LogUtil.iRateLimited(
+                                            "vcam_takeover_fallback:createCaptureSession(SessionConfig)",
+                                            5_000L, TAG,
+                                            "vcam_takeover_fallback createCaptureSession(SessionConfig):"
+                                                    + " rebuild failed");
                                 }
                             }
                         });
@@ -348,17 +357,17 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             List<Surface> in = (List<Surface>) arg;
             if (in.isEmpty()) return;
 
-            // Track all original surfaces by type
-            engine.trackOriginalSurfaces(in);
-
-            // Replace with single throwaway surface
-            Surface throwaway = engine.getOrCreateThrowawaySurface();
-            List<Surface> replaced = new ArrayList<>(1);
-            replaced.add(throwaway);
-            param.args[argIndex] = replaced;
-
-            LogUtil.i(TAG, hookName + ": replaced " + in.size() +
-                    " original surfaces with throwaway");
+            int originalCount = in.size();
+            List<Surface> workList = new ArrayList<>(in);
+            boolean applied = engine.applyVcamCompatTakeoverSurfaceList(workList);
+            if (applied) {
+                param.args[argIndex] = workList;
+                LogUtil.iRateLimited("vcam_takeover_applied:" + hookName, 5_000L, TAG,
+                        "vcam_takeover_applied " + hookName + " replaced=" + originalCount + " mapped=1");
+            } else {
+                LogUtil.iRateLimited("vcam_takeover_fallback:" + hookName, 5_000L, TAG,
+                        "vcam_takeover_fallback " + hookName);
+            }
         }
     }
 
@@ -387,21 +396,17 @@ public final class XposedEntry implements IXposedHookLoadPackage, IXposedHookZyg
             List<OutputConfiguration> in = (List<OutputConfiguration>) arg;
             if (in.isEmpty()) return;
 
-            List<Surface> originals = new ArrayList<>();
-            for (OutputConfiguration oc : in) {
-                Surface s = safeGetSurface(oc);
-                if (s != null) originals.add(s);
+            int originalCount = in.size();
+            List<OutputConfiguration> workList = new ArrayList<>(in);
+            boolean applied = engine.applyVcamCompatTakeoverOutputConfigList(workList);
+            if (applied) {
+                param.args[argIndex] = workList;
+                LogUtil.iRateLimited("vcam_takeover_applied:" + hookName, 5_000L, TAG,
+                        "vcam_takeover_applied " + hookName + " replaced=" + originalCount + " mapped=1");
+            } else {
+                LogUtil.iRateLimited("vcam_takeover_fallback:" + hookName, 5_000L, TAG,
+                        "vcam_takeover_fallback " + hookName);
             }
-            engine.trackOriginalSurfaces(originals);
-
-            Surface throwaway = engine.getOrCreateThrowawaySurface();
-            OutputConfiguration throwawayConfig = new OutputConfiguration(throwaway);
-            List<OutputConfiguration> replaced = new ArrayList<>(1);
-            replaced.add(throwawayConfig);
-            param.args[argIndex] = replaced;
-
-            LogUtil.i(TAG, hookName + ": replaced " + in.size() +
-                    " output configs with throwaway");
         }
     }
 
